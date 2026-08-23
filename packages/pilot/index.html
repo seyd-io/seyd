@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DARC Pilot</title>
+  <style>
+    /* Reinforce the hidden attribute against author-style overrides. */
+    [hidden] { display: none !important; }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: ui-monospace, 'SF Mono', monospace;
+      font-size: 13px;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    #container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #video-canvas {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+    }
+
+    /* ── overlays ─────────────────────────────────────── */
+
+    .overlay {
+      position: absolute;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      gap: 12px;
+      background: linear-gradient(to bottom, rgba(0,0,0,.6), transparent);
+    }
+
+    #overlay-top {
+      top: 0;
+      justify-content: space-between;
+    }
+
+    #overlay-bottom {
+      bottom: 0;
+      background: linear-gradient(to top, rgba(0,0,0,.6), transparent);
+      justify-content: space-between;
+    }
+
+    #robot-id { opacity: .5; }
+
+    #status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+    }
+    #status.connected  { background: rgba(52,199,89,.25); color: #34c759; }
+    #status.error      { background: rgba(255,59,48,.25);  color: #ff3b30; }
+
+    #sensor {
+      font-size: 18px;
+      letter-spacing: .05em;
+      opacity: .85;
+    }
+
+    #hint {
+      font-size: 11px;
+      opacity: .35;
+    }
+
+    /* ── toast ────────────────────────────────────────── */
+
+    #toast {
+      position: absolute;
+      bottom: 56px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: rgba(255,255,255,.15);
+      backdrop-filter: blur(8px);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── error screen ─────────────────────────────────── */
+
+    #error {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #000;
+      padding: 32px;
+      text-align: center;
+    }
+    #error h2 { font-size: 16px; color: #ff3b30; margin-bottom: 4px; }
+    #error p  { opacity: .5; line-height: 1.6; }
+    #error code {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 12px 20px;
+      background: rgba(255,255,255,.08);
+      border-radius: 8px;
+      font-size: 12px;
+      text-align: left;
+      white-space: pre;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="video-canvas"></canvas>
+
+    <div id="overlay-top" class="overlay">
+      <span id="robot-id"></span>
+      <span id="status">Connecting…</span>
+    </div>
+
+    <div id="overlay-bottom" class="overlay">
+      <span id="sensor">—</span>
+      <span id="hint">SPACE — snapshot</span>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+
+  <div id="error" hidden>
+    <h2>Missing parameters</h2>
+    <p>Open this page with <strong>robot</strong> and <strong>signal</strong> query parameters.</p>
+    <code id="error-example"></code>
+  </div>
+
+  <script src="pilot.js"></script>
+</body>
+</html>

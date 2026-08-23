@@ -1,0 +1,8 @@
+{
+  "name": "@darc/pilot",
+  "version": "0.1.0",
+  "description": "DARC browser pilot application",
+  "scripts": {
+    "dev": "npx serve . --listen 8080"
+  }
+}

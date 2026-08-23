@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# TLS certs generated at runtime (packages/agent/cert.py)
+*.pem
+*.key
+*.crt
+
+# Editor
+.vscode/
+.idea/
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# Logs
+*.log
