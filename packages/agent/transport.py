@@ -152,6 +152,7 @@ class WebTransportServer:
     def __init__(self):
         self._current_session: Optional[_Session] = None
         self._quic_server = None
+        self._probe_task: Optional[asyncio.Task] = None
         self.on_connected: Optional[Callable] = None
         self.on_disconnected: Optional[Callable] = None
         self.on_message: Optional[Callable] = None
@@ -180,32 +181,76 @@ class WebTransportServer:
         except Exception:
             return None
 
-    def probe(self, ip: str, ports: tuple[int, ...] = (443, 4433, 8080)):
+    def start_probing(self, ip: str, port: int = 443,
+                      interval: float = 0.25, duration: float = 12.0):
         """
-        Send small UDP packets from the WebTransport socket to ip on several
-        common ports. This creates a NAT mapping on our side so the pilot's
-        inbound QUIC packets are allowed through (address-restricted NAT).
-        We probe multiple ports because we don't know which source port the
-        pilot's browser will use for WebTransport.
+        Repeatedly send a small UDP packet from the WebTransport socket toward
+        the pilot's IP, so our NAT creates an outbound mapping and admits the
+        pilot's inbound QUIC Initial.
+
+        What this does and does not buy us, by agent-side NAT type:
+
+          full-cone           already reachable via the STUN candidate; probe is
+                              redundant but harmless
+          address-restricted  WORKS — filtering is by source *address* only, so
+                              the destination port we probe is irrelevant
+          port-restricted     cannot work — the NAT would only admit traffic from
+                              the exact ip:port we probed, and the browser picks a
+                              random ephemeral source port we have no way to learn
+          symmetric / CGNAT   cannot work — the external mapping differs per
+                              destination, so the advertised STUN candidate is
+                              already wrong
+
+        Hence a single destination port, not a list of guesses: for the one NAT
+        type this helps, the port does not matter, and for the type where it
+        would matter the port is unknowable.
+
+        Probing repeats rather than firing once because a lone UDP packet can be
+        dropped, and because the mapping has to still be alive whenever the
+        pilot's Initial actually arrives — Chrome retries its QUIC handshake with
+        backoff, so that can be seconds after the pilot first tried.
         """
+        self.stop_probing()
+        self._probe_task = asyncio.ensure_future(
+            self._probe_loop(ip, port, interval, duration)
+        )
+
+    def stop_probing(self):
+        if self._probe_task and not self._probe_task.done():
+            self._probe_task.cancel()
+        self._probe_task = None
+
+    async def _probe_loop(self, ip: str, port: int, interval: float, duration: float):
         sock = self.get_socket()
         if not sock:
             log.warning('probe: no socket available')
             return
-        for port in ports:
-            try:
-                sock.sendto(b'\x00', (ip, port))
-            except Exception as e:
-                log.debug('probe to %s:%d failed: %s', ip, port, e)
-        log.info('probed %s on ports %s to open NAT hole', ip, ports)
+        loop     = asyncio.get_running_loop()
+        deadline = loop.time() + duration
+        sent     = 0
+        try:
+            while loop.time() < deadline:
+                try:
+                    sock.sendto(b'\x00', (ip, port))
+                    sent += 1
+                except Exception as e:
+                    log.debug('probe to %s:%d failed: %s', ip, port, e)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            log.info('sent %d NAT probes to %s:%d', sent, ip, port)
 
     def stop(self):
+        self.stop_probing()
         if self._quic_server:
             self._quic_server.close()
 
     def _set_session(self, session: Optional[_Session]):
         self._current_session = session
         if session is not None:
+            # The hole is open and in use — no reason to keep probing.
+            self.stop_probing()
             if self.on_connected:
                 asyncio.ensure_future(self.on_connected(session))
         else:

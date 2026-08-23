@@ -124,12 +124,13 @@ async def main():
 
     async def on_pilot_connected(pilot_ip: str | None):
         if pilot_ip:
-            wt.probe(pilot_ip)
+            wt.start_probing(pilot_ip)
         relay.send_binary      = None
         relay.send_json        = None
         relay.flush_send_queue = None
 
     async def on_pilot_disconnected():
+        wt.stop_probing()
         relay.send_binary      = None
         relay.send_json        = None
         relay.flush_send_queue = None

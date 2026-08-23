@@ -182,9 +182,16 @@ function hexToBuffer(hex) {
 }
 
 // Race all candidates in parallel — first one that completes wt.ready wins.
-// Returns the winning WebTransport object; closes all others.
-// Waits holdMs before attempting, giving the agent time to send hole-punch probes.
-async function raceWebTransportCandidates(candidates, certFingerprintHex, holdMs = 400) {
+// Resolves with the winning WebTransport; every other attempt is closed.
+//
+// This function owns the whole P2P attempt including its deadline. That matters:
+// an attempt left running past the deadline can still succeed later, and the
+// agent switches its video output to QUIC datagrams the moment a session is
+// accepted (agent.py on_wt_connected). If the pilot has already given up and
+// moved to relay by then, it has no datagram reader attached and video stops
+// dead. So no connection may outlive this call unless it is the returned winner.
+async function raceWebTransportCandidates(candidates, certFingerprintHex,
+                                          { holdMs = 400, timeoutMs = 10_000 } = {}) {
   const opts = {
     serverCertificateHashes: [{
       algorithm: 'sha-256',
@@ -198,32 +205,54 @@ async function raceWebTransportCandidates(candidates, certFingerprintHex, holdMs
   await new Promise(r => setTimeout(r, holdMs));
 
   const connections = candidates.map(c => {
-    try { return { wt: new WebTransport(c.url, opts), label: c.label }; }
-    catch { return null; }
+    try {
+      const wt = new WebTransport(c.url, opts);
+      // Losing attempts are closed below and never awaited; swallow their
+      // closure rejections so they don't surface as unhandled promise errors.
+      wt.closed.catch(() => {});
+      return { wt, label: c.label };
+    } catch { return null; }
   }).filter(Boolean);
 
   if (connections.length === 0) throw new Error('No valid candidates');
 
-  return new Promise((resolve, reject) => {
-    let pending  = connections.length;
-    let resolved = false;
+  const closeAllExcept = (winner) => {
+    for (const { wt: c } of connections) {
+      if (c !== winner) { try { c.close(); } catch {} }
+    }
+  };
 
-    connections.forEach(({ wt: conn, label }, i) => {
+  return new Promise((resolve, reject) => {
+    let pending = connections.length;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      closeAllExcept(null);
+      reject(new Error('P2P timed out'));
+    }, timeoutMs);
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      closeAllExcept(null);
+      reject(err);
+    };
+
+    connections.forEach(({ wt: conn, label }) => {
       conn.ready.then(() => {
-        if (!resolved) {
-          resolved = true;
-          console.log(`WebTransport connected via ${label} candidate`);
-          // Close all other in-flight connections
-          connections.forEach(({ wt: c }, j) => { if (j !== i) c.close(); });
-          resolve({ wt: conn, label });
-        } else {
-          conn.close();
-        }
+        if (settled) { try { conn.close(); } catch {} return; }
+        settled = true;
+        clearTimeout(timer);
+        console.log(`WebTransport connected via ${label} candidate`);
+        closeAllExcept(conn);
+        resolve({ wt: conn, label });
       }).catch(err => {
         console.warn(`Candidate ${label} failed:`, err.message);
-        pending--;
-        if (pending === 0 && !resolved) {
-          reject(new Error(
+        if (--pending === 0) {
+          fail(new Error(
             `All ${connections.length} connection candidate(s) failed. ` +
             'The robot may be behind a strict firewall or symmetric NAT.'
           ));
@@ -241,17 +270,14 @@ async function connectWebTransport(candidates, certFingerprintHex) {
 
   setStatus(`Connecting… (trying ${candidates.length} path${candidates.length > 1 ? 's' : ''})`);
 
-  // Attempt P2P WebTransport. Cap the wait — Chrome's QUIC timeout can be 30s+,
-  // which is too long before falling back to relay.
-  const P2P_TIMEOUT_MS = 10_000;
+  // Attempt P2P WebTransport. The deadline is enforced inside the race so that
+  // no attempt survives it — Chrome's own QUIC timeout can be 30s+, and a
+  // straggler that connects after we've moved to relay would silently break
+  // video (the agent would switch to datagrams we aren't reading).
   let conn;
   try {
-    conn = await Promise.race([
-      raceWebTransportCandidates(candidates, certFingerprintHex),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('P2P timed out')), P2P_TIMEOUT_MS)
-      ),
-    ]);
+    conn = await raceWebTransportCandidates(candidates, certFingerprintHex,
+                                            { timeoutMs: 10_000 });
   } catch (e) {
     // P2P failed (NAT, firewall, timeout) — fall back to signal-server relay.
     console.warn('WebTransport P2P failed, falling back to relay:', e.message);
