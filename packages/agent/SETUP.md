@@ -1,8 +1,14 @@
 # darc-agent — Setup
 
+For a fresh machine, prefer running `./tools/setup-machine.sh` from the repo
+root — it installs everything below automatically (Homebrew, Node, Python
+3.12, FFmpeg) and works on both Apple Silicon and Intel Macs. The manual
+steps here are for reference or partial setups.
+
 ## System dependencies
 
-aiortc uses PyAV (libav) for media. Install FFmpeg via Homebrew before installing Python packages:
+PyAV (libav) needs FFmpeg's underlying libraries. Install FFmpeg via Homebrew
+before installing Python packages:
 
 ```bash
 brew install ffmpeg
@@ -10,9 +16,11 @@ brew install ffmpeg
 
 ## Python setup
 
+The agent requires Python 3.12 specifically (matches `dev.sh`/`robot.sh`):
+
 ```bash
 cd packages/agent
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -46,23 +54,14 @@ python packages/agent/agent.py --robot-id mac-robot-01 --signal-url wss://...
 | `--robot-id` | required | Unique identifier for this robot |
 | `--signal-url` | required | WebSocket URL of darc-signal (wss://...) |
 | `--video-port` | 5000 | UDP port the RTP video source sends to |
-| `--sensor-port` | 5001 | UDP port the sensor source sends to |
+| `--sensor-port` | 5002 | UDP port the sensor source sends to |
+| `--webtransport-port` | 4433 | UDP port for the WebTransport (QUIC) server |
+| `--webtransport-host` | (STUN-discovered) | Override STUN and advertise this host directly |
 
-## What the agent logs
-
-```
-12:34:01 INFO     registered robot_id=mac-robot-01
-12:34:15 INFO     pilot connected — initiating WebRTC offer
-12:34:15 INFO     video track attached from UDP RTP :5000
-12:34:16 INFO     offer ready (ICE gathering complete)
-12:34:16 INFO     remote description set (answer accepted)
-12:34:16 INFO     connection state: connected
-12:34:16 INFO     data channel open — binding sensor UDP :5001
-12:34:45 INFO     [cmd] type=snapshot ts=1723456789123
-```
+See `PROTOTYPE.md` for the full transport architecture (WebTransport P2P
+with WebSocket relay fallback) and the video chunk wire format.
 
 ## Notes
 
-- The agent waits for ICE gathering to complete before sending the offer. This embeds all ICE candidates in the SDP (no trickle ICE for the offer). The pilot may still trickle ICE candidates back; the agent handles them.
 - Video and sensor sources are started independently. The agent does not crash if they are not running — it simply has no data to relay until they start.
 - This prototype version handles one session at a time. Connecting a second pilot while one is active is undefined behaviour.
