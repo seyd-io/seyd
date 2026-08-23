@@ -24,17 +24,20 @@ class SignalingClient:
 
     def __init__(self, url: str, robot_id: str,
                  cert_fingerprint: str,
-                 candidates: list[dict]):
+                 candidates: list[dict],
+                 p2p_hint: str = 'likely'):
         self.url = url
         self.robot_id = robot_id
         self.cert_fingerprint = cert_fingerprint
-        self.candidates = candidates  # [{url, label}, ...]
+        self.candidates = candidates  # [{url, label, priority, needsProbe}, ...]
+        self.p2p_hint = p2p_hint      # 'likely' | 'lan-only' | 'none'
         self._ws = None
         self._pilot_connected = False
 
         self.on_pilot_connected: Optional[object] = None    # async (pilot_ip: str|None) -> None
         self.on_pilot_disconnected: Optional[object] = None # async () -> None
         self.on_relay_mode: Optional[object] = None          # async () -> None
+        self.on_punch: Optional[object] = None               # async (pilot_ip: str|None) -> None
 
     async def run(self):
         backoff = 1
@@ -82,6 +85,7 @@ class SignalingClient:
             'robotId':         self.robot_id,
             'certFingerprint': self.cert_fingerprint,
             'candidates':      self.candidates,
+            'p2pHint':         self.p2p_hint,
         }
         await self.send(msg)
         labels = ', '.join(f"{c['label']}:{c['url']}" for c in self.candidates) or 'none'
@@ -102,6 +106,13 @@ class SignalingClient:
             self._pilot_connected = False
             if self.on_pilot_disconnected:
                 await self.on_pilot_disconnected()
+        elif t == 'punch':
+            # Pilot is retrying P2P while relay carries video. Punch only —
+            # leaving the current video sinks alone, unlike pilot-connected.
+            pilot_ip = msg.get('pilotIp')
+            log.info('re-punching NAT for pilot at %s (P2P retry)', pilot_ip or 'unknown')
+            if self.on_punch:
+                await self.on_punch(pilot_ip)
         elif t == 'relay-mode':
             log.info('relay mode requested — switching video to signal server')
             if self.on_relay_mode:

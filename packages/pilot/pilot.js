@@ -32,6 +32,7 @@ let jsonWriter  = null;   // writable side of the bidi JSON stream
 let decoder     = null;
 let hasVideo    = false;
 let relayMode   = false;  // true when falling back to signal-server relay
+let session     = null;   // {candidates, fingerprint, hint} from the last `ready`
 
 const ctx = canvas.getContext('2d');
 
@@ -147,8 +148,12 @@ function handleVideoChunk(value) {
 function handleSignalMessage(msg) {
   switch (msg.type) {
     case 'ready':
+      // Remembered so a dropped session can be re-established without another
+      // signalling round trip.
+      session = { candidates: msg.candidates, fingerprint: msg.certFingerprint,
+                  hint: msg.p2pHint ?? 'likely' };
       initDecoder();
-      connectWebTransport(msg.candidates, msg.certFingerprint);
+      connectWebTransport(session.candidates, session.fingerprint, session.hint);
       break;
     case 'unreachable':
       showFatalError('Cannot reach robot', msg.reason);
@@ -156,7 +161,11 @@ function handleSignalMessage(msg) {
     case 'peer-disconnected':
       setStatus('Robot disconnected', 'error');
       showToast('Robot disconnected');
+      cancelP2PRetry();
       relayMode = false;
+      // Cleared before closing so the closure handler treats this as a real
+      // disconnect and doesn't try to fall back to relay — the robot is gone.
+      session = null;
       if (wt) { wt.close(); wt = null; }
       break;
   }
@@ -181,7 +190,20 @@ function hexToBuffer(hex) {
   return bytes.buffer;
 }
 
-// Race all candidates in parallel — first one that completes wt.ready wins.
+// How long P2P is worth waiting for, given what the agent learned about its own
+// NAT. A robot behind a symmetric NAT with no router mapping can only ever be
+// reached across a shared LAN, so there is no point holding video for ten
+// seconds to find that out — but a robot that has a port mapping or a usable
+// reflexive address deserves the full window before we give up on it.
+function p2pDeadlineMs(hint) {
+  switch (hint) {
+    case 'none':     return 2_000;
+    case 'lan-only': return 4_000;
+    default:         return 10_000;   // 'likely'
+  }
+}
+
+// Race all candidates — first one that completes wt.ready wins.
 // Resolves with the winning WebTransport; every other attempt is closed.
 //
 // This function owns the whole P2P attempt including its deadline. That matters:
@@ -190,8 +212,15 @@ function hexToBuffer(hex) {
 // accepted (agent.py on_wt_connected). If the pilot has already given up and
 // moved to relay by then, it has no datagram reader attached and video stops
 // dead. So no connection may outlive this call unless it is the returned winner.
-async function raceWebTransportCandidates(candidates, certFingerprintHex,
-                                          { holdMs = 400, timeoutMs = 10_000 } = {}) {
+//
+// Candidates are tried highest-priority first, and split into two waves. Ones
+// flagged needsProbe depend on the agent having punched a hole in its NAT, so
+// they are held back briefly to let those probes land. Ones that don't — a LAN
+// address, an explicitly port-mapped address — are fired immediately, because
+// making the common same-network case wait on a hole punch it never needed just
+// adds latency to every connect.
+function raceWebTransportCandidates(candidates, certFingerprintHex,
+                                    { holdMs = 400, timeoutMs = 10_000 } = {}) {
   const opts = {
     serverCertificateHashes: [{
       algorithm: 'sha-256',
@@ -199,70 +228,82 @@ async function raceWebTransportCandidates(candidates, certFingerprintHex,
     }],
   };
 
-  // Give the agent's NAT hole-punch probes time to open the agent's NAT before
-  // we fire QUIC Initial packets. 400ms is generous for a round-trip through
-  // the signal server plus probe transmission.
-  await new Promise(r => setTimeout(r, holdMs));
-
-  const connections = candidates.map(c => {
-    try {
-      const wt = new WebTransport(c.url, opts);
-      // Losing attempts are closed below and never awaited; swallow their
-      // closure rejections so they don't surface as unhandled promise errors.
-      wt.closed.catch(() => {});
-      return { wt, label: c.label };
-    } catch { return null; }
-  }).filter(Boolean);
-
-  if (connections.length === 0) throw new Error('No valid candidates');
-
-  const closeAllExcept = (winner) => {
-    for (const { wt: c } of connections) {
-      if (c !== winner) { try { c.close(); } catch {} }
-    }
-  };
+  const sorted = [...candidates].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
   return new Promise((resolve, reject) => {
-    let pending = connections.length;
-    let settled = false;
+    const open    = [];
+    const total   = sorted.length;
+    let   failed  = 0;
+    let   settled = false;
+    let   holdTimer = null;
 
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      closeAllExcept(null);
-      reject(new Error('P2P timed out'));
-    }, timeoutMs);
+    if (total === 0) { reject(new Error('No valid candidates')); return; }
 
-    const fail = (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      closeAllExcept(null);
-      reject(err);
+    const closeAllExcept = (winner) => {
+      for (const c of open) {
+        if (c !== winner) { try { c.close(); } catch {} }
+      }
     };
 
-    connections.forEach(({ wt: conn, label }) => {
-      conn.ready.then(() => {
-        if (settled) { try { conn.close(); } catch {} return; }
-        settled = true;
-        clearTimeout(timer);
-        console.log(`WebTransport connected via ${label} candidate`);
-        closeAllExcept(conn);
-        resolve({ wt: conn, label });
-      }).catch(err => {
-        console.warn(`Candidate ${label} failed:`, err.message);
-        if (--pending === 0) {
-          fail(new Error(
-            `All ${connections.length} connection candidate(s) failed. ` +
+    const settle = (fn) => {
+      settled = true;
+      clearTimeout(deadline);
+      clearTimeout(holdTimer);
+      fn();
+    };
+
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      settle(() => { closeAllExcept(null); reject(new Error('P2P timed out')); });
+    }, timeoutMs);
+
+    const noteFailure = (label, err) => {
+      console.warn(`Candidate ${label} failed:`, err?.message ?? err);
+      if (settled) return;
+      if (++failed === total) {
+        settle(() => {
+          closeAllExcept(null);
+          reject(new Error(
+            `All ${total} connection candidate(s) failed. ` +
             'The robot may be behind a strict firewall or symmetric NAT.'
           ));
-        }
-      });
-    });
+        });
+      }
+    };
+
+    const launch = (c) => {
+      if (settled) return;
+      let conn;
+      try {
+        conn = new WebTransport(c.url, opts);
+      } catch (e) {
+        noteFailure(c.label, e);
+        return;
+      }
+      // Losing attempts get closed below and are never awaited; swallow their
+      // closure rejections so they don't surface as unhandled promise errors.
+      conn.closed.catch(() => {});
+      open.push(conn);
+
+      conn.ready.then(() => {
+        if (settled) { try { conn.close(); } catch {} return; }
+        settle(() => {
+          console.log(`WebTransport connected via ${c.label} candidate`);
+          closeAllExcept(conn);
+          resolve({ wt: conn, label: c.label });
+        });
+      }).catch(e => noteFailure(c.label, e));
+    };
+
+    const immediate = sorted.filter(c => !c.needsProbe);
+    const delayed   = sorted.filter(c => c.needsProbe);
+
+    immediate.forEach(launch);
+    if (delayed.length) holdTimer = setTimeout(() => delayed.forEach(launch), holdMs);
   });
 }
 
-async function connectWebTransport(candidates, certFingerprintHex) {
+async function connectWebTransport(candidates, certFingerprintHex, hint = 'likely') {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     showFatalError('Cannot reach robot', 'No WebTransport candidates received from signal server.');
     return;
@@ -277,18 +318,31 @@ async function connectWebTransport(candidates, certFingerprintHex) {
   let conn;
   try {
     conn = await raceWebTransportCandidates(candidates, certFingerprintHex,
-                                            { timeoutMs: 10_000 });
+                                            { timeoutMs: p2pDeadlineMs(hint) });
   } catch (e) {
-    // P2P failed (NAT, firewall, timeout) — fall back to signal-server relay.
+    // P2P failed (NAT, firewall, timeout) — fall back to signal-server relay,
+    // but keep trying for P2P in the background. Relay is a compromise on both
+    // latency and cost, so it should never be a one-way door: NAT state,
+    // interface, and network all change under a robot in the field.
     console.warn('WebTransport P2P failed, falling back to relay:', e.message);
     relayMode = true;
     setStatus('Waiting for video… (relay)');
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'relay-request', robotId: ROBOT_ID }));
     }
+    scheduleP2PRetry(candidates, certFingerprintHex, hint);
     return;
   }
 
+  attachSession(conn);
+}
+
+// Wire up a freshly established WebTransport session. Split out from the
+// connect path because the relay-upgrade retry needs exactly the same wiring.
+async function attachSession(conn) {
+  cancelP2PRetry();
+  const wasRelay = relayMode;
+  relayMode = false;
   wt = conn.wt;
 
   // Video datagrams: agent → pilot (unreliable, lowest latency)
@@ -334,14 +388,70 @@ async function connectWebTransport(candidates, certFingerprintHex) {
     } catch {}
   })();
 
-  // Handle WebTransport closure
-  wt.closed.then(() => {
-    setStatus('Disconnected', 'error');
+  // Handle WebTransport closure. If signalling is still up the robot is still
+  // there and only the P2P path died, so drop to relay rather than leaving the
+  // operator with a frozen canvas — then start trying to climb back to P2P.
+  const self = conn.wt;
+  const onClosed = () => {
+    // A superseded session's close fires after a newer one was attached; it
+    // must not tear down the connection that replaced it.
+    if (wt !== self) return;
     jsonWriter = null;
     wt = null;
-  }).catch(() => {});
+    if (ws?.readyState !== WebSocket.OPEN || !session) {
+      setStatus('Disconnected', 'error');
+      return;
+    }
+    console.warn('P2P session dropped — falling back to relay');
+    relayMode = true;
+    initDecoder();                     // resync; the old decoder may have faulted
+    setStatus('Reconnecting… (relay)');
+    ws.send(JSON.stringify({ type: 'relay-request', robotId: ROBOT_ID }));
+    scheduleP2PRetry(session.candidates, session.fingerprint, session.hint);
+  };
+  wt.closed.then(onClosed).catch(onClosed);
 
-  setStatus('Waiting for video…');
+  if (wasRelay) {
+    console.log('upgraded from relay to P2P');
+    showToast('Upgraded to direct connection');
+  } else {
+    setStatus('Waiting for video…');
+  }
+}
+
+// ── relay → P2P upgrade ────────────────────────────────────────────────────
+// While relaying, keep retrying P2P on a slow cadence. The agent only rewires
+// its video output when a WebTransport session is actually accepted, so a
+// failed retry costs nothing and never disturbs the working relay.
+let p2pRetryTimer = null;
+const P2P_RETRY_MS = 30_000;
+
+function cancelP2PRetry() {
+  clearTimeout(p2pRetryTimer);
+  p2pRetryTimer = null;
+}
+
+function scheduleP2PRetry(candidates, certFingerprintHex, hint) {
+  cancelP2PRetry();
+  p2pRetryTimer = setTimeout(async () => {
+    if (!relayMode || ws?.readyState !== WebSocket.OPEN) return;
+
+    // Ask the agent to punch a fresh hole first — whatever mapping it opened
+    // for the original attempt has long since lapsed.
+    ws.send(JSON.stringify({ type: 'probe-request', robotId: ROBOT_ID }));
+
+    let conn;
+    try {
+      conn = await raceWebTransportCandidates(candidates, certFingerprintHex,
+                                              { timeoutMs: p2pDeadlineMs(hint) });
+    } catch {
+      scheduleP2PRetry(candidates, certFingerprintHex, hint);
+      return;
+    }
+    // Relay may have been torn down while we were connecting.
+    if (!relayMode) { try { conn.wt.close(); } catch {} return; }
+    attachSession(conn);
+  }, P2P_RETRY_MS);
 }
 
 // ── commands ───────────────────────────────────────────────────────────────

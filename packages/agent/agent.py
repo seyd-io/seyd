@@ -22,12 +22,16 @@ Optional:
 import asyncio
 import argparse
 import logging
+import socket
 
+import portmap
 from cert import generate_cert
-from stun import get_local_ips, get_stun_address
+from stun import discover_nat, format_host, get_local_ips, is_ipv6
 from transport import WebTransportServer
 from signaling import SignalingClient
 from peer import Relay
+
+log = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -39,7 +43,120 @@ def parse_args():
                    help='Override public host for WebTransport (skips STUN)')
     p.add_argument('--video-port',         type=int, default=5000)
     p.add_argument('--sensor-port',        type=int, default=5002)
+    p.add_argument('--no-port-mapping',    action='store_true',
+                   help='Skip PCP/NAT-PMP/UPnP router port mapping')
+    p.add_argument('--no-ipv6',            action='store_true',
+                   help='Do not listen on or advertise IPv6')
     return p.parse_args()
+
+
+def bind_sockets(port: int, want_ipv6: bool) -> list[socket.socket]:
+    """
+    Bind the UDP sockets the QUIC server will use.
+
+    These are bound here, up front, because STUN has to run on the very socket
+    that later receives QUIC — binding a temporary socket and letting aioquic
+    rebind the port makes the advertised reflexive address a guess. Two separate
+    sockets rather than one dual-stack socket: V6ONLY keeps the IPv6 listener
+    from colliding with the IPv4 one on the same port, and it keeps the IPv4
+    path byte-identical to what is already known to work.
+    """
+    socks: list[socket.socket] = []
+
+    s4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s4.bind(('0.0.0.0', port))
+    s4.setblocking(False)
+    socks.append(s4)
+
+    if want_ipv6:
+        try:
+            s6 = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            s6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s6.bind(('::', port))
+            s6.setblocking(False)
+            socks.append(s6)
+        except OSError as e:
+            log.info('IPv6 listener unavailable (%s) — continuing IPv4-only', e)
+
+    return socks
+
+
+async def gather_candidates(args, socks) -> tuple[list[dict], list[str], str]:
+    """
+    Work out every address a pilot could reach us on.
+
+    Returns (candidates, san_ips, p2p_hint). Candidates carry a `priority` so
+    the pilot can order its attempts, and `needsProbe` so it knows which ones
+    depend on a NAT hole being punched first and must not be fired too early.
+    """
+    wt_port = args.webtransport_port
+    candidates: list[dict] = []
+    san_ips: list[str] = []
+
+    def add(ip: str, port: int, label: str, priority: int, needs_probe: bool):
+        url = f'https://{format_host(ip)}:{port}/darc'
+        if any(c['url'] == url for c in candidates):
+            return
+        candidates.append({'url': url, 'label': label,
+                           'priority': priority, 'needsProbe': needs_probe})
+        if ip not in san_ips:
+            san_ips.append(ip)
+        log.info('candidate [%-8s prio %3d] %s', label, priority, url)
+
+    if args.webtransport_host:
+        add(args.webtransport_host, wt_port, 'host-override', 250, False)
+        return candidates, san_ips, 'likely'
+
+    # ── host candidates ──────────────────────────────────────────────────────
+    # A LAN address wins instantly when the pilot is on the same network, and a
+    # global IPv6 address has no NAT in front of it at all — both are reachable
+    # without any hole punching, so the pilot can try them immediately.
+    have_global_v6 = False
+    for ip in get_local_ips():
+        if is_ipv6(ip):
+            have_global_v6 = True
+            add(ip, wt_port, 'host6', 200, True)   # firewall pinhole still helps
+        else:
+            add(ip, wt_port, 'host', 240, False)
+
+    # ── router port mapping ──────────────────────────────────────────────────
+    # Explicitly asking the router to forward the port beats inferring a mapping
+    # from STUN: it also covers port-restricted and many symmetric NATs.
+    mapped = None
+    if not args.no_port_mapping:
+        mapped = await portmap.map_port(wt_port)
+        # Only advertise it if the router's external address is actually on the
+        # public internet — under CGNAT it will report one that isn't, and a
+        # candidate nobody can route to just burns a slot in the pilot's race.
+        if mapped and mapped.routable:
+            add(mapped.external_ip, mapped.external_port, 'portmap', 220, False)
+        elif mapped:
+            mapped = None
+
+    # ── server-reflexive candidate ───────────────────────────────────────────
+    nat = await discover_nat(socks[0])
+    if nat.reflexive:
+        add(nat.reflexive[0], nat.reflexive[1], 'srflx', 150, True)
+    elif nat.symmetric:
+        # Advertising it would just burn a slot in the pilot's race: under a
+        # symmetric NAT the external port is chosen per destination, so the one
+        # STUN saw is not the one the pilot's packets would arrive on.
+        log.info('skipping reflexive candidate — %s NAT', nat.nat_type)
+
+    # How hopeful should the pilot be? This drives how long it waits before
+    # giving up on P2P, so that a definitely-doomed attempt fails fast while a
+    # plausible one gets the full window.
+    if mapped or nat.reflexive or have_global_v6:
+        hint = 'likely'
+    elif candidates:
+        hint = 'lan-only'   # only host candidates; works iff pilot shares the LAN
+    else:
+        hint = 'none'
+
+    log.info('NAT type: %s — P2P outlook: %s', nat.nat_type, hint)
+    return candidates, san_ips, hint
 
 
 async def main():
@@ -49,49 +166,25 @@ async def main():
         format='%(asctime)s %(levelname)-8s %(message)s',
         datefmt='%H:%M:%S',
     )
-    log = logging.getLogger(__name__)
-
     wt_port = args.webtransport_port
 
-    # ── Step 1: Gather all IPs and candidates ────────────────────────────────
-    # Done BEFORE cert generation so every IP is included in the SAN extension,
-    # which Chrome requires for the serverCertificateHashes verifier to accept.
-    candidates: list[dict] = []
-    all_ips:    list[str]  = []
+    # ── Step 1: Bind the sockets QUIC will use ───────────────────────────────
+    # Everything downstream measures and advertises *these* sockets, so nothing
+    # rebinds the port later and invalidates what we told the pilot.
+    socks = bind_sockets(wt_port, want_ipv6=not args.no_ipv6)
 
-    if args.webtransport_host:
-        candidates.append({'url': f'https://{args.webtransport_host}:{wt_port}/darc',
-                           'label': 'host-override'})
-        all_ips.append(args.webtransport_host)
-        log.info('WebTransport host override: %s:%d', args.webtransport_host, wt_port)
-    else:
-        # Host candidates — LAN IPs; win immediately when pilot is on same network
-        for ip in get_local_ips():
-            candidates.append({'url': f'https://{ip}:{wt_port}/darc', 'label': 'host'})
-            all_ips.append(ip)
-            log.info('host candidate: https://%s:%d/darc', ip, wt_port)
-
-        # STUN — discovers the public address for this port before aioquic binds.
-        # SO_REUSEADDR/REUSEPORT ensures the temp socket can bind the same port;
-        # many NATs reuse the same external mapping when aioquic quickly rebinds.
-        stun_result = await get_stun_address(wt_port)
-        if stun_result:
-            stun_ip, stun_port = stun_result
-            candidates.append({'url': f'https://{stun_ip}:{stun_port}/darc', 'label': 'stun'})
-            if stun_ip not in all_ips:
-                all_ips.append(stun_ip)
-            log.info('STUN reflexive address: %s:%d', stun_ip, stun_port)
-        else:
-            log.warning('STUN failed — robot may not be reachable from internet')
-
+    # ── Step 2: Discover every reachable address ─────────────────────────────
+    candidates, all_ips, p2p_hint = await gather_candidates(args, socks)
     if not candidates:
         log.error('no WebTransport candidates — agent will register as unreachable')
 
-    # ── Step 2: Generate TLS cert with all IPs in SubjectAlternativeName ─────
+    # ── Step 3: TLS cert covering all of them ────────────────────────────────
+    # Generated after discovery so every advertised IP lands in the SAN
+    # extension, which Chrome requires for serverCertificateHashes to verify.
     cert, key, fingerprint = generate_cert(all_ips)
     log.info('cert fingerprint: %s…  (SAN IPs: %s)', fingerprint[:16], ', '.join(all_ips))
 
-    # ── Step 3: Start relay + WebTransport server ─────────────────────────────
+    # ── Step 4: Start relay + WebTransport server ─────────────────────────────
     relay = Relay(video_port=args.video_port, sensor_port=args.sensor_port)
     wt    = WebTransportServer()
 
@@ -112,14 +205,15 @@ async def main():
     wt.on_message      = relay.handle_message
 
     await relay.start()
-    await wt.start(port=wt_port, cert=cert, key=key)
+    await wt.start(socks, cert=cert, key=key)
 
-    # ── Step 4: Signaling ─────────────────────────────────────────────────────
+    # ── Step 5: Signaling ─────────────────────────────────────────────────────
     signaling = SignalingClient(
         url=args.signal_url,
         robot_id=args.robot_id,
         cert_fingerprint=fingerprint,
         candidates=candidates,
+        p2p_hint=p2p_hint,
     )
 
     async def on_pilot_connected(pilot_ip: str | None):
@@ -135,6 +229,12 @@ async def main():
         relay.send_json        = None
         relay.flush_send_queue = None
 
+    async def on_punch(pilot_ip: str | None):
+        # P2P retry from a pilot already on relay. Only reopen the hole; the
+        # video sinks must keep pointing at the relay until a session lands.
+        if pilot_ip:
+            wt.start_probing(pilot_ip)
+
     async def on_relay_mode():
         # P2P failed — pilot asked to relay video through the signal server.
         # Switch send_binary to the signaling WebSocket; flush is a no-op (TCP).
@@ -145,8 +245,9 @@ async def main():
     signaling.on_pilot_connected    = on_pilot_connected
     signaling.on_pilot_disconnected = on_pilot_disconnected
     signaling.on_relay_mode         = on_relay_mode
+    signaling.on_punch              = on_punch
 
-    # ── Step 5: Run ───────────────────────────────────────────────────────────
+    # ── Step 6: Run ───────────────────────────────────────────────────────────
     try:
         await signaling.run()
     except KeyboardInterrupt:

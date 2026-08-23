@@ -271,17 +271,59 @@ The Mac-to-Mac prototype now runs this transport architecture end-to-end, using 
 - WebTransport P2P: aioquic server on the robot, Chrome WebTransport on the pilot
 - QUIC DATAGRAM frames for video (unreliable, no HOL blocking, no jitter buffer)
 - Application-layer fragmentation: H.264 access units split into ≤1000-byte chunks with a 7-byte header (frame_id, chunk_idx, total_chunks, keyframe flag) to fit QUIC DATAGRAM MTU
-- Multi-candidate connection: robot advertises host (LAN) IPs + STUN-reflexive address; pilot races all in parallel; first to connect wins
+- Multi-candidate connection: robot advertises host (LAN IPv4 + global IPv6), router-mapped, and STUN-reflexive addresses; pilot races them by priority, first to connect wins
+- Router port mapping via PCP, NAT-PMP and UPnP-IGD, implemented directly (no miniupnpc) to keep the agent on pure-Python wheels for the ARM cross-compile
+- NAT classification from two STUN operators: symmetric NAT is detected at startup and its useless reflexive candidate suppressed, so the pilot fails over to relay in ~2s rather than 10
 - Self-signed ECDSA P-256 TLS with `serverCertificateHashes` API — no CA chain, fingerprint pinned via signal server
 - NAT hole-punching: robot probes pilot IP from the WebTransport UDP socket before pilot's QUIC Initial arrives
 - Latest-frame-only sender: single-slot frame buffer + aioquic datagram queue flush before each frame — no latency growth on congested paths
-- WebSocket relay fallback: automatic after 10s P2P timeout; same chunk format; pilot detects ArrayBuffer on WebSocket and routes through the same decoder path
+- WebSocket relay fallback: automatic once the P2P deadline passes; same chunk format; pilot detects ArrayBuffer on WebSocket and routes through the same decoder path. Not a one-way door — the pilot keeps retrying P2P every 30s and upgrades live if it succeeds.
 
 **What the production version adds:**
 - Native QUIC via **MsQuic** (C library, Microsoft) on the agent — Python/aioquic replaced for ARM embedded targets
-- Standard ICE/TURN for robust NAT traversal (currently: STUN + relay fallback via signal server WebSocket)
 - WebRTC fallback for environments where UDP is blocked entirely
 - Desktop and iOS operator SDKs (currently browser-only)
+
+#### NAT traversal: why DARC does not implement ICE
+
+**Decision (2026-08-23): stay on WebTransport and maximise agent reachability,
+rather than adopting ICE.**
+
+Full ICE (RFC 8445) requires an ICE agent on *both* peers: candidate gathering,
+STUN connectivity checks across candidate pairs, priority ordering, nomination.
+The browser side of DARC cannot participate. `WebTransport` is strictly
+client→server HTTP/3 — it exposes no candidate API, cannot send connectivity
+checks, and gives the application no control over or visibility into its own
+source port. Only `RTCPeerConnection` embeds an ICE agent.
+
+This reframes the problem usefully. DARC does not need symmetric peer
+connectivity; it needs **the agent to be reachable as a server**, because the
+pilot is always the initiator and its own NAT is therefore never an obstacle.
+The techniques that matter for that are, in descending order of reliability:
+
+1. **Router port mapping** (PCP / NAT-PMP / UPnP-IGD) — an installed mapping,
+   not an inferred one. Also covers port-restricted NAT.
+2. **IPv6** — no NAT in the path at all.
+3. **STUN reflexive address + hole punching** — works for full-cone and
+   address-restricted NAT only.
+4. **Manual port forwarding.**
+5. **Relay** — last resort.
+
+Port-restricted and symmetric NAT are unreachable by construction under this
+model, and no amount of implementation effort changes that while the pilot is a
+browser WebTransport client.
+
+**The alternative that was considered and deferred:** an unreliable, unordered
+**WebRTC DataChannel** would deliver real ICE and TURN, and — importantly — the
+two objections this document raises against WebRTC above both apply to *media
+tracks*, not data channels. A DataChannel carries opaque bytes with no jitter
+buffer and no transcoding, so the single-encode-chain and WebCodecs decode
+survive intact. The costs are SCTP/DTLS overhead versus raw QUIC datagrams, a
+second transport to maintain, and an ICE stack on the agent
+(libdatachannel/libjuice rather than MsQuic) for the C port. Worth revisiting if
+field data shows a material share of robots stuck on relay for NAT reasons that
+a port mapping could not fix — see "track the % of sessions that fall back to
+relay" under TURN Relay below.
 
 **Browser operator:** **WebTransport** (QUIC semantics in the browser). WebTransport reached Baseline status in March 2026 with Safari 26.4 shipping support — it is now safe to depend on in all major browsers. Same WebCodecs VideoDecoder as in the POC; only the transport changes.
 
@@ -371,8 +413,8 @@ The Mac-to-Mac prototype is complete and working. See PROTOTYPE.md for full impl
 
 **What exists:**
 - `darc-signal`: Node.js WebSocket server on Cloud Run, handles registration, connection brokering, binary relay fallback, fleet UI
-- `darc-agent`: Python daemon with WebTransport P2P (aioquic), STUN/hole-punching, automatic relay fallback via signaling WebSocket
-- `darc-pilot`: Vanilla JS browser app with WebTransport candidate racing, chunk reassembly, WebCodecs decode, relay fallback
+- `darc-agent`: Python daemon with WebTransport P2P (aioquic) over IPv4 and IPv6, router port mapping (PCP/NAT-PMP/UPnP), STUN with NAT classification, hole-punching, automatic relay fallback via signaling WebSocket
+- `darc-pilot`: Vanilla JS browser app with prioritised WebTransport candidate racing, chunk reassembly, WebCodecs decode, relay fallback with live P2P upgrade
 - End-to-end tested: LAN, broadband-to-broadband, broadband-to-cellular (relay fallback)
 
 **What is not built yet:**
@@ -392,7 +434,7 @@ The Mac-to-Mac prototype is complete and working. See PROTOTYPE.md for full impl
 3. **Port agent to C with MsQuic** — Python/aioquic is prototype-quality; the production agent needs to run on ARM Linux (Jetson, RPi 5, RK3588) with MsQuic for sub-10ms QUIC processing overhead
 
 ### Medium-term (path to product)
-4. **Standard TURN relay** — replace WebSocket relay fallback with coturn or Cloudflare TURN; implement ICE candidate exchange for proper NAT traversal across all NAT types
+4. **Standard TURN relay** — replace the WebSocket relay fallback with coturn or Cloudflare TURN. Note this is a better *relay*, not better traversal: a browser WebTransport client cannot allocate or use a TURN relay, so this means a QUIC-forwarding relay with a public address rather than TURN proper. Real ICE across all NAT types requires the WebRTC DataChannel path described under "NAT traversal" above.
 5. **Agent API surface** — define the integration contract: configuration, lifecycle, stream hooks, command callbacks. This determines what ROS2 node or Linux daemon integrators would call.
 6. **Operator SDK API surface** — TypeScript first (browser + Electron); what does a 10-line integration look like?
 7. **Fleet registry data model** — vehicle identity, owner, operator RBAC, presence events; Postgres + Redis pub/sub

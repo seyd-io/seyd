@@ -6,9 +6,12 @@
 
 | Scenario | Works | Notes |
 |---|---|---|
-| Robot + pilot on same LAN | ✓ | Host candidate wins immediately, sub-ms NAT traversal |
-| Robot on broadband, pilot on broadband | ✓ | STUN candidate, hole punching |
-| Robot on iPhone hotspot (CGNAT), pilot on broadband | ✓ (relay) | Symmetric NAT blocks P2P; auto-falls back to WebSocket relay after 10s |
+| Robot + pilot on same LAN | ✓ | Host candidate wins immediately, fired without the probe hold |
+| Robot on broadband, pilot on broadband | ✓ | Port mapping where the router allows it, otherwise STUN + hole punching |
+| Robot behind UPnP/NAT-PMP/PCP router | ✓ | Explicit port mapping — also covers port-restricted NAT |
+| Robot and pilot both on IPv6 | ✓ | No NAT in the path at all |
+| Robot on iPhone hotspot (CGNAT), pilot on broadband | ✓ (relay) | Symmetric NAT detected at startup; fails over in ~2s instead of 10 |
+| Relay → P2P upgrade | ✓ | Retried every 30s while relaying; switches over live when it succeeds |
 | Latency on good path | ✓ | Perceptibly lower than WebRTC; no jitter buffer |
 | Latency on congested/mobile path | ✓ | Agent always sends latest frame; no queue buildup |
 
@@ -120,17 +123,28 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 
 | Direction | Message | Fields |
 |---|---|---|
-| Robot → server | `register` | `robotId`, `certFingerprint`, `candidates: [{url, label}]` |
+| Robot → server | `register` | `robotId`, `certFingerprint`, `candidates: [{url, label, priority, needsProbe}]`, `p2pHint` |
 | Pilot → server | `connect` | `robotId` |
 | Pilot → server | `relay-request` | `robotId` (P2P failed, activate relay) |
-| Server → pilot | `ready` | `candidates`, `certFingerprint` |
+| Pilot → server | `probe-request` | `robotId` (retrying P2P from relay — punch again) |
+| Server → pilot | `ready` | `candidates`, `certFingerprint`, `p2pHint` |
 | Server → pilot | `unreachable` | `reason` |
 | Server → pilot | `peer-disconnected` | — |
 | Server → robot | `pilot-connected` | `pilotIp` (real IP from `X-Forwarded-For`) |
+| Server → robot | `punch` | `pilotIp` — reopen the hole *without* tearing down video sinks |
 | Server → robot | `peer-disconnected` | — |
 | Server → robot | `relay-mode` | — (switch video to WebSocket) |
 | Server → robot (binary) | video chunks | forwarded verbatim from pilot's WebSocket |
 | Server → pilot (binary) | video chunks | forwarded verbatim from robot's WebSocket |
+
+`punch` exists separately from `pilot-connected` because the latter also tells
+the agent to drop its video sinks. Reusing it for a P2P retry would kill the
+relay that is currently carrying video.
+
+`p2pHint` is `'likely' | 'lan-only' | 'none'` — the agent's own read on whether
+P2P can work at all, derived from NAT classification and whether a port mapping
+succeeded. The pilot turns it into a deadline (10s / 4s / 2s), so a
+provably-hopeless attempt fails fast while a plausible one gets the full window.
 
 **Cloud Run specifics:**
 - `X-Forwarded-For` header used for real client IP (load balancer sets `remoteAddress` to `169.254.169.126`)
@@ -147,22 +161,30 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 
 | File | Responsibility |
 |---|---|
-| `agent.py` | Entry point: startup sequence, wiring all callbacks |
-| `cert.py` | Generate ECDSA P-256 self-signed TLS cert with SAN |
-| `stun.py` | Async STUN client + local LAN IP discovery |
+| `agent.py` | Entry point: socket binding, candidate gathering, startup sequence, callback wiring |
+| `cert.py` | Generate ECDSA P-256 self-signed TLS cert with SAN (IPv4 + IPv6) |
+| `stun.py` | STUN client with retransmission, NAT classification, local address discovery |
+| `portmap.py` | Router port mapping via PCP, NAT-PMP, and UPnP-IGD |
 | `transport.py` | aioquic WebTransport server (`WebTransportServer`, `DARCProtocol`, `_Session`) |
 | `peer.py` | `Relay` class: video chunking + sender, sensor relay, command handling |
 | `signaling.py` | `SignalingClient`: WebSocket to darc-signal, relay mode send |
 
 **Startup sequence (critical ordering):**
-1. Discover local LAN IPs → `get_local_ips()` — host candidates
-2. STUN from a temp UDP socket on port 4433 (before aioquic binds) → `get_stun_address(wt_port)` — STUN-reflexive candidate. STUN is done BEFORE aioquic binds because: (a) we can't use `loop.add_reader` on aioquic's socket without breaking its internal read handler, and (b) many NATs preserve the external port mapping when the same local port quickly rebinds.
+1. `bind_sockets()` binds the UDP sockets QUIC will use — IPv4 on `0.0.0.0:4433`, and IPv6 on `[::]:4433` when available (`IPV6_V6ONLY`, so the two don't collide on the same port)
+2. `gather_candidates()` discovers every reachable address (below)
 3. Generate TLS cert with all discovered IPs in `SubjectAlternativeName` → required by Chrome's `serverCertificateHashes` verifier
-4. Start `Relay` + WebTransport server on UDP :4433
-5. Connect to signal server, register with candidates + fingerprint
+4. Start `Relay` + WebTransport server **on the already-bound sockets**
+5. Connect to signal server, register with candidates + fingerprint + `p2pHint`
+
+Sockets are bound first, before anything else, because STUN has to run on the
+very socket that later receives QUIC. An earlier version bound a throwaway
+socket for STUN, closed it, and let aioquic rebind the port — which made the
+advertised reflexive address correct only if the NAT happened to reissue the
+same external port. It usually did on port-preserving home routers and silently
+did not on strict ones. Same socket, never rebound, no guess.
 
 **WebTransport server:**
-- Listens on UDP :4433 (aioquic)
+- Runs on caller-supplied pre-bound sockets (one `QuicServer` per address family) rather than binding its own via aioquic's `serve()`
 - Accepts HTTP/3 CONNECT at path `/darc`
 - `max_datagram_frame_size = 65536` for QUIC DATAGRAM support
 - Self-signed ECDSA P-256 cert, 13-day validity (Chrome's `serverCertificateHashes` limit is 14 days)
@@ -173,11 +195,78 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 - `SubjectAlternativeName` extension must be present with the server's IP(s)
 - Fingerprint = SHA-256 of DER-encoded cert bytes
 
-**NAT hole-punching:**
-- On `pilot-connected`, agent sends small UDP probes from the WebTransport socket (port 4433) to the pilot's IP on common ports (443, 4433, 8080)
-- This creates a NAT mapping allowing inbound QUIC Initial packets from the pilot
-- Works for full-cone and address-restricted NAT
-- Does NOT work for symmetric NAT (carrier CGNAT — use relay fallback instead)
+**NAT traversal — why this is not ICE**
+
+The pilot is a browser using the `WebTransport` API, which is strictly
+client→server HTTP/3. The browser has no ICE agent: it cannot gather
+candidates, cannot send STUN connectivity checks, and cannot control or observe
+its own source port. Only `RTCPeerConnection` has an ICE agent in the browser.
+
+So DARC's traversal problem is not symmetric peer connectivity — it is the
+narrower **"make the agent reachable as a server."** Everything below follows
+from that, and it bounds what is achievable:
+
+| Agent-side NAT | Reachable | How |
+|---|---|---|
+| Public IP / manually forwarded | ✓ | host / srflx candidate |
+| UPnP / NAT-PMP / PCP router | ✓ | explicit port mapping |
+| Both ends IPv6 | ✓ | no NAT at all |
+| Full-cone | ✓ | srflx candidate |
+| Address-restricted | ✓ | srflx + hole punch |
+| Port-restricted | ✗ | would need the browser's ephemeral source port, which is unknowable |
+| Symmetric / CGNAT | ✗ | external mapping differs per destination |
+
+The last two rows are architectural, not missing work. They relay.
+
+**Candidate gathering** (`gather_candidates`, in priority order):
+
+| Label | Priority | needsProbe | Source |
+|---|---|---|---|
+| `host` | 240 | no | Private/public IPv4 on any interface — wins instantly on a shared LAN |
+| `host6` | 200 | yes | Globally routable IPv6; no NAT, but may want a firewall pinhole |
+| `portmap` | 220 | no | PCP / NAT-PMP / UPnP mapping, only if the router's external address is globally routable |
+| `srflx` | 150 | yes | STUN reflexive address, only when the NAT is not symmetric |
+
+`needsProbe` tells the pilot which candidates depend on a hole being punched
+first. Those are held back ~400ms; the rest fire immediately, so the common
+same-LAN case doesn't wait on a hole punch it never needed.
+
+**Router port mapping** (`portmap.py`) — tried before falling back to STUN
+inference. PCP (RFC 6887) and NAT-PMP (RFC 6886) are UDP to `gateway:5351`;
+UPnP-IGD is SSDP discovery plus a SOAP `AddPortMapping`. All three are
+implemented directly rather than via miniupnpc, to keep the agent on pure-Python
+wheels for the eventual ARM cross-compile. An explicit mapping beats hole
+punching: it also covers port-restricted NAT, and it doesn't expire the way an
+inferred mapping does.
+
+A router will happily install a mapping and report an external address that is
+itself behind another NAT — RFC 1918 on a double-NAT LAN, or `100.64.0.0/10`
+under CGNAT. That mapping is still useful (it removes the inner NAT from the
+path, which can make the reflexive candidate work) but the address must not be
+advertised. The predicate for this is `ipaddress.is_global`, **not** `is_private`
+— the latter does not flag CGNAT space.
+
+**STUN** (`stun.py`) — two servers on different operators (Google, Cloudflare),
+each with a compressed RFC 5389 retransmission ladder. Two operators rather than
+one because comparing the two answers is what classifies the NAT:
+
+- both report the same `ip:port` → cone; the reflexive candidate is usable
+- same IP, different ports → **symmetric**; the mapping is chosen per
+  destination, so the port STUN saw is not the port the pilot would arrive on.
+  The candidate is dropped rather than advertised, since it can only waste a
+  slot in the pilot's race.
+
+**NAT hole-punching** (`start_probing`):
+- On `pilot-connected`, the agent sends a small UDP packet from the WebTransport
+  socket toward the pilot's IP, repeated every 250ms for 12s
+- Repeated rather than fired once: a lone UDP packet can drop, and Chrome
+  retries its QUIC handshake with backoff, so the Initial can arrive seconds later
+- One destination port, not a list of guesses. For address-restricted NAT — the
+  one type this helps — filtering is by source *address* and the port is
+  irrelevant. For port-restricted NAT, where the port would matter, it is
+  unknowable. Probing three arbitrary ports out of ~16k ephemeral ones was
+  guesswork that bought nothing.
+- Probing stops as soon as a session is established
 
 **Latency guarantee — frame sender design:**
 - PyAV thread writes each decoded frame to a single `_latest_frame` slot (overwrites previous)
@@ -196,12 +285,14 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 --robot-id           <string>    e.g. mac-robot-01
 --signal-url         <wss://...> signal server
 --webtransport-port  <int>       UDP port for WebTransport (default: 4433)
---webtransport-host  <host>      Override STUN (skip STUN, use this IP)
+--webtransport-host  <host>      Override discovery (skip STUN, use this IP)
 --video-port         <int>       RTP video input (default: 5000)
 --sensor-port        <int>       Sensor UDP input (default: 5002)
+--no-port-mapping                Skip PCP/NAT-PMP/UPnP
+--no-ipv6                        Do not listen on or advertise IPv6
 ```
 
-**Dependencies:** `av` (PyAV), `websockets`, `aioquic`, `cryptography`, `ifaddr` (optional; falls back to socket trick for IP discovery)
+**Dependencies:** `av` (PyAV), `websockets`, `aioquic`, `cryptography`, `ifaddr`
 
 ---
 
@@ -211,15 +302,30 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 
 **P2P connection flow:**
 1. Connects to signal server, sends `connect`
-2. Receives `ready` with candidates + fingerprint
+2. Receives `ready` with candidates + fingerprint + `p2pHint`
 3. Calls `initDecoder()` to reset the WebCodecs VideoDecoder
-4. Calls `connectWebTransport(candidates, fingerprint)`:
-   - Waits 400ms (gives agent NAT probes time to reach pilot)
-   - Creates one `WebTransport` per candidate simultaneously
-   - Races all `wt.ready` promises; first to resolve wins, others closed
-   - 10-second overall timeout; on timeout/failure → sends `relay-request`
+4. Calls `connectWebTransport(candidates, fingerprint, hint)`:
+   - Sorts candidates by `priority`, descending
+   - Fires `needsProbe: false` candidates immediately; holds the rest 400ms so the agent's probes can land first
+   - Races all `wt.ready` promises; first to resolve wins, every other attempt is closed
+   - Deadline from `p2pHint` (10s / 4s / 2s); on timeout or total failure → sends `relay-request`
 5. In relay mode: receives binary `ArrayBuffer` from WebSocket → `handleVideoChunk`
 6. In P2P mode: reads `wt.datagrams.readable` → `handleVideoChunk`
+
+**No attempt outlives the deadline.** The race owns every `WebTransport` it
+creates and closes all of them on timeout. This is load-bearing: the agent
+rewires its video output to QUIC datagrams the instant a session is accepted,
+so a straggler connecting after the pilot has moved to relay would hand the
+agent a P2P session the pilot has no datagram reader for — video would stop
+dead with nothing to recover it.
+
+**Relay is not a one-way door.** While relaying, the pilot retries P2P every
+30s: it sends `probe-request` to reopen the agent's NAT hole, then re-runs the
+same race. A failed retry costs nothing and cannot disturb the working relay,
+because the agent only switches its output when a session is actually accepted.
+On success the pilot calls `attachSession()` — the same wiring the initial
+connect uses — and reports "Upgraded to direct connection". NAT state,
+interfaces, and networks all change under a robot in the field.
 
 **Chunk reassembly (`handleVideoChunk`):**
 - `_frameChunks` Map: `frame_id → {chunks[], received, total, isKeyframe}`
@@ -316,13 +422,14 @@ darc/
 │   │   ├── deploy.sh      # GCLOUD_PROJECT=darc-platform ./deploy.sh
 │   │   └── DEPLOY.md
 │   ├── agent/             # darc-agent (Python)
-│   │   ├── agent.py       # Entry point, startup sequence, callback wiring
-│   │   ├── cert.py        # ECDSA P-256 TLS cert generation
-│   │   ├── stun.py        # Async STUN client + local IP discovery
-│   │   ├── transport.py   # aioquic WebTransport server
+│   │   ├── agent.py       # Entry point, socket binding, candidate gathering
+│   │   ├── cert.py        # ECDSA P-256 TLS cert generation (IPv4 + IPv6 SAN)
+│   │   ├── stun.py        # STUN client, NAT classification, local IP discovery
+│   │   ├── portmap.py     # PCP / NAT-PMP / UPnP-IGD router port mapping
+│   │   ├── transport.py   # aioquic WebTransport server on pre-bound sockets
 │   │   ├── peer.py        # Relay class: video chunking, sensor, commands
 │   │   ├── signaling.py   # SignalingClient
-│   │   └── requirements.txt  # av, websockets, aioquic, cryptography
+│   │   └── requirements.txt  # av, websockets, aioquic, cryptography, ifaddr
 │   └── pilot/             # darc-pilot (HTML/JS, served by darc-signal)
 │       ├── index.html
 │       └── pilot.js
@@ -363,11 +470,17 @@ On the WebSocket relay path, the TCP layer can buffer chunks if the signal serve
 ### Commands not forwarded in relay mode
 The pilot's bidirectional JSON command stream is a WebTransport stream; it doesn't exist in relay mode. Snapshot (Space bar) silently does nothing. Sensor data still flows. Fixing this requires routing commands via the signaling WebSocket JSON path (signal server relays JSON pilot→robot and robot→pilot).
 
-### STUN and symmetric NAT
-The STUN-reflexive candidate fails for robots behind symmetric carrier CGNAT (common on 5G/4G). The relay fallback handles this case, but the 10-second P2P timeout is noticeable before video starts. A proper TURN relay would provide video immediately with relay quality.
+### Symmetric NAT and port-restricted NAT cannot do P2P
+Architectural, not a gap — see the traversal table above. Both need something
+the browser cannot provide (its own ephemeral source port) or something the NAT
+refuses to provide (a stable external mapping). Symmetric NAT is now *detected*
+at startup, so the pilot fails over in ~2s instead of waiting the full 10.
+Port-restricted NAT is not distinguishable from address-restricted without a
+cooperating peer, so it still burns the full window before relaying.
 
-### STUN pre-binding window
-STUN runs on a temporary socket before aioquic binds. The NAT mapping created by STUN may expire (NATs typically give UDP 30–120s) and may differ from the mapping aioquic creates when it binds the same port. On most residential NATs with port-preservation, they match. On strict or load-balanced NATs, they may not. See `stun.py` for the SO_REUSEADDR/REUSEPORT workaround.
+The real fix for both is a router port mapping, which `portmap.py` now attempts
+first. Where that is unavailable (carrier networks, locked-down corporate LANs)
+the relay is genuinely the only option.
 
 ### One pilot per robot
 Session state is in-memory on the single Cloud Run instance. The signal server tracks one robot WebSocket and one pilot WebSocket per robot ID. Multi-pilot monitoring is not implemented.
@@ -391,8 +504,10 @@ Session state is in-memory on the single Cloud Run instance. The signal server t
 ### Immediate (prototype improvements)
 1. **Relay-mode commands** — route JSON commands via signaling WebSocket in relay mode (signal server relays pilot→robot JSON in both directions, not just binary)
 2. **Latency measurement** — capture wall-clock timestamp in the frame chunk header; display end-to-end latency in the pilot UI
-3. **Relay status in UI** — currently shows "Waiting for video… (relay)" before video starts, then just "Connected" — should persistently indicate relay mode
-4. **Port forwarding instructions** — if P2P fails and relay activates, show a hint to the user about UPnP or manual UDP :4433 forwarding
+3. **Relay status in UI** — currently shows "Waiting for video… (relay)" before video starts, then just "Connected" — should persistently indicate relay mode, and surface which candidate label won
+4. **Port mapping renewal** — mappings are requested with a 3600s lease but never renewed, so a session running longer than an hour can lose its `portmap` candidate. Renew at half the granted lifetime, and release on shutdown.
+5. **Re-run discovery on network change** — candidates are gathered once at startup. A robot that changes interface (WiFi → cellular) keeps advertising stale ones until restarted.
+6. **Port forwarding instructions** — when relay activates and no port mapping was available, tell the user which port to forward manually
 
 ### Production path
 1. **Port agent to C with MsQuic** — Python/aioquic is prototype-quality; MsQuic handles QUIC on ARM Linux embedded targets

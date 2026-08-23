@@ -28,7 +28,7 @@ def generate_cert(ip_addresses: list[str] | None = None):
     """
     Returns (cert, private_key, fingerprint_hex).
 
-    ip_addresses: list of IPv4 strings to include in SubjectAlternativeName.
+    ip_addresses: IPv4 and/or IPv6 address strings for SubjectAlternativeName.
     fingerprint_hex: lowercase hex SHA-256 of the DER cert — matches what
                      Chrome computes for serverCertificateHashes.
     """
@@ -37,13 +37,18 @@ def generate_cert(ip_addresses: list[str] | None = None):
 
     # Build SubjectAlternativeName. Chrome requires SAN to be present for the
     # fingerprint verifier to accept the cert. Include every IP the agent may
-    # be reachable on so the cert is nominally "correct" for the URLs tried.
+    # be reachable on so the cert is nominally "correct" for the URLs tried —
+    # both families, since IPv6 candidates are advertised where available.
     san_ips: list[x509.GeneralName] = []
+    seen: set[str] = set()
     for ip in (ip_addresses or []):
         try:
-            san_ips.append(x509.IPAddress(ipaddress.IPv4Address(ip)))
+            addr = ipaddress.ip_address(ip.split('%', 1)[0])
         except ValueError:
-            pass
+            continue
+        if str(addr) not in seen:
+            seen.add(str(addr))
+            san_ips.append(x509.IPAddress(addr))
     if not san_ips:
         san_ips.append(x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')))
 

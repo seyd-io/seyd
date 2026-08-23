@@ -8,8 +8,11 @@ bidirectional stream initiated by the pilot.
 Commands from the pilot arrive on the same stream and are dispatched via
 the on_message callback.
 
-After the server starts, get_socket() returns the underlying UDP socket so
-the caller can run STUN from it to discover the correct external address.
+The server does not bind its own sockets. The caller passes in sockets it has
+already bound and already run STUN on, so the NAT mapping advertised to the
+pilot is provably the same mapping QUIC will receive on — see stun.py. One
+socket per address family: IPv4 and, where the host has a routable address,
+IPv6.
 """
 
 import asyncio
@@ -18,8 +21,8 @@ import logging
 import socket
 from typing import Callable, Optional
 
-from aioquic.asyncio import serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
+from aioquic.asyncio.server import QuicServer
 from aioquic.h3.connection import H3Connection, H3_ALPN
 from aioquic.h3.events import (
     DatagramReceived,
@@ -151,13 +154,15 @@ class WebTransportServer:
 
     def __init__(self):
         self._current_session: Optional[_Session] = None
-        self._quic_server = None
+        self._quic_servers: list[QuicServer] = []
+        self._socks: list[socket.socket] = []
         self._probe_task: Optional[asyncio.Task] = None
         self.on_connected: Optional[Callable] = None
         self.on_disconnected: Optional[Callable] = None
         self.on_message: Optional[Callable] = None
 
-    async def start(self, port: int, cert, key):
+    async def start(self, socks: list[socket.socket], cert, key):
+        """Run a QUIC server on each already-bound socket."""
         config = QuicConfiguration(
             alpn_protocols=H3_ALPN,
             is_client=False,
@@ -166,20 +171,31 @@ class WebTransportServer:
         config.certificate = cert
         config.private_key = key
 
-        self._quic_server = await serve(
-            host='0.0.0.0',
-            port=port,
-            configuration=config,
-            create_protocol=lambda *a, **kw: DARCProtocol(*a, server=self, **kw),
-        )
-        log.info('WebTransport server listening on port %d', port)
+        loop = asyncio.get_running_loop()
+        self._socks = list(socks)
 
-    def get_socket(self) -> Optional[socket.socket]:
-        """Return the raw UDP socket so STUN can be run from it."""
-        try:
-            return self._quic_server._transport.get_extra_info('socket')
-        except Exception:
-            return None
+        for sock in socks:
+            # aioquic's serve() binds for us, which we cannot use here: these
+            # sockets are already bound and already carry the NAT mapping STUN
+            # measured. Drive QuicServer onto the existing socket instead.
+            _, server = await loop.create_datagram_endpoint(
+                lambda: QuicServer(
+                    configuration=config,
+                    create_protocol=lambda *a, **kw: DARCProtocol(*a, server=self, **kw),
+                ),
+                sock=sock,
+            )
+            self._quic_servers.append(server)
+            family = 'IPv6' if sock.family == socket.AF_INET6 else 'IPv4'
+            log.info('WebTransport server listening on %s %s', family, sock.getsockname()[:2])
+
+    def _socket_for(self, ip: str) -> Optional[socket.socket]:
+        """Pick the listening socket whose address family matches `ip`."""
+        want = socket.AF_INET6 if ':' in ip else socket.AF_INET
+        for sock in self._socks:
+            if sock.family == want:
+                return sock
+        return None
 
     def start_probing(self, ip: str, port: int = 443,
                       interval: float = 0.25, duration: float = 12.0):
@@ -221,9 +237,9 @@ class WebTransportServer:
         self._probe_task = None
 
     async def _probe_loop(self, ip: str, port: int, interval: float, duration: float):
-        sock = self.get_socket()
+        sock = self._socket_for(ip)
         if not sock:
-            log.warning('probe: no socket available')
+            log.warning('probe: no listening socket matches %s', ip)
             return
         loop     = asyncio.get_running_loop()
         deadline = loop.time() + duration
@@ -243,8 +259,13 @@ class WebTransportServer:
 
     def stop(self):
         self.stop_probing()
-        if self._quic_server:
-            self._quic_server.close()
+        for server in self._quic_servers:
+            try:
+                server.close()
+            except Exception:
+                pass
+        self._quic_servers.clear()
+        self._socks.clear()
 
     def _set_session(self, session: Optional[_Session]):
         self._current_session = session

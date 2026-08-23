@@ -66,7 +66,7 @@ darc/
 | Component | Language / runtime | Rationale |
 |---|---|---|
 | darc-signal | Node.js | Fast iteration, good WebSocket support, easy cloud deploy |
-| darc-agent | Python + PyAV (av) + websockets | PyAV demuxes H.264 from RTP; forwarded byte-for-byte as binary WebSocket frames |
+| darc-agent | Python + PyAV (av) + aioquic + websockets | PyAV demuxes H.264 from RTP; forwarded byte-for-byte. NAT traversal (STUN, PCP/NAT-PMP/UPnP) implemented directly — no miniupnpc — to stay on pure-Python wheels for the ARM cross-compile |
 | darc-pilot | Vanilla HTML/JS + WebCodecs | WebCodecs VideoDecoder eliminates jitter buffer; canvas render, no `<video>` element |
 | Video source (sim) | FFmpeg | Standard RTP/H.264 output; matches what real robot camera nodes produce |
 
