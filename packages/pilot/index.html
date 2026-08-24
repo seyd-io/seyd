@@ -32,7 +32,13 @@
       max-width: 100%;
       max-height: 100%;
       display: block;
+      outline: 2px solid transparent;
+      transition: outline-color .15s;
     }
+    /* Unrecoverable loss has corrupted the reference chain: what is on screen
+       cannot be trusted until the next clean keyframe. Never let a smeared or
+       frozen picture pass as reality. */
+    #video-canvas.degraded { outline-color: #ff3b30; }
 
     /* ── overlays ─────────────────────────────────────── */
 
@@ -79,6 +85,37 @@
       font-size: 11px;
       opacity: .35;
     }
+
+    #qos {
+      font-family: inherit;
+      font-size: 11px;
+      color: #fff;
+      background: rgba(255,255,255,.12);
+      border: 0;
+      border-radius: 999px;
+      padding: 3px 8px;
+    }
+    #qos:disabled { opacity: .4; }
+
+    /* ── stats panel ──────────────────────────────────── */
+
+    #stats {
+      position: absolute;
+      top: 44px;
+      left: 16px;
+      padding: 10px 14px;
+      background: rgba(0,0,0,.72);
+      backdrop-filter: blur(8px);
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.65;
+      white-space: pre;
+      pointer-events: none;
+      opacity: .92;
+    }
+    #stats .ok   { color: #34c759; }
+    #stats .warn { color: #ffcc00; }
+    #stats .bad  { color: #ff3b30; }
 
     /* ── toast ────────────────────────────────────────── */
 
@@ -136,12 +173,21 @@
 
     <div id="overlay-top" class="overlay">
       <span id="robot-id"></span>
-      <span id="status">Connecting…</span>
+      <span style="display:flex; gap:12px; align-items:center;">
+        <select id="qos" title="Quality of service profile">
+          <option value="latency">latency</option>
+          <option value="balanced">balanced</option>
+          <option value="quality">quality</option>
+        </select>
+        <span id="status">Connecting…</span>
+      </span>
     </div>
+
+    <pre id="stats" hidden></pre>
 
     <div id="overlay-bottom" class="overlay">
       <span id="sensor">—</span>
-      <span id="hint">SPACE — snapshot</span>
+      <span id="hint">SPACE — snapshot · S — stats</span>
     </div>
 
     <div id="toast"></div>
@@ -153,6 +199,8 @@
     <code id="error-example"></code>
   </div>
 
+  <!-- fec.js must load first: pilot.js reads DARCFec at parse time. -->
+  <script src="fec.js"></script>
   <script src="pilot.js"></script>
 </body>
 </html>

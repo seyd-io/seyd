@@ -41,15 +41,31 @@ darc/
 │   └── pilot/             # darc-pilot: browser operator application (HTML/JS)
 │
 ├── sim/                   # robot simulation — NOT part of DARC
-│   ├── video-source.sh    # FFmpeg webcam → RTP/H.264 UDP :5000
-│   └── sensor-source.py   # counter → UDP :5001 at 10 Hz
+│   ├── video-source.sh    # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
+│   └── sensor-source.py   # counter → UDP :5002 at 10 Hz
 │
 ├── deploy/                # cloud infrastructure and deployment config
 │
+├── tools/                 # internal tooling and test harnesses
+│   ├── setup-machine.sh   # dev machine bootstrap
+│   ├── fec-vectors.py     # emit FEC interop vectors from the agent encoder
+│   └── fec-check.js       # replay them through the pilot decoder
+│
 ├── web/                   # (future) landing page and marketing site
-├── docs/                  # (future) developer documentation and SDK guides
-└── tools/                 # (future) internal tooling, dashboards, scripts
+└── docs/                  # (future) developer documentation and SDK guides
 ```
+
+**Import direction:** `tools/` may reach into `packages/`. `packages/` must never
+reach into `tools/` or `sim/`.
+
+## Where QoS settings live
+
+Encoder settings (resolution, preset, VBV, GOP) belong to the robot's video
+publisher — `sim/video-source.sh` in the prototype. DARC states only
+transport-observable *targets* (`packages/agent/qos.py`: bitrate ceiling, latency
+budget, max GOP) plus its own transport policy (FEC rate, drop threshold). If you
+find yourself putting a resolution in `qos.py`, or an FEC percentage in `sim/`,
+the boundary has leaked.
 
 ## Component philosophy
 
@@ -66,9 +82,10 @@ darc/
 | Component | Language / runtime | Rationale |
 |---|---|---|
 | darc-signal | Node.js | Fast iteration, good WebSocket support, easy cloud deploy |
-| darc-agent | Python + PyAV (av) + aioquic + websockets | PyAV demuxes H.264 from RTP; forwarded byte-for-byte. NAT traversal (STUN, PCP/NAT-PMP/UPnP) implemented directly — no miniupnpc — to stay on pure-Python wheels for the ARM cross-compile |
+| darc-agent | Python + PyAV (av) + aioquic + websockets | PyAV demuxes H.264 from RTP; forwarded byte-for-byte. NAT traversal (STUN, PCP/NAT-PMP/UPnP) and Reed-Solomon FEC implemented directly — no miniupnpc, no numpy — to stay on pure-Python wheels for the ARM cross-compile |
 | darc-pilot | Vanilla HTML/JS + WebCodecs | WebCodecs VideoDecoder eliminates jitter buffer; canvas render, no `<video>` element |
-| Video source (sim) | FFmpeg | Standard RTP/H.264 output; matches what real robot camera nodes produce |
+| Loss resilience | Reed-Solomon over GF(256), Cauchy matrix | FEC not retransmission: a retransmit costs a round trip, which teleoperation cannot spend. Paired implementations in `packages/agent/fec.py` and `packages/pilot/fec.js` — they must agree byte-for-byte, enforced by `tools/fec-check.js` |
+| Video source (sim) | FFmpeg | Standard RTP/H.264 output; matches what real robot camera nodes produce. Bitrate is **capped** — CRF mode produced unbounded 8–14 Mbps spikes on motion |
 
 **Video path (prototype):** FFmpeg H.264 encode → RTP UDP → PyAV demux → binary WebSocket → signal relay → WebCodecs VideoDecoder → canvas. Single encode chain. No transcoding, no jitter buffer.
 

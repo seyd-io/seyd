@@ -2,32 +2,97 @@
 # Captures the default Mac webcam and streams H.264 RTP to localhost:5000.
 # This simulates what a robot's camera node publishes on its internal LAN.
 # The DARC Agent subscribes to this port — start this before connecting a pilot.
+#
+# NOT part of DARC. This stands in for the robot's video publisher, and it owns
+# the encoder settings: per SPEC.md, DARC states a bitrate ceiling and a latency
+# budget, and the publisher decides how to meet them (resolution, preset, VBV,
+# GOP). That is why the resolution table lives here and not in packages/agent/qos.py.
 set -euo pipefail
 
 PORT=${VIDEO_PORT:-5000}
 DEVICE=${VIDEO_DEVICE:-0}
+PROFILE=${DARC_QOS_PROFILE:-balanced}
 
-echo "Available AVFoundation video devices:"
-ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 40 "AVFoundation video devices" | grep -E "^\[|video" || true
+# ── QoS profile → encoder settings ───────────────────────────────────────────
+# Bitrate ceilings mirror packages/agent/qos.py. Keep the two in step: DARC sizes
+# its FEC overhead against these numbers, and the pair has to fit the uplink as
+# one budget.
+case "$PROFILE" in
+  latency)
+    W=960;  H=540; FPS=30; KBPS=1500; GOP=30; PRESET=ultrafast; VBV_MS=100 ;;
+  balanced)
+    W=1280; H=720; FPS=30; KBPS=3000; GOP=30; PRESET=veryfast;  VBV_MS=100 ;;
+  quality)
+    W=1280; H=720; FPS=30; KBPS=6000; GOP=60; PRESET=veryfast;  VBV_MS=200 ;;
+  *)
+    echo "Unknown DARC_QOS_PROFILE '${PROFILE}' — use latency, balanced, or quality." >&2
+    exit 1 ;;
+esac
+
+# VBV buffer = how long the encoder may run over its average rate. This is a
+# latency knob, not just a quality one:
+#   • ffmpeg's default (bufsize == maxrate, i.e. 1s) lets a motion burst emit a
+#     whole second of extra bits. The modem queue absorbs that as ~1s of added
+#     glass-to-glass latency, or drops it as the packet loss we are fixing.
+#   • One frame (33ms) is too tight — an IDR legitimately needs 3-5x an average
+#     frame, so a one-frame buffer forces keyframe QP up brutally and the
+#     keyframe is the frame you least want ugly.
+#   • ~100ms (3 frames) fits one IDR without allowing a deep queue.
+BUFK=$(( KBPS * VBV_MS / 1000 ))
+
+echo "DARC video publisher"
+echo "  profile   ${PROFILE}"
+echo "  video     ${W}x${H} @ ${FPS}fps"
+echo "  bitrate   ${KBPS} kbps capped (VBV ${BUFK}k = ${VBV_MS}ms)"
+echo "  GOP       ${GOP} frames ($(( GOP * 1000 / FPS ))ms)"
+echo "  preset    ${PRESET}"
 echo ""
-echo "Streaming webcam device [${DEVICE}] → RTP H.264 → UDP 127.0.0.1:${PORT}"
-echo "Override device with VIDEO_DEVICE=1 if device 0 is not your camera."
+
+# ── input ────────────────────────────────────────────────────────────────────
+# VIDEO_DEVICE=lavfi gives a synthetic, continuously-moving source. It is the
+# permanent worst case for a motion-sensitive encoder and, unlike a webcam, it is
+# byte-reproducible — which is what makes loss and bitrate measurements
+# comparable between runs.
+if [[ "$DEVICE" == "lavfi" ]]; then
+  echo "Input: synthetic testsrc2 (reproducible motion fixture)"
+  # -re is essential here and only here. A webcam is paced by hardware, but a
+  # lavfi source generates frames as fast as the CPU allows — measured at ~2450
+  # fps / 157 Mbps without it, which floods the relay and makes every latency and
+  # loss number meaningless.
+  INPUT_ARGS=(-re -f lavfi -i "testsrc2=size=${W}x${H}:rate=${FPS}")
+else
+  echo "Available AVFoundation video devices:"
+  ffmpeg -f avfoundation -list_devices true -i "" 2>&1 \
+    | grep -A 40 "AVFoundation video devices" | grep -E "^\[|video" || true
+  echo ""
+  echo "Input: webcam device [${DEVICE}] (override with VIDEO_DEVICE=1, or =lavfi for synthetic)"
+  INPUT_ARGS=(-f avfoundation -framerate "${FPS}" -video_size "${W}x${H}" -i "${DEVICE}")
+fi
+
+echo "Streaming → RTP H.264 → UDP 127.0.0.1:${PORT}"
 echo "Press Ctrl+C to stop."
 echo ""
 
-ffmpeg \
+# ── encode ───────────────────────────────────────────────────────────────────
+# scenecut=0 forces strictly periodic IDRs. A scene-cut IDR is an unpredictable
+# bitrate spike, and on a rate-limited link an unpredictable spike is exactly
+# what we are eliminating. It also keeps DARC's per-keyframe FEC accounting
+# predictable.
+#
+# Deliberately NOT using nal-hrd=cbr: it pads to hit the rate exactly, spending
+# scarce uplink on filler bytes.
+exec ffmpeg \
   -fflags nobuffer \
-  -f avfoundation \
-  -framerate 30 \
-  -video_size 1280x720 \
-  -i "${DEVICE}" \
+  "${INPUT_ARGS[@]}" \
   -pix_fmt yuv420p \
-  -vcodec libx264 \
+  -c:v libx264 \
   -tune zerolatency \
-  -preset ultrafast \
+  -preset "${PRESET}" \
   -profile:v baseline \
-  -g 15 \
+  -b:v "${KBPS}k" -maxrate "${KBPS}k" -bufsize "${BUFK}k" \
+  -g "${GOP}" -keyint_min "${GOP}" -bf 0 \
+  -x264-params "scenecut=0" \
   -an \
   -flush_packets 1 \
-  -f rtp \
-  "rtp://127.0.0.1:${PORT}"
+  -max_delay 0 \
+  -f rtp "rtp://127.0.0.1:${PORT}"

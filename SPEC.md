@@ -338,6 +338,60 @@ SRT (Secure Reliable Transport, Haivision) is actively maintained (v1.5.6, July 
 
 **SRT potential role:** Optional archival/recording path — pipe vehicle video to an SRT endpoint for high-quality session logging. Not on the control path.
 
+### Loss Resilience: FEC, Not Retransmission
+
+**Decision (2026-08-24): Reed-Solomon forward error correction over GF(256), sized per QoS profile.**
+
+Unreliable datagrams plus whole-frame reassembly means a single lost chunk
+destroys an entire frame, and because H.264 delta frames reference their
+predecessors, one loss smears until the next keyframe. Measured on the prototype:
+at 5% chunk loss only 19% of frames arrived whole. Retransmission is the obvious
+fix and the wrong one — a retransmit costs a round trip, which is the one thing
+teleoperation cannot spend. FEC pays a fixed bandwidth premium instead of a
+variable latency one, which is the correct trade for this product.
+
+Measured result on the prototype: **99.3% of frames delivered at 5% independent
+chunk loss**, against 71.9% without FEC.
+
+**Reed-Solomon rather than XOR parity.** Interleaved XOR is simpler and handles
+bursts well, but recovers only one loss per stripe. RS recovers any k losses
+wherever they fall, which is robust whether real cellular loss turns out to be
+bursty or independent — a question still open. The standard objection to RS is
+speed: naive GF(256) in Python costs 100–200 ms per keyframe, which would force a
+numpy dependency and break the pure-Python-wheels constraint that keeps the agent
+cross-compilable to ARM. **That objection was measured and found false**: doing
+the scalar multiply with `bytes.translate()` and accumulating with big-integer
+XOR (both C-speed) costs 0.25 ms per keyframe, 30x faster than the naive loop.
+Browser-side decode is 0.02–0.53 ms against a 33 ms budget. In production the
+MsQuic C agent can use ISA-L or jerasure with SIMD and the cost becomes noise.
+
+**Known limit:** the low-latency profile's delta frames are small (~6 chunks), so
+a loss burst longer than k destroys them regardless. Delivery falls to ~90% under
+bursts of 3+. Keyframes carry far more parity and were never lost in testing, so
+corruption is bounded to one GOP rather than accumulating. Raising delta parity or
+interleaving across frames would fix it, at the cost of bandwidth or latency
+respectively — deferred until real cellular loss is characterised.
+
+### Quality of Service Profiles
+
+The link constrains *total bytes on the wire*, not video bitrate. A QoS profile is
+therefore one budget split three ways — pixels, redundancy, headroom — exposed as
+a named operator choice: `latency`, `balanced`, `quality`.
+
+The split follows the architectural boundary: **DARC states transport-observable
+targets (bitrate ceiling, latency budget, max GOP) and owns its own transport
+policy (FEC rate, frame-drop threshold, close-out deadlines). The robot's video
+publisher owns how to meet them** — resolution, preset, VBV sizing. DARC never
+specifies a resolution, because only the publisher knows its sensor. This is the
+first concrete piece of the codec negotiation API listed under Open Questions,
+carried over a documented UDP control interface to the publisher.
+
+Counter-intuitively the *latency* profile carries the *most* redundancy: it runs a
+low video rate and spends the headroom on never losing a frame, where `quality`
+spends it on pixels and tolerates occasional loss. FEC overhead and video bitrate
+must always be set together as one budget — raising FEC on a saturated link
+increases loss rather than reducing it.
+
 ### Video Codec
 - **H.264**: Use now. Hardware encoders on every ARM SoC; GStreamer pipeline is mature.
 - **AV1**: Track it. Better compression at low bitrate, but hardware encode on embedded is not yet universal (2026). Plan to support it in the codec negotiation API so integrators can opt in.
@@ -403,7 +457,7 @@ Full robotics platform — gRPC for structured RPCs, WebRTC for P2P streaming, c
 3. **Pricing model** — per-vehicle-per-month (predictable for customers), per-minute of active session (scales with usage), or bandwidth-based (hard to predict). Voysys used per-vehicle pricing.
 4. **ROS2 agent form factor** — should the DARC agent be a native ROS2 node (tight integration, requires ROS2) or a standalone daemon with a ROS2 bridge adapter (wider compatibility, two processes)?
 5. **Session recording** — built-in synchronized recording of video + sensor data + commands is valuable for training data and post-incident review. Design the data model early.
-6. **Codec negotiation** — how does the vehicle agent and operator SDK negotiate codec, resolution, and bitrate? Define this API surface before it ossifies.
+6. **Codec negotiation** — *partially answered.* The QoS profile system establishes the shape: DARC states a bitrate ceiling, latency budget and max GOP; the publisher maps those onto resolution, preset and VBV itself. Carried today as best-effort JSON over UDP to the publisher (`--publisher-control-port`). Still open: codec *identity* negotiation (H.264 vs AV1, profile/level), whether the pilot should derive its decoder config from the SPS rather than assuming Baseline, and whether the control channel should be acknowledged rather than fire-and-forget.
 
 ---
 
@@ -414,7 +468,8 @@ The Mac-to-Mac prototype is complete and working. See PROTOTYPE.md for full impl
 **What exists:**
 - `darc-signal`: Node.js WebSocket server on Cloud Run, handles registration, connection brokering, binary relay fallback, fleet UI
 - `darc-agent`: Python daemon with WebTransport P2P (aioquic) over IPv4 and IPv6, router port mapping (PCP/NAT-PMP/UPnP), STUN with NAT classification, hole-punching, automatic relay fallback via signaling WebSocket
-- `darc-pilot`: Vanilla JS browser app with prioritised WebTransport candidate racing, chunk reassembly, WebCodecs decode, relay fallback with live P2P upgrade
+- `darc-pilot`: Vanilla JS browser app with prioritised WebTransport candidate racing, FEC-recovering chunk reassembly, WebCodecs decode, relay fallback with live P2P upgrade, telemetry HUD
+- Reed-Solomon FEC and QoS profiles (`latency`/`balanced`/`quality`) spanning the DARC/publisher boundary; 99.3% frame delivery at 5% independent chunk loss
 - End-to-end tested: LAN, broadband-to-broadband, broadband-to-cellular (relay fallback)
 
 **What is not built yet:**

@@ -21,10 +21,12 @@ Optional:
 
 import asyncio
 import argparse
+import json
 import logging
 import socket
 
 import portmap
+import qos
 from cert import generate_cert
 from stun import discover_nat, format_host, get_local_ips, is_ipv6
 from transport import WebTransportServer
@@ -32,6 +34,41 @@ from signaling import SignalingClient
 from peer import Relay
 
 log = logging.getLogger(__name__)
+
+
+class PublisherControl:
+    """
+    Outbound control channel to the robot's video publisher.
+
+    DARC defines the message and the port; it does not implement the publisher.
+    Per SPEC.md, DARC states a bitrate ceiling and a latency budget and the
+    publisher decides how to meet them — so this carries targets, never
+    resolutions or encoder flags.
+
+    Best-effort UDP to localhost, fire-and-forget, never fatal: a robot whose
+    publisher does not implement the interface must keep streaming on whatever
+    it was already configured with.
+    """
+
+    def __init__(self, port: int, host: str = '127.0.0.1'):
+        self._addr = (host, port)
+        self._sock: socket.socket | None = None
+
+    async def send(self, msg: dict) -> bool:
+        if self._sock is None:
+            try:
+                self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self._sock.setblocking(False)
+            except OSError as e:
+                log.debug('publisher control socket unavailable: %s', e)
+                return False
+        try:
+            self._sock.sendto(json.dumps(msg).encode(), self._addr)
+            log.info('publisher control → %s', msg.get('type'))
+            return True
+        except OSError as e:
+            log.debug('publisher control send failed: %s', e)
+            return False
 
 
 def parse_args():
@@ -47,6 +84,11 @@ def parse_args():
                    help='Skip PCP/NAT-PMP/UPnP router port mapping')
     p.add_argument('--no-ipv6',            action='store_true',
                    help='Do not listen on or advertise IPv6')
+    p.add_argument('--qos-profile',        default=qos.DEFAULT,
+                   choices=sorted(qos.PROFILES),
+                   help=f'Starting QoS profile (default: {qos.DEFAULT})')
+    p.add_argument('--publisher-control-port', type=int, default=5003,
+                   help='UDP port the video publisher listens on for config')
     return p.parse_args()
 
 
@@ -185,24 +227,49 @@ async def main():
     log.info('cert fingerprint: %s…  (SAN IPs: %s)', fingerprint[:16], ', '.join(all_ips))
 
     # ── Step 4: Start relay + WebTransport server ─────────────────────────────
-    relay = Relay(video_port=args.video_port, sensor_port=args.sensor_port)
+    publisher = PublisherControl(args.publisher_control_port)
+    relay = Relay(video_port=args.video_port, sensor_port=args.sensor_port,
+                  profile=qos.get(args.qos_profile))
     wt    = WebTransportServer()
 
+    def detach_sinks():
+        relay.send_batch    = None
+        relay.send_json     = None
+        relay.pending_bytes = None
+        relay.drop_pending  = None
+        relay.link_stats    = None
+
     async def on_wt_connected(session):
-        relay.send_binary      = session.send_datagram
-        relay.send_json        = session.send_json
-        relay.flush_send_queue = session.flush_datagrams
+        relay.send_batch    = session.send_datagram_batch
+        relay.send_json     = session.send_json
+        relay.pending_bytes = session.pending_bytes
+        relay.drop_pending  = session.drop_pending
+        relay.link_stats    = session.link_stats
         log.info('pilot connected via WebTransport')
 
     async def on_wt_disconnected():
-        relay.send_binary      = None
-        relay.send_json        = None
-        relay.flush_send_queue = None
+        detach_sinks()
         log.info('pilot disconnected from WebTransport')
+
+    async def on_qos(profile_name: str) -> dict:
+        """Apply a profile: DARC's half immediately, the publisher's best-effort."""
+        profile = qos.get(profile_name)
+        relay.set_profile(profile)
+        delivered = await publisher.send(profile.publisher_config())
+        return {
+            'type':      'qos-applied',
+            'profile':   profile.name,
+            'fec':       {'delta': profile.fec_delta_pct, 'key': profile.fec_key_pct},
+            'pilot':     profile.pilot_config(),
+            # 'requested', not 'applied' — the control channel is fire-and-forget
+            # UDP, so claiming the publisher applied it would be a guess.
+            'publisher': 'requested' if delivered else 'unavailable',
+        }
 
     wt.on_connected    = on_wt_connected
     wt.on_disconnected = on_wt_disconnected
     wt.on_message      = relay.handle_message
+    relay.on_qos       = on_qos
 
     await relay.start()
     await wt.start(socks, cert=cert, key=key)
@@ -219,15 +286,11 @@ async def main():
     async def on_pilot_connected(pilot_ip: str | None):
         if pilot_ip:
             wt.start_probing(pilot_ip)
-        relay.send_binary      = None
-        relay.send_json        = None
-        relay.flush_send_queue = None
+        detach_sinks()
 
     async def on_pilot_disconnected():
         wt.stop_probing()
-        relay.send_binary      = None
-        relay.send_json        = None
-        relay.flush_send_queue = None
+        detach_sinks()
 
     async def on_punch(pilot_ip: str | None):
         # P2P retry from a pilot already on relay. Only reopen the hole; the
@@ -237,15 +300,28 @@ async def main():
 
     async def on_relay_mode():
         # P2P failed — pilot asked to relay video through the signal server.
-        # Switch send_binary to the signaling WebSocket; flush is a no-op (TCP).
-        relay.send_binary      = signaling.send_binary
-        relay.flush_send_queue = None
+        # Same chunk format including parity; the pilot decodes it identically.
+        # There is no drop_pending on TCP, so relay latency stays unbounded under
+        # sustained congestion — a documented limitation of the fallback path.
+        relay.send_batch    = signaling.send_binary_batch
+        relay.pending_bytes = signaling.pending_bytes
+        relay.drop_pending  = None
+        relay.link_stats    = None
         log.info('relay mode — video now flows via signal server')
+
+    async def on_qos_signal(profile_name: str):
+        # Arrives via the signal server, so it works in relay mode too — where
+        # there is no pilot→robot JSON path at all.
+        await on_qos(profile_name)
 
     signaling.on_pilot_connected    = on_pilot_connected
     signaling.on_pilot_disconnected = on_pilot_disconnected
     signaling.on_relay_mode         = on_relay_mode
     signaling.on_punch              = on_punch
+    signaling.on_qos                = on_qos_signal
+
+    # Push the startup profile to the publisher so it is not left on its default.
+    await publisher.send(relay.profile.publisher_config())
 
     # ── Step 6: Run ───────────────────────────────────────────────────────────
     try:

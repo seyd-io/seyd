@@ -3,6 +3,18 @@ const params     = new URLSearchParams(location.search);
 const ROBOT_ID   = params.get('robot');
 const SIGNAL_URL = params.get('signal');
 
+// QoS: ?qos= wins, then the last choice, then the balanced default.
+const QOS_PROFILES = ['latency', 'balanced', 'quality'];
+let qosProfile = params.get('qos') || localStorage.getItem('darc.qos') || 'balanced';
+if (!QOS_PROFILES.includes(qosProfile)) qosProfile = 'balanced';
+
+// Synthetic loss injection for testing FEC without a cellular link.
+// ?loss=0.05 drops 5% of chunks; ?burst=3 drops them in runs of 3 (at 1/3 the
+// probability, so mean loss is unchanged and only burstiness varies — that is
+// the experiment that says whether real loss is bursty or independent).
+const LOSS_RATE  = Math.max(0, Math.min(1, parseFloat(params.get('loss')) || 0));
+const LOSS_BURST = Math.max(1, parseInt(params.get('burst'), 10) || 1);
+
 // ── elements ───────────────────────────────────────────────────────────────
 const canvas    = document.getElementById('video-canvas');
 const statusEl  = document.getElementById('status');
@@ -11,6 +23,8 @@ const sensorEl  = document.getElementById('sensor');
 const toastEl   = document.getElementById('toast');
 const errorEl   = document.getElementById('error');
 const errorEgEl = document.getElementById('error-example');
+const statsEl   = document.getElementById('stats');
+const qosSelect = document.getElementById('qos');
 
 // ── guard: require params ──────────────────────────────────────────────────
 if (!ROBOT_ID || !SIGNAL_URL) {
@@ -33,8 +47,73 @@ let decoder     = null;
 let hasVideo    = false;
 let relayMode   = false;  // true when falling back to signal-server relay
 let session     = null;   // {candidates, fingerprint, hint} from the last `ready`
+let pathLabel   = '—';    // winning candidate label, for the stats panel
 
 const ctx = canvas.getContext('2d');
+
+// ── telemetry ──────────────────────────────────────────────────────────────
+// Without these, a degraded picture is indistinguishable between link loss,
+// agent-side frame drops, and a decoder that cannot keep up — so nothing about
+// video quality can be tuned or even verified. Cumulative counters are the audit
+// trail; rates are derived over a sliding window.
+const stats = {
+  chunksRx: 0, bytesRx: 0, parityRx: 0, chunksDup: 0, chunksBadHeader: 0,
+  chunksDropped: 0,           // discarded by the synthetic injector
+  chunksMissing: 0,           // never arrived, counted at frame close-out
+  framesSeen: 0, framesClean: 0, framesRecovered: 0, framesIncomplete: 0,
+  framesTooLate: 0,           // completed after a newer frame already decoded
+  keyframesClean: 0, keyframesLost: 0,
+  framesDecoded: 0, decodeErrors: 0,
+  spread: [],                 // per-frame chunk arrival spread, ms
+  degraded: false,            // unrecoverable loss since the last clean keyframe
+  agent: null,                // last agent-stats message
+};
+
+// Sliding 1s window for rate derivation.
+let rateWindow = [];
+function noteRate(bytes, parityBytes, frames) {
+  rateWindow.push({ t: performance.now(), bytes, parityBytes, frames });
+}
+
+function windowRates() {
+  const now = performance.now();
+  rateWindow = rateWindow.filter(s => now - s.t < 1000);
+  if (rateWindow.length < 2) return { kbps: 0, kbpsPayload: 0, fps: 0 };
+  const span = (now - rateWindow[0].t) / 1000;
+  if (span <= 0) return { kbps: 0, kbpsPayload: 0, fps: 0 };
+  let bytes = 0, parity = 0, frames = 0;
+  for (const s of rateWindow) { bytes += s.bytes; parity += s.parityBytes; frames += s.frames; }
+  return {
+    kbps:        Math.round(bytes * 8 / span / 1000),
+    kbpsPayload: Math.round((bytes - parity) * 8 / span / 1000),
+    fps:         Math.round(frames / span),
+  };
+}
+
+function percentile(arr, p) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(s.length * p))];
+}
+
+// ── synthetic loss injector ────────────────────────────────────────────────
+// Applied at the transport read, before any parsing, so the counters above see
+// exactly what real loss looks like. Seeded so runs are comparable.
+let lossSeed = 0x2545F491;
+function nextRandom() {
+  lossSeed ^= lossSeed << 13; lossSeed ^= lossSeed >>> 17; lossSeed ^= lossSeed << 5;
+  return ((lossSeed >>> 0) % 1e6) / 1e6;
+}
+let burstRemaining = 0;
+function shouldDrop() {
+  if (!LOSS_RATE) return false;
+  if (burstRemaining > 0) { burstRemaining--; return true; }
+  if (nextRandom() < LOSS_RATE / LOSS_BURST) {
+    burstRemaining = LOSS_BURST - 1;
+    return true;
+  }
+  return false;
+}
 
 // ── ui helpers ─────────────────────────────────────────────────────────────
 function setStatus(text, cls = '') {
@@ -65,6 +144,7 @@ function initDecoder() {
 
   decoder = new VideoDecoder({
     output: (frame) => {
+      stats.framesDecoded++;
       if (!hasVideo) {
         hasVideo = true;
         setStatus('Connected', 'connected');
@@ -76,7 +156,7 @@ function initDecoder() {
       ctx.drawImage(frame, 0, 0);
       frame.close();
     },
-    error: (e) => console.error('VideoDecoder error:', e),
+    error: (e) => { stats.decodeErrors++; console.error('VideoDecoder error:', e); },
   });
 
   decoder.configure({
@@ -90,6 +170,11 @@ function initDecoder() {
 // isKeyframe is provided by the chunk reassembler (from the flags byte).
 function handleVideoFrame(data, isKeyframe) {
   if (!decoder || decoder.state !== 'configured') return;
+  // 'freeze-until-idr' shows a clean but stale picture rather than a corrupted
+  // one; 'continue' keeps decoding through the smear. Either is defensible, so
+  // it is a per-profile choice — but a stale image is dangerous too, which is
+  // why the degraded border is shown regardless of which is active.
+  if (onLossPolicy === 'freeze-until-idr' && stats.degraded && !isKeyframe) return;
   try {
     decoder.decode(new EncodedVideoChunk({
       type:      isKeyframe ? 'key' : 'delta',
@@ -97,51 +182,144 @@ function handleVideoFrame(data, isKeyframe) {
       data,
     }));
   } catch (e) {
+    stats.decodeErrors++;
     console.warn('decode skipped:', e.message);
   }
 }
 
-// Chunk wire format (matches peer.py _blocking_video_relay):
-//   byte 0:     flags — bit 7 = keyframe
-//   bytes 1-2:  frame_id  (uint16 BE, rolls at 65535)
-//   bytes 3-4:  chunk_idx (uint16 BE, 0-based)
-//   bytes 5-6:  total_chunks (uint16 BE)
-//   bytes 7+:   H.264 Annex B payload slice
-const _frameChunks = new Map(); // frame_id → {chunks, received, total, isKeyframe}
+// ── frame reassembly with Reed-Solomon recovery ────────────────────────────
+// Wire format and code construction live in fec.js / packages/agent/fec.py.
+const CHUNK_SIZE  = DARCFec.MAX_CHUNK_PAYLOAD;
+const MAX_REORDER = 4;
+
+const _frames = new Map();   // frameId → assembly state
+let _newestId  = null;       // highest frame id seen
+let _lastDecodedId = null;   // highest frame id handed to the decoder
+
+// Close-out deadlines, overridden by the agent's qos-applied ack.
+let deadlineDelta = 30;
+let deadlineKey   = 60;
+let onLossPolicy  = 'continue';
 
 function handleVideoChunk(value) {
-  // value is a Uint8Array from wt.datagrams.readable
-  if (value.byteLength < 7) return;
-  const dv          = new DataView(value.buffer, value.byteOffset, value.byteLength);
-  const flags       = dv.getUint8(0);
-  const frameId     = dv.getUint16(1);
-  const chunkIdx    = dv.getUint16(3);
-  const totalChunks = dv.getUint16(5);
-  const isKeyframe  = (flags & 0x80) !== 0;
-  const chunkData   = value.subarray(7); // zero-copy view of this chunk's payload
+  stats.chunksRx++;
+  stats.bytesRx += value.byteLength;
 
-  if (!_frameChunks.has(frameId)) {
-    _frameChunks.set(frameId, { chunks: new Array(totalChunks), received: 0, total: totalChunks, isKeyframe });
-    // Evict frames whose IDs are more than 30 behind the current one (stale/lost).
-    for (const [id] of _frameChunks) {
-      if (((frameId - id) & 0xFFFF) > 30) _frameChunks.delete(id);
+  const h = DARCFec.parseHeader(value);
+  if (!h) { stats.chunksBadHeader++; return; }
+
+  const isParity = h.chunkIdx >= h.n;
+  if (isParity) stats.parityRx++;
+
+  // Every frame-id comparison goes through the signed helper. Doing this with
+  // raw unsigned arithmetic is what let a single reordered chunk from an older
+  // frame delete the frame currently being assembled.
+  if (_newestId === null || DARCFec.int16Delta(h.frameId, _newestId) > 0) {
+    _newestId = h.frameId;
+  }
+  if (DARCFec.int16Delta(_newestId, h.frameId) > MAX_REORDER) return;  // too old
+  if (_lastDecodedId !== null && DARCFec.int16Delta(h.frameId, _lastDecodedId) <= 0) {
+    stats.framesTooLate++;
+    return;
+  }
+
+  let f = _frames.get(h.frameId);
+  if (!f) {
+    f = {
+      id: h.frameId, n: h.n, k: h.k, lastLen: h.lastLen, isKeyframe: h.isKeyframe,
+      data: new Array(h.n).fill(null), parity: new Array(h.k).fill(null),
+      dataRx: 0, parityRx: 0,
+      firstSeen: performance.now(), lastSeen: performance.now(),
+      timer: null, closed: false,
+    };
+    _frames.set(h.frameId, f);
+    stats.framesSeen++;
+    const budget = h.isKeyframe ? deadlineKey : deadlineDelta;
+    f.timer = setTimeout(() => closeFrame(f, false), budget);
+  }
+  if (f.closed) return;
+  f.lastSeen = performance.now();
+
+  // Parity was computed over chunks zero-padded to CHUNK_SIZE, so the short
+  // final data chunk must be re-padded before it can take part in recovery.
+  const slot = isParity ? h.chunkIdx - h.n : h.chunkIdx;
+  const target = isParity ? f.parity : f.data;
+  if (slot >= target.length || target[slot]) { stats.chunksDup++; return; }
+
+  let body = h.payload;
+  if (body.byteLength < CHUNK_SIZE) {
+    const padded = new Uint8Array(CHUNK_SIZE);
+    padded.set(body);
+    body = padded;
+  } else {
+    body = body.slice();     // copy: the transport buffer is reused
+  }
+  target[slot] = body;
+  if (isParity) f.parityRx++; else f.dataRx++;
+
+  // Eager recovery: the moment n chunks of any kind are in hand the frame is
+  // solvable, so this adds no latency of its own.
+  if (f.dataRx === f.n) {
+    finishFrame(f, false);
+  } else if (f.dataRx + f.parityRx >= f.n && f.k > 0) {
+    const recovered = DARCFec.decode(f.data, f.parity);
+    if (recovered) {
+      f.data = recovered;
+      f.dataRx = f.n;
+      finishFrame(f, true);
     }
   }
+}
 
-  const frame = _frameChunks.get(frameId);
-  if (!frame || frame.chunks[chunkIdx]) return; // duplicate chunk
-  frame.chunks[chunkIdx] = chunkData.slice(); // copy before buffer is reused
-  frame.received++;
-
-  if (frame.received === frame.total) {
-    _frameChunks.delete(frameId);
-    // Reassemble all chunks into one contiguous Uint8Array
-    const totalLen = frame.chunks.reduce((n, c) => n + c.byteLength, 0);
-    const buf = new Uint8Array(totalLen);
-    let off = 0;
-    for (const c of frame.chunks) { buf.set(c, off); off += c.byteLength; }
-    handleVideoFrame(buf, frame.isKeyframe);
+function reassemble(f) {
+  const total = (f.n - 1) * CHUNK_SIZE + f.lastLen;
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (let i = 0; i < f.n; i++) {
+    const take = (i === f.n - 1) ? f.lastLen : CHUNK_SIZE;
+    buf.set(f.data[i].subarray(0, take), off);
+    off += take;
   }
+  return buf;
+}
+
+function finishFrame(f, viaFec) {
+  if (f.closed) return;
+  f.closed = true;
+  clearTimeout(f.timer);
+  _frames.delete(f.id);
+
+  if (viaFec) stats.framesRecovered++; else stats.framesClean++;
+  if (f.isKeyframe) {
+    stats.keyframesClean++;
+    stats.degraded = false;   // a clean keyframe resets the reference chain
+  }
+  stats.spread.push(f.lastSeen - f.firstSeen);
+  if (stats.spread.length > 300) stats.spread.shift();
+
+  noteRate(0, 0, 1);
+  _lastDecodedId = f.id;
+  // Anything still older than this can never be decoded now.
+  for (const [id, other] of _frames) {
+    if (DARCFec.int16Delta(id, f.id) < 0) closeFrame(other, true);
+  }
+  handleVideoFrame(reassemble(f), f.isKeyframe);
+}
+
+function closeFrame(f, superseded) {
+  if (f.closed) return;
+  f.closed = true;
+  clearTimeout(f.timer);
+  _frames.delete(f.id);
+
+  stats.framesIncomplete++;
+  stats.chunksMissing += (f.n - f.dataRx);
+  if (f.isKeyframe) stats.keyframesLost++;
+  // Mark the picture untrustworthy until the next clean keyframe: a lost delta
+  // frame corrupts every frame that references it, and the operator must not be
+  // shown a smeared image without being told.
+  stats.degraded = true;
+  if (superseded) return;
 }
 
 // ── signal message handler (handshake only in phase 2) ────────────────────
@@ -180,7 +358,30 @@ function handleStreamMessage(msg) {
     case 'ack':
       if (msg.cmd === 'snapshot') showToast('Snapshot saved');
       break;
+    case 'agent-stats':
+      // The pilot cannot see a frame whose chunks were all lost, so its own
+      // loss estimate is biased low. Pairing chunksRx with the agent's
+      // chunks_sent is what makes the number a measurement.
+      stats.agent = msg;
+      break;
+    case 'qos-applied':
+      applyQosAck(msg);
+      break;
   }
+}
+
+function applyQosAck(msg) {
+  if (msg.pilot) {
+    deadlineDelta = msg.pilot.deadlineDelta ?? deadlineDelta;
+    deadlineKey   = msg.pilot.deadlineKey   ?? deadlineKey;
+    onLossPolicy  = msg.pilot.onLoss        ?? onLossPolicy;
+  }
+  activeQos = msg.profile || activeQos;
+  qosPublisher = msg.publisher || 'unknown';
+  if (qosSelect) qosSelect.value = activeQos;
+  showToast(qosPublisher === 'unavailable'
+    ? `QoS ${activeQos} (transport only)`
+    : `QoS ${activeQos}`);
 }
 
 // ── webtransport P2P session ───────────────────────────────────────────────
@@ -343,6 +544,7 @@ async function attachSession(conn) {
   cancelP2PRetry();
   const wasRelay = relayMode;
   relayMode = false;
+  pathLabel = conn.label;
   wt = conn.wt;
 
   // Video datagrams: agent → pilot (unreliable, lowest latency)
@@ -352,6 +554,7 @@ async function attachSession(conn) {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (shouldDrop()) { stats.chunksDropped++; continue; }
         handleVideoChunk(value);
       }
     } catch (e) { console.error('datagram reader error:', e); }
@@ -474,8 +677,100 @@ function takeSnapshot() {
   sendCommand({ type: 'snapshot', ts });
 }
 
+// ── QoS selection ──────────────────────────────────────────────────────────
+let activeQos    = qosProfile;
+let qosPublisher = 'unknown';
+
+function selectQos(name) {
+  if (!QOS_PROFILES.includes(name)) return;
+  qosProfile = name;
+  localStorage.setItem('darc.qos', name);
+  // Prefer the WebTransport stream when it exists; otherwise go via signalling,
+  // which is the only path that reaches the agent in relay mode.
+  if (jsonWriter) {
+    sendCommand({ type: 'qos', profile: name });
+  } else if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'qos', robotId: ROBOT_ID, profile: name }));
+    activeQos = name;
+  }
+}
+
+if (qosSelect) {
+  qosSelect.value = qosProfile;
+  qosSelect.addEventListener('change', () => selectQos(qosSelect.value));
+}
+
+// ── stats panel ────────────────────────────────────────────────────────────
+let statsVisible = localStorage.getItem('darc.stats') === '1';
+
+function colour(value, warn, bad) {
+  return value >= bad ? 'bad' : value >= warn ? 'warn' : 'ok';
+}
+
+function renderStats() {
+  if (statsEl) statsEl.hidden = !statsVisible;
+  canvas.classList.toggle('degraded', stats.degraded);
+  if (!statsVisible || !statsEl) return;
+
+  const r = windowRates();
+  const a = stats.agent;
+  const fecPct = r.kbps ? Math.round((r.kbps - r.kbpsPayload) / r.kbps * 100) : 0;
+
+  // Two loss figures, because they answer different questions. `est` is what the
+  // pilot can see on its own and is biased low — a frame lost in its entirety
+  // leaves no trace. `true` compares against the agent's own send count.
+  const seen = stats.chunksMissing + stats.chunksRx;
+  const est  = seen ? stats.chunksMissing / seen * 100 : 0;
+  const trueLoss = (a && a.chunks_sent)
+    ? Math.max(0, (1 - stats.chunksRx / a.chunks_sent) * 100) : null;
+
+  const path = relayMode ? 'relay (via signal)' : `p2p (${pathLabel})`;
+  const lossCls = colour(trueLoss ?? est, 1, 3);
+  const keyCls  = colour(stats.keyframesLost, 1, 3);
+
+  statsEl.innerHTML =
+    `path   ${path}\n` +
+    `qos    ${activeQos}${qosPublisher === 'unavailable' ? ' (transport only)' : ''}\n` +
+    `video  ${r.kbps} kbps  ${r.fps} fps   fec ${fecPct}%\n` +
+    `loss   <span class="${lossCls}">${trueLoss === null ? '—' : trueLoss.toFixed(1) + '% true'}` +
+      `  ${est.toFixed(1)}% est</span>   spread p50 ${percentile(stats.spread, 0.5).toFixed(0)}ms` +
+      ` p95 ${percentile(stats.spread, 0.95).toFixed(0)}ms\n` +
+    `frames ${stats.framesClean} ok  ${stats.framesRecovered} rec  ` +
+      `${stats.framesIncomplete} lost  ${stats.framesTooLate} late\n` +
+    `key    <span class="${keyCls}">${stats.keyframesClean} ok  ${stats.keyframesLost} lost</span>` +
+      `   decodeQ ${decoder ? decoder.decodeQueueSize : 0}  err ${stats.decodeErrors}\n` +
+    (a ? `agent  ${a.frames_sent} sent  ${a.frames_dropped_backlog} dropped  ` +
+         `${a.frames_skipped_stale} stale  pending ${a.pending_bytes ?? 0}B\n` +
+         `link   cwnd ${a.cwnd ?? '—'}  srtt ${a.srtt_ms ?? '—'}ms\n` : '') +
+    (LOSS_RATE ? `\nINJECTING ${(LOSS_RATE * 100).toFixed(1)}% LOSS (burst ${LOSS_BURST}) — ` +
+                 `${stats.chunksDropped} dropped\n` : '');
+}
+
+setInterval(renderStats, 500);
+
+// Report our counters back to the agent so its log is self-contained for
+// post-hoc analysis, and so the deferred adaptive-bitrate loop has an input.
+setInterval(() => {
+  if (!jsonWriter) return;
+  const r = windowRates();
+  sendCommand({
+    type: 'pilot-stats',
+    chunksRx: stats.chunksRx, chunksMissing: stats.chunksMissing,
+    framesClean: stats.framesClean, framesRecovered: stats.framesRecovered,
+    framesIncomplete: stats.framesIncomplete, keyframesLost: stats.keyframesLost,
+    kbps: r.kbps, fps: r.fps,
+    spreadP95: Math.round(percentile(stats.spread, 0.95)),
+    decodeQ: decoder ? decoder.decodeQueueSize : 0,
+  });
+}, 1000);
+
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); takeSnapshot(); }
+  if (e.code === 'KeyS')  {
+    statsVisible = !statsVisible;
+    localStorage.setItem('darc.stats', statsVisible ? '1' : '0');
+    renderStats();
+  }
 });
 
 // ── signaling (handshake + presence only) ─────────────────────────────────
@@ -485,13 +780,17 @@ function connect() {
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'connect', robotId: ROBOT_ID }));
+    // The profile rides along with connect so the agent has it before the first
+    // frame — and so it arrives even when the session ends up on relay, where
+    // there is no pilot→robot JSON path.
+    ws.send(JSON.stringify({ type: 'connect', robotId: ROBOT_ID, qos: qosProfile }));
     setStatus('Waiting for robot…');
   };
 
   ws.onmessage = (event) => {
     if (event.data instanceof ArrayBuffer) {
       // Binary video chunk forwarded by the signal server in relay mode.
+      if (shouldDrop()) { stats.chunksDropped++; return; }
       handleVideoChunk(new Uint8Array(event.data));
       return;
     }

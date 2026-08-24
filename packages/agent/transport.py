@@ -48,21 +48,58 @@ class _Session:
         self._buf = b''
         self.on_message: Optional[Callable] = None
 
-    def flush_datagrams(self):
-        """Discard QUIC DATAGRAM frames still queued for transmission.
+    def pending_bytes(self) -> int:
+        """
+        Bytes queued inside aioquic but not yet on the wire.
 
-        Called before sending a new video frame so that stale chunks from the
-        previous frame (which haven't left the host yet due to congestion or
-        pacing) don't delay the new one.
+        Note this grows for two different reasons: an exhausted congestion
+        window, and aioquic's pacer merely spacing packets out. So a non-empty
+        queue does not mean congestion — the caller must compare against a byte
+        budget, not against zero.
+
+        Fails open (returns 0, meaning "no backlog") so that a missing private
+        attribute degrades to always-send rather than never-send.
+        """
+        try:
+            return sum(len(d) for d in self._protocol._quic._datagrams_pending)
+        except AttributeError:
+            return 0
+
+    def drop_pending(self):
+        """
+        Discard queued DATAGRAM frames.
+
+        Only ever correct ahead of a keyframe: an IDR makes every queued chunk
+        from the previous GOP irrelevant by definition. Doing this before a
+        delta frame destroys a frame the pilot still needs and throws away
+        uplink already spent on it.
         """
         try:
             self._protocol._quic._datagrams_pending.clear()
         except AttributeError:
             pass
 
-    async def send_datagram(self, data: bytes):
-        self._http.send_datagram(self._session_id, data)
+    async def send_datagram_batch(self, chunks: list[bytes]):
+        """
+        Queue every chunk of one frame, then transmit once.
+
+        Transmitting per chunk means a full packet-build/send pass for each
+        1000-byte datagram — 40+ of them for a keyframe. At this chunk size
+        nothing coalesces into a shared QUIC packet anyway, so batching is a
+        pure CPU and jitter win with no change in what goes on the wire.
+        """
+        for data in chunks:
+            self._http.send_datagram(self._session_id, data)
         self._protocol.transmit()
+
+    def link_stats(self) -> dict:
+        """Congestion window and smoothed RTT, for the telemetry channel."""
+        try:
+            loss = self._protocol._quic._loss
+            return {'cwnd': loss.congestion_window,
+                    'srtt_ms': round(loss._rtt_smoothed * 1000, 1)}
+        except AttributeError:
+            return {}
 
     async def send_json(self, msg: dict):
         if self._stream_id is None:

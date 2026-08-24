@@ -14,6 +14,32 @@
 | Relay → P2P upgrade | ✓ | Retried every 30s while relaying; switches over live when it succeeds |
 | Latency on good path | ✓ | Perceptibly lower than WebRTC; no jitter buffer |
 | Latency on congested/mobile path | ✓ | Agent always sends latest frame; no queue buildup |
+| Quality under motion | ✓ | Bitrate capped; was unbounded CRF at 8–14 Mbps |
+| Independent packet loss | ✓ | 99.3% of frames delivered at 5% chunk loss (71.9% without FEC) |
+| Bursty packet loss | ~ | ~90% delivered at 5%/burst-3; keyframes never lost, so corruption self-heals within one GOP |
+
+### Measured video resilience
+
+`latency` profile (960×540, 1.5 Mbps + parity = 1.9 Mbps total), 30 fps, synthetic
+`testsrc2` motion fixture over the relay path, 10 s per run. `clean` is the share
+that arrived without needing FEC — i.e. what delivery *would* have been without it.
+
+| injected loss | clean | recovered by FEC | delivered | keyframes lost |
+|---|---|---|---|---|
+| 1% independent | 90.7% | 9.3% | **100.0%** | 0 |
+| 5% independent | 71.9% | 27.4% | **99.3%** | 0 |
+| 10% independent | 55.5% | 41.5% | **97.0%** | 0 |
+| 5%, bursts of 2 | 80.3% | 15.1% | 95.3% | 0 |
+| 5%, bursts of 3 | 85.7% | 4.7% | 90.3% | 0 |
+| 5%, bursts of 6+ | 87.7% | 3.3% | ~91% | 0 |
+
+For reference, the pre-fix baseline was 19% of frames arriving whole at 5% loss,
+with every loss smearing for up to 0.5 s.
+
+**Zero keyframes were lost in any run**, including 10% loss and bursts of 10.
+Keyframes are ~18 data chunks with 50% parity (k=9), which survives bursts
+comfortably — so however bad the delta-frame loss, the picture fully resets every
+GOP (1 s) and corruption cannot accumulate.
 
 ---
 
@@ -127,6 +153,8 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 | Pilot → server | `connect` | `robotId` |
 | Pilot → server | `relay-request` | `robotId` (P2P failed, activate relay) |
 | Pilot → server | `probe-request` | `robotId` (retrying P2P from relay — punch again) |
+| Pilot → server | `qos` | `robotId`, `profile` |
+| Server → robot | `qos` | `profile` — forwarded verbatim |
 | Server → pilot | `ready` | `candidates`, `certFingerprint`, `p2pHint` |
 | Server → pilot | `unreachable` | `reason` |
 | Server → pilot | `peer-disconnected` | — |
@@ -145,6 +173,12 @@ relay that is currently carrying video.
 P2P can work at all, derived from NAT classification and whether a port mapping
 succeeded. The pilot turns it into a deadline (10s / 4s / 2s), so a
 provably-hopeless attempt fails fast while a plausible one gets the full window.
+
+`qos` goes through the signal server rather than the WebTransport stream because
+that is the only path that reaches the agent in relay mode, where there is no
+pilot→robot JSON channel at all. The signal server has no opinion about QoS; it
+stores the name on the session (so it can be delivered before the first frame is
+encoded) and forwards it.
 
 **Cloud Run specifics:**
 - `X-Forwarded-For` header used for real client IP (load balancer sets `remoteAddress` to `169.254.169.126`)
@@ -165,6 +199,8 @@ provably-hopeless attempt fails fast while a plausible one gets the full window.
 | `cert.py` | Generate ECDSA P-256 self-signed TLS cert with SAN (IPv4 + IPv6) |
 | `stun.py` | STUN client with retransmission, NAT classification, local address discovery |
 | `portmap.py` | Router port mapping via PCP, NAT-PMP, and UPnP-IGD |
+| `fec.py` | Reed-Solomon over GF(256) + the video chunk wire format |
+| `qos.py` | QoS profile table (DARC's half — transport targets, no resolution) |
 | `transport.py` | aioquic WebTransport server (`WebTransportServer`, `DARCProtocol`, `_Session`) |
 | `peer.py` | `Relay` class: video chunking + sender, sensor relay, command handling |
 | `signaling.py` | `SignalingClient`: WebSocket to darc-signal, relay mode send |
@@ -271,9 +307,27 @@ one because comparing the two answers is what classifies the NAT:
 **Latency guarantee — frame sender design:**
 - PyAV thread writes each decoded frame to a single `_latest_frame` slot (overwrites previous)
 - `_frame_sender` async coroutine wakes on `asyncio.Event`, reads the slot
-- Before sending: calls `flush_datagrams()` which clears aioquic's `_datagrams_pending` list — discards any chunks from the previous frame that haven't been transmitted yet
-- Mid-frame: if `_latest_frame` becomes non-None during the chunk loop, abandons current frame
-- Result: pilot always sees the most recent frame regardless of network speed
+- **Admission control happens before the first chunk is sent.** If the backlog
+  (`pending_bytes()`) exceeds the profile's `drop_threshold_bytes`, a delta frame
+  is dropped whole and nothing is transmitted.
+- **Keyframes are never dropped.** If a keyframe faces a backlog, `drop_pending()`
+  clears the queue and the keyframe goes. This is the only case where discarding
+  is free — an IDR makes every queued chunk from the previous GOP irrelevant.
+- Once a frame is committed, every one of its chunks is sent, in one batch with a
+  single `transmit()` call.
+- Result: the pilot always sees the most recent *complete* frame.
+
+An earlier version instead flushed the datagram queue before every frame and
+abandoned frames mid-chunk-loop. Both emitted partial frames, which is the worst
+available outcome: the bandwidth was already spent, the pilot must discard the
+frame anyway, and because H.264 delta frames reference their predecessors one
+torn frame corrupts every later frame until the next keyframe. **Skipping a frame
+cleanly costs one frame; tearing one costs a GOP.** The threshold is a byte budget
+rather than "queue non-empty" because aioquic's pending list also grows simply
+from the pacer spacing packets out.
+
+Note this bounds *latency*, not bandwidth — the encoder already spent a dropped
+frame's bits. Only the publisher's bitrate cap bounds bandwidth; both are needed.
 
 **Relay fallback:**
 - `signaling.send_binary(data)` sends binary over the agent's WebSocket to the signal server
@@ -290,6 +344,8 @@ one because comparing the two answers is what classifies the NAT:
 --sensor-port        <int>       Sensor UDP input (default: 5002)
 --no-port-mapping                Skip PCP/NAT-PMP/UPnP
 --no-ipv6                        Do not listen on or advertise IPv6
+--qos-profile        <name>      latency | balanced | quality (default: balanced)
+--publisher-control-port <int>   UDP port the video publisher listens on (5003)
 ```
 
 **Dependencies:** `av` (PyAV), `websockets`, `aioquic`, `cryptography`, `ifaddr`
@@ -328,10 +384,24 @@ connect uses — and reports "Upgraded to direct connection". NAT state,
 interfaces, and networks all change under a robot in the field.
 
 **Chunk reassembly (`handleVideoChunk`):**
-- `_frameChunks` Map: `frame_id → {chunks[], received, total, isKeyframe}`
-- Stores each chunk by `chunk_idx`
-- When `received === total`: concatenates all chunks, calls `handleVideoFrame(buf, isKeyframe)`
-- Evicts incomplete frames with `frame_id` more than 30 behind the current one (stale/lost frames)
+- `_frames` Map: `frame_id → {data[], parity[], dataRx, parityRx, …}`
+- **Recovery is eager**: the moment `dataRx + parityRx >= n` the frame is
+  solvable, so FEC adds no latency of its own. `dataRx === n` skips it entirely.
+- Every frame-id comparison goes through `DARCFec.int16Delta()`, a wrap-aware
+  *signed* 16-bit difference. The previous unsigned version had a real bug: one
+  reordered chunk from an older frame created a map entry, and the eviction sweep
+  then computed `(oldId − currentId) & 0xFFFF ≈ 65500 > 30` for the frame being
+  actively assembled and deleted it.
+- Chunks older than the newest seen by more than `MAX_REORDER = 4` are rejected
+  rather than admitted.
+- **Frames are gated into decode order** via `_lastDecodedId`. Without this a
+  late-recovered frame would be fed to the decoder after its successor and
+  corrupt decoder state. Under `optimizeForLatency: true` with no B-frames,
+  decode order equals display order, so a strict monotonic gate is correct.
+- A frame is closed out (counted lost) on whichever comes first: its per-frame
+  close-out timer, or a newer frame decoding. This replaced a 30-frames-behind
+  eviction rule that delayed loss accounting by a full second, which is why loss
+  used to be invisible.
 
 **Video decode:**
 ```javascript
@@ -358,18 +428,47 @@ These simulate the robot camera and sensor system. In production, a real robot's
 
 #### `sim/video-source.sh`
 Captures the Mac webcam and streams H.264 Baseline RTP to `127.0.0.1:5000`.
+Reads `DARC_QOS_PROFILE` (default `balanced`) and maps it to encoder settings —
+see the QoS table above.
 
 ```bash
-ffmpeg \
-  -fflags nobuffer \
-  -f avfoundation -framerate 30 -video_size 1280x720 -i "${DEVICE}" \
+ffmpeg -fflags nobuffer \
+  -f avfoundation -framerate ${FPS} -video_size ${W}x${H} -i "${DEVICE}" \
   -pix_fmt yuv420p \
-  -vcodec libx264 -tune zerolatency -preset ultrafast -profile:v baseline \
-  -g 15 -an -flush_packets 1 \
+  -c:v libx264 -tune zerolatency -preset ${PRESET} -profile:v baseline \
+  -b:v ${KBPS}k -maxrate ${KBPS}k -bufsize ${BUFK}k \
+  -g ${GOP} -keyint_min ${GOP} -bf 0 -x264-params "scenecut=0" \
+  -an -flush_packets 1 -max_delay 0 \
   -f rtp "rtp://127.0.0.1:${PORT}"
 ```
 
-Key flags: `-g 15` (keyframe every 15 frames = 0.5s at 30fps), `-tune zerolatency`, `-profile:v baseline` (required for `avc1.42001f`), `-pix_fmt yuv420p` (Baseline requires 4:2:0).
+**The bitrate cap is the single most important flag here.** Without `-b:v`/
+`-maxrate`/`-bufsize`, libx264 runs in default CRF≈23 constant-*quality* mode:
+measured 7.9–13.7 Mbps at 720p30, unbounded and spiking on motion. No cellular
+uplink sustains that, so motion produced genuine packet loss — the root cause of
+the quality collapse this profile system exists to fix.
+
+`bufsize` = 100 ms × maxrate, and it is a *latency* knob as much as a quality one.
+ffmpeg's default (`bufsize == maxrate`, one second) lets a motion burst emit a
+whole second of extra bits, which the modem queue absorbs as ~1 s of added
+glass-to-glass latency or drops as loss. One frame (33 ms) is too tight — an IDR
+legitimately needs 3–5× an average frame. ~100 ms fits one IDR without allowing a
+deep queue.
+
+Other choices: `-g 30` rather than 15 (an IDR costs ~5× a P-frame, so halving the
+rate returns 15–20% of the budget to P-frames, at a 1 s ceiling on error
+propagation and join latency); `-preset veryfast` for the higher profiles because
+`ultrafast` sets `aq-mode=0` and adaptive quantisation is exactly what keeps dark
+and low-contrast regions readable when bits are scarce; `scenecut=0` so IDR
+placement is strictly periodic, since an unpredictable spike is what we are
+eliminating. Deliberately *not* `nal-hrd=cbr`, which pads to hit the rate exactly
+and spends scarce uplink on filler.
+
+`VIDEO_DEVICE=lavfi` swaps in a synthetic `testsrc2` source: continuous motion, so
+a permanent worst case, and byte-reproducible, so loss and bitrate measurements
+are comparable between runs. It needs `-re` — without it ffmpeg generates frames
+as fast as the CPU allows (measured ~2450 fps / 157 Mbps), which floods the relay
+and makes every measurement meaningless.
 
 #### `sim/sensor-source.py`
 Increments a counter and sends each value as UTF-8 UDP to `127.0.0.1:5002` at 10 Hz.
@@ -380,17 +479,153 @@ Increments a counter and sends each value as UTF-8 UDP to `127.0.0.1:5002` at 10
 
 ### Video chunks (primary format — same for P2P and relay paths)
 
-Each H.264 access unit from PyAV is split into 1000-byte chunks to fit within QUIC DATAGRAM's MTU limit (~1200 bytes after QUIC/H3 framing overhead). Each chunk is sent as one QUIC DATAGRAM (P2P) or one binary WebSocket frame (relay).
+Each H.264 access unit from PyAV is split into 1000-byte chunks, with Reed-Solomon
+parity chunks appended. Each chunk is sent as one QUIC DATAGRAM (P2P) or one
+binary WebSocket frame (relay).
 
 ```
-Byte 0:     flags — 0x80 = keyframe, 0x00 = delta frame
-Bytes 1-2:  frame_id (uint16 big-endian, rolls at 65535)
-Bytes 3-4:  chunk_idx (uint16 big-endian, 0-based)
-Bytes 5-6:  total_chunks (uint16 big-endian)
-Bytes 7+:   H.264 Annex B payload slice (≤ 1000 bytes)
+byte  0     bit 7    keyframe
+            bits 4-6 fec_type (0 = none, 2 = reed-solomon)
+            bits 0-3 format version (currently 1)
+bytes 1-2   frame_id      uint16 BE, rolls at 65535
+bytes 3-4   chunk_idx     uint16 BE — 0..n-1 data, n..n+k-1 parity
+bytes 5-6   total_chunks  uint16 BE = n (DATA chunks only)
+byte  7     fec_count     uint8     = k
+bytes 8-9   last_len      uint16 BE = real length of data chunk n-1
+bytes 10+   payload
 ```
 
-**Why 1000-byte chunks?** QUIC DATAGRAM frames must fit in a single UDP packet. The path MTU is typically 1200–1500 bytes; after QUIC, HTTP/3, and WebTransport framing, roughly 1200 bytes remain for the DATAGRAM payload. A 1000-byte cap is conservative and guarantees delivery on any reasonable path. H.264 keyframes at 720p can be 20–100 KB — without chunking they would be silently dropped by aioquic.
+**Why 1000-byte chunks?** QUIC DATAGRAM frames must fit in a single UDP packet.
+Path MTU is typically 1200–1500 bytes; after QUIC, HTTP/3, and WebTransport
+framing, roughly 1200 bytes remain. 1000 + the 10-byte header is conservative on
+any path. Keyframes are 18–60 KB — without chunking aioquic drops them silently.
+
+**Why `k` is in the header:** the receiver cannot derive the code parameters, and
+therefore cannot reconstruct anything, without it.
+
+**Why `last_len` is in the header:** parity is computed over chunks zero-padded to
+1000 bytes. If the short final chunk is the one reconstructed it comes back
+padded, and there is no other way to recover its true length. Omitting this
+appends up to 999 zero bytes to recovered frames — which decoders sometimes
+tolerate and sometimes do not, i.e. the worst kind of bug.
+
+**The version nibble makes this a hard cutover.** Agent and pilot must be
+deployed together. An unrecognised version is counted (`chunksBadHeader`) and
+dropped rather than misparsed into garbage video.
+
+### Forward error correction
+
+`packages/agent/fec.py` (encode) and `packages/pilot/fec.js` (decode) implement
+Reed-Solomon over GF(256), field polynomial `0x11d`, with a **Cauchy** generator
+matrix `A[i][j] = 1/(i XOR (k+j))`. Cauchy rather than Vandermonde because every
+square submatrix is guaranteed invertible — which is exactly the guarantee "any
+k losses recover" requires. Both sides derive the matrix from `(n, k)`, so the
+construction is part of the wire contract; changing it breaks interop silently,
+which is what `tools/fec-check.js` exists to catch.
+
+**Why this is fast enough in pure Python.** The usual objection is that GF(256)
+in Python costs 100–200 ms per keyframe and needs numpy — which would violate the
+pure-Python-wheels constraint for the ARM port. That objection assumes a per-byte
+inner loop. Doing the scalar multiply with `bytes.translate()` and accumulating
+with big-integer XOR (both C-speed) measures **0.25 ms** to encode a 20 KB
+keyframe at 50% parity and 0.02 ms for a delta frame — 30x faster than the naive
+loop. Browser-side decode is 0.02–0.53 ms against a 33 ms frame budget.
+
+Keyframes carry more parity than delta frames: they are 3–5x larger, so their
+survival odds at a given chunk-loss rate are much worse, and losing one costs a
+whole GOP rather than one frame. Note that `parity_count()` enforces a floor of
+k=1 whenever FEC is enabled, so at the small frame sizes the `latency` profile
+produces (~6 data chunks) the realised overhead for the `quality` profile is
+~14% rather than its nominal 8%.
+
+The agent computes parity over its own transport chunks. It parses no NAL headers
+and is indifferent to the payload being H.264, so this stays inside DARC's "pure
+byte relay, never transcodes" rule.
+
+### QoS profiles
+
+The link constrains *total bytes on the wire*, not video bitrate, so a profile is
+one budget split between pixels, redundancy, and headroom. Before profiles
+existed the split was "unbounded pixels, zero redundancy, zero headroom", which
+is exactly why motion collapsed the stream.
+
+**The boundary matters.** Per SPEC.md, encoder settings belong to the robot's
+video publisher and transport policy belongs to DARC. So a profile is not a
+config object both sides read — it is a request DARC makes and the publisher
+answers. `packages/agent/qos.py` carries no resolution: DARC says "stay under
+1500 kbps with a 100 ms latency budget", and `sim/video-source.sh` maps that onto
+resolution, preset and VBV using its own table, because only the publisher knows
+its sensor. This is the first concrete piece of SPEC.md's open question on a
+codec negotiation API.
+
+| | `latency` | `balanced` | `quality` |
+|---|---|---|---|
+| **publisher half** | | | |
+| resolution / fps | 960×540 / 30 | 1280×720 / 30 | 1280×720 / 30 |
+| bitrate cap | 1500 kbps | 3000 kbps | 6000 kbps |
+| GOP | 30 (1 s) | 30 (1 s) | 60 (2 s) |
+| x264 preset | ultrafast | veryfast | veryfast |
+| VBV window | 100 ms | 100 ms | 200 ms |
+| **DARC half** | | | |
+| FEC delta / keyframe | 25% / 50% | 15% / 30% | 8% / 15% |
+| backlog drop threshold | 1 frame | 2 frames | 3 frames |
+| pilot close-out (delta/key) | 20/40 ms | 30/60 ms | 50/100 ms |
+| on unrecoverable loss | continue | continue | freeze until IDR |
+| **total link budget** | ~1.9 Mbps | ~3.5 Mbps | ~6.6 Mbps |
+
+Note the deliberate inversion: the *latency* profile carries the *most*
+redundancy. It runs a low video rate and spends the headroom on never losing a
+frame; `quality` spends it on pixels and accepts occasional loss.
+
+**FEC costs bandwidth on a bandwidth-limited link.** The overhead and the video
+bitrate must be set together as one budget, never tuned independently. If
+measured loss *rises* with FEC enabled, lower the video bitrate — not the FEC.
+
+DARC's half applies live, at the next frame boundary (changing FEC mid-frame
+would compute parity at a different rate than the header advertises). The
+publisher's half currently requires a restart: `sim/video-source.sh` reads
+`DARC_QOS_PROFILE` at start. So a live switch reports `publisher: "requested"`
+and the pilot shows "(transport only)" rather than implying the camera changed.
+
+### Publisher control interface
+
+The agent sends best-effort JSON over UDP to `127.0.0.1:5003`
+(`--publisher-control-port`). DARC defines the message and the port; it does not
+implement the publisher. Fire-and-forget and never fatal — a robot whose
+publisher ignores this must keep streaming on whatever it was configured with.
+
+```json
+{ "type": "video-config", "profile": "latency",
+  "maxBitrateKbps": 1500, "latencyBudgetMs": 100, "maxGopMs": 1000 }
+```
+
+Also specified, not yet implemented on either side:
+`{"type": "request-keyframe"}`. It is useful today (it would cut
+join-to-first-frame from up to one GOP down to ~1 RTT) and it is the
+prerequisite for intra-refresh — see Known Limitations.
+
+### Telemetry
+
+The agent pushes counters at 1 Hz over the JSON stream:
+
+```json
+{ "type": "agent-stats", "frames_in": …, "frames_sent": …,
+  "frames_dropped_backlog": …, "frames_skipped_stale": …, "keyframes_forced": …,
+  "chunks_sent": …, "parity_sent": …, "bytes_sent": …,
+  "pending_bytes": …, "cwnd": …, "srtt_ms": … }
+```
+
+The pilot replies with `{"type": "pilot-stats", …}`. Pairing the two is the point:
+the pilot cannot see a frame whose chunks were *all* lost, so its own loss figure
+is biased low. `chunksRx` against the agent's `chunks_sent` turns an estimate into
+a measurement, and the HUD shows both (`true` and `est`).
+
+Press **S** in the pilot to toggle the stats panel. A red border around the canvas
+means unrecoverable loss has corrupted the reference chain and what is on screen
+cannot be trusted until the next clean keyframe — an operator must never be shown
+a smeared or frozen picture without being told.
+
+Neither stats direction works in relay mode (no pilot↔robot JSON path there).
 
 ### Sensor data (robot → pilot, JSON)
 ```json
@@ -428,14 +663,21 @@ darc/
 │   │   ├── portmap.py     # PCP / NAT-PMP / UPnP-IGD router port mapping
 │   │   ├── transport.py   # aioquic WebTransport server on pre-bound sockets
 │   │   ├── peer.py        # Relay class: video chunking, sensor, commands
+│   │   ├── fec.py         # Reed-Solomon GF(256) + chunk wire format
+│   │   ├── qos.py         # QoS profiles (DARC half)
 │   │   ├── signaling.py   # SignalingClient
 │   │   └── requirements.txt  # av, websockets, aioquic, cryptography, ifaddr
 │   └── pilot/             # darc-pilot (HTML/JS, served by darc-signal)
 │       ├── index.html
+│       ├── fec.js         # Reed-Solomon decode + header parse (loads first)
 │       └── pilot.js
 ├── sim/                   # Robot simulation — NOT part of DARC
 │   ├── video-source.sh    # FFmpeg webcam → RTP H.264 UDP :5000
 │   └── sensor-source.py   # Counter → UDP :5002 at 10 Hz
+├── tools/
+│   ├── setup-machine.sh   # Dev machine bootstrap
+│   ├── fec-vectors.py     # Emit FEC interop vectors (agent side)
+│   └── fec-check.js       # Replay them through the pilot decoder
 ├── robot.sh               # Starts sensor-sim + video-sim + agent (robot Mac)
 ├── CLAUDE.md
 ├── SPEC.md
@@ -470,6 +712,21 @@ On the WebSocket relay path, the TCP layer can buffer chunks if the signal serve
 ### Commands not forwarded in relay mode
 The pilot's bidirectional JSON command stream is a WebTransport stream; it doesn't exist in relay mode. Snapshot (Space bar) silently does nothing. Sensor data still flows. Fixing this requires routing commands via the signaling WebSocket JSON path (signal server relays JSON pilot→robot and robot→pilot).
 
+### Bursty loss defeats FEC on small delta frames
+The `latency` profile's delta frames are only ~6 data chunks, so 25% parity gives
+k=2 — and a burst of 3 consecutive losses exceeds it. That is why delivery falls
+from 99.3% (independent loss) to ~90% (bursts of 3+) at the same 5% mean rate. The
+frames are small relative to the burst length, which is the flip side of the
+resolution choice that made them survive individual losses so well.
+
+Not fixed, and the options all cost something: raising delta parity to k=3 needs
+~50% overhead; interleaving parity across consecutive frames would cover bursts
+but adds a frame of latency, defeating the point. For now this is bounded rather
+than solved — keyframes always survive, so the worst case is a smeared second,
+never accumulating corruption. Whether it matters depends on whether real cellular
+loss is bursty, which the `?burst=` control exists to measure and which has not
+yet been characterised on a real 5G link.
+
 ### Symmetric NAT and port-restricted NAT cannot do P2P
 Architectural, not a gap — see the traversal table above. Both need something
 the browser cannot provide (its own ephemeral source port) or something the NAT
@@ -502,12 +759,14 @@ Session state is in-memory on the single Cloud Run instance. The signal server t
 ## Next Steps
 
 ### Immediate (prototype improvements)
-1. **Relay-mode commands** — route JSON commands via signaling WebSocket in relay mode (signal server relays pilot→robot JSON in both directions, not just binary)
-2. **Latency measurement** — capture wall-clock timestamp in the frame chunk header; display end-to-end latency in the pilot UI
-3. **Relay status in UI** — currently shows "Waiting for video… (relay)" before video starts, then just "Connected" — should persistently indicate relay mode, and surface which candidate label won
-4. **Port mapping renewal** — mappings are requested with a 3600s lease but never renewed, so a session running longer than an hour can lose its `portmap` candidate. Renew at half the granted lifetime, and release on shutdown.
-5. **Re-run discovery on network change** — candidates are gathered once at startup. A robot that changes interface (WiFi → cellular) keeps advertising stale ones until restarted.
-6. **Port forwarding instructions** — when relay activates and no port mapping was available, tell the user which port to forward manually
+1. **Characterise real cellular loss** — run the `?burst=` control on the 5G hotspot. Whether loss is bursty or independent decides how much the point above actually costs, and whether delta parity should rise.
+2. **Relay-mode commands and telemetry** — route JSON both ways via the signalling WebSocket in relay mode. Currently snapshot silently no-ops and neither stats direction works there.
+3. **Keyframe on request** — `{"type":"request-keyframe"}` is specified but implemented on neither side. Worth doing on its own merits (join-to-first-frame drops from a GOP to ~1 RTT) and it is the prerequisite for intra-refresh.
+4. **Live publisher reconfiguration** — `sim/video-source.sh` reads `DARC_QOS_PROFILE` once at start, so the encoder half of a profile switch needs a restart. A supervisor listening on the control port would close this; note that a real camera node changes bitrate live through its encoder API, so the restart hiccup is a simulation artefact and must not become a claim about DARC.
+5. **Adaptive bitrate** — all the inputs now exist (`cwnd`/`srtt`, true loss, `frames_dropped_backlog`). This is the real answer to a hotspot whose capacity varies 5× minute to minute, and it turns a profile from a fixed setting into a ceiling the link finds its own level under.
+6. **Latency measurement** — a send timestamp in the chunk header gives relative jitter and intra-frame spread immediately. True glass-to-glass needs clock sync between the two Macs, which is separate work.
+7. **Port mapping renewal** — mappings are requested with a 3600s lease but never renewed, so a session over an hour can lose its `portmap` candidate.
+8. **Re-run discovery on network change** — candidates are gathered once at startup, so a robot switching WiFi → cellular advertises stale ones until restarted.
 
 ### Production path
 1. **Port agent to C with MsQuic** — Python/aioquic is prototype-quality; MsQuic handles QUIC on ARM Linux embedded targets
