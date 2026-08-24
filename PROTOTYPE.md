@@ -688,10 +688,36 @@ darc/
 
 ```bash
 ./robot.sh [robot-id]
-# Defaults: robot-id = mac-robot-01, signal = wss://darc-signal-qjsonun6gq-ew.a.run.app
+
+# Defaults: robot-id = mac-robot-01, profile = balanced, webcam input,
+#           signal = wss://darc-signal-qjsonun6gq-ew.a.run.app
+
+DARC_QOS_PROFILE=latency ./robot.sh          # ultra-low-latency profile
+VIDEO_DEVICE=lavfi ./robot.sh                # synthetic motion fixture, no webcam
+SIGNAL_URL=ws://localhost:8080 ./robot.sh    # against a local signal server
 ```
 
-The script kills any stale processes, then starts sensor-sim, video-sim, and agent.
+The script kills any stale processes, then starts sensor-sim, video-sim, and
+agent. `DARC_QOS_PROFILE` deliberately drives *both* halves — the publisher reads
+it directly and it is passed to the agent as `--qos-profile` — because FEC
+overhead and video bitrate are one budget and must not drift apart.
+
+### Testing loss resilience without a cellular link
+
+Append to the pilot URL:
+
+```
+&loss=0.05          drop 5% of chunks at the transport read
+&loss=0.05&burst=3  same mean rate, but in bursts of 3 consecutive chunks
+```
+
+Injection happens before any parsing, so the stats counters see exactly what real
+loss looks like, and the seed is fixed so runs are comparable. A banner shows
+whenever it is active. `burst` is the control that distinguishes independent from
+bursty loss — the two behave very differently (see the resilience table above).
+
+This exercises reassembly, FEC recovery, decode ordering and telemetry. It does
+*not* exercise congestion control or queueing; for that use `dnctl`/`pf` dummynet.
 
 ### Deploying the signal server
 
