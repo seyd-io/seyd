@@ -30,7 +30,10 @@ trap cleanup EXIT INT TERM
 start() {
   local label="$1"; shift
   printf "  ▶ %-20s" "$label"
-  "$@" > >(sed "s/^/  [${label}] /") 2>&1 &
+  # Read loop rather than `sed`, which block-buffers when not writing to a
+  # terminal and silently swallows subprocess output when this script is piped
+  # to a file. See the same note in robot.sh.
+  "$@" > >(while IFS= read -r line; do printf '  [%s] %s\n' "$label" "$line"; done) 2>&1 &
   local pid=$!
   PIDS+=("$pid")
   echo "(pid $pid)"

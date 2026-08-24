@@ -49,10 +49,42 @@ echo "  preset    ${PRESET}"
 echo ""
 
 # ── input ────────────────────────────────────────────────────────────────────
-# VIDEO_DEVICE=lavfi gives a synthetic, continuously-moving source. It is the
-# permanent worst case for a motion-sensitive encoder and, unlike a webcam, it is
-# byte-reproducible — which is what makes loss and bitrate measurements
-# comparable between runs.
+# Capture resolution and encode resolution are separate concerns. A camera only
+# offers a handful of discrete capture modes, and the profile's target is rarely
+# one of them — 960x540 is not a mode any Mac webcam supports, for instance.
+# Asking AVFoundation for an unsupported size does not fall back, it refuses to
+# open the device at all: no camera light, no frames, and the agent just reports
+# an RTP read timeout with nothing to explain it. So capture at a real mode and
+# scale to the target, which is also what a real robot camera pipeline does.
+detect_capture_mode() {
+  # Requesting an impossible size makes ffmpeg print the device's actual mode
+  # list. There is no cleaner way to enumerate them.
+  local modes
+  modes=$(ffmpeg -hide_banner -f avfoundation -video_size 1x1 -i "${DEVICE}" \
+            -t 0 -f null - 2>&1 \
+          | sed -n 's/^.*[[:space:]]\([0-9]\{2,\}x[0-9]\{2,\}\)@.*$/\1/p' | sort -u)
+  [[ -z "$modes" ]] && return 1
+
+  # Smallest mode that still covers the target, so we scale down and never up.
+  local best="" best_px=0 mw mh px
+  while read -r m; do
+    mw=${m%x*}; mh=${m#*x}
+    (( mw < W || mh < H )) && continue
+    px=$(( mw * mh ))
+    if [[ -z "$best" ]] || (( px < best_px )); then best=$m; best_px=$px; fi
+  done <<< "$modes"
+
+  # Nothing large enough — take the biggest on offer and accept the upscale.
+  if [[ -z "$best" ]]; then
+    while read -r m; do
+      mw=${m%x*}; mh=${m#*x}; px=$(( mw * mh ))
+      if (( px > best_px )); then best=$m; best_px=$px; fi
+    done <<< "$modes"
+  fi
+  echo "$best"
+}
+
+VIDEO_FILTER=()
 if [[ "$DEVICE" == "lavfi" ]]; then
   echo "Input: synthetic testsrc2 (reproducible motion fixture)"
   # -re is essential here and only here. A webcam is paced by hardware, but a
@@ -61,12 +93,19 @@ if [[ "$DEVICE" == "lavfi" ]]; then
   # loss number meaningless.
   INPUT_ARGS=(-re -f lavfi -i "testsrc2=size=${W}x${H}:rate=${FPS}")
 else
-  echo "Available AVFoundation video devices:"
-  ffmpeg -f avfoundation -list_devices true -i "" 2>&1 \
-    | grep -A 40 "AVFoundation video devices" | grep -E "^\[|video" || true
-  echo ""
-  echo "Input: webcam device [${DEVICE}] (override with VIDEO_DEVICE=1, or =lavfi for synthetic)"
-  INPUT_ARGS=(-f avfoundation -framerate "${FPS}" -video_size "${W}x${H}" -i "${DEVICE}")
+  CAPTURE="${CAPTURE_SIZE:-$(detect_capture_mode || true)}"
+  if [[ -z "$CAPTURE" ]]; then
+    CAPTURE="1280x720"
+    echo "Could not enumerate camera modes — falling back to ${CAPTURE}."
+    echo "Override with CAPTURE_SIZE=WxH if the camera rejects it."
+  fi
+  echo "Input: webcam device [${DEVICE}], capturing ${CAPTURE}"
+  echo "       (VIDEO_DEVICE=1 for another camera, =lavfi for synthetic)"
+  INPUT_ARGS=(-f avfoundation -framerate "${FPS}" -video_size "${CAPTURE}" -i "${DEVICE}")
+  if [[ "$CAPTURE" != "${W}x${H}" ]]; then
+    echo "       scaling ${CAPTURE} → ${W}x${H} for the ${PROFILE} profile"
+    VIDEO_FILTER=(-vf "scale=${W}:${H}")
+  fi
 fi
 
 echo "Streaming → RTP H.264 → UDP 127.0.0.1:${PORT}"
@@ -84,6 +123,7 @@ echo ""
 exec ffmpeg \
   -fflags nobuffer \
   "${INPUT_ARGS[@]}" \
+  "${VIDEO_FILTER[@]}" \
   -pix_fmt yuv420p \
   -c:v libx264 \
   -tune zerolatency \

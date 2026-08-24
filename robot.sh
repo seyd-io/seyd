@@ -33,7 +33,11 @@ trap cleanup EXIT INT TERM
 start() {
   local label="$1"; shift
   printf "  ▶ %-20s" "$label"
-  "$@" > >(sed "s/^/  [${label}] /") 2>&1 &
+  # A read loop rather than `sed`: sed block-buffers when its output is not a
+  # terminal, so piping this script to a file silently swallowed subprocess
+  # output — including the ffmpeg error explaining why the camera never opened.
+  # Process substitution keeps $! pointing at the command, not the filter.
+  "$@" > >(while IFS= read -r line; do printf '  [%s] %s\n' "$label" "$line"; done) 2>&1 &
   local pid=$!
   PIDS+=("$pid")
   echo "(pid $pid)"

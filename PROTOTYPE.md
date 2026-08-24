@@ -464,6 +464,16 @@ placement is strictly periodic, since an unpredictable spike is what we are
 eliminating. Deliberately *not* `nal-hrd=cbr`, which pads to hit the rate exactly
 and spends scarce uplink on filler.
 
+**Capture resolution is not encode resolution.** A camera offers only a handful
+of discrete capture modes and the profile target is rarely one of them — no Mac
+webcam supports the `latency` profile's 960×540, for example. AVFoundation does
+not fall back on an unsupported size; it refuses to open the device entirely, so
+the symptom is no camera light, no frames, and an unexplained RTP read timeout in
+the agent. The script therefore enumerates the device's real modes (by requesting
+a deliberately impossible size, the only way ffmpeg will list them), picks the
+smallest mode that covers the target, and scales down with `-vf scale`. Override
+with `CAPTURE_SIZE=WxH`; it falls back to 1280×720 if enumeration fails.
+
 `VIDEO_DEVICE=lavfi` swaps in a synthetic `testsrc2` source: continuous motion, so
 a permanent worst case, and byte-reproducible, so loss and bitrate measurements
 are comparable between runs. It needs `-re` — without it ffmpeg generates frames
