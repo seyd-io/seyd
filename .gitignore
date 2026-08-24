@@ -12,6 +12,10 @@ venv/
 node_modules/
 npm-debug.log*
 
+# Build artifact: deploy.sh copies packages/pilot/ here so the image can serve
+# it, and removes it on exit. Ignored in case that trap doesn't fire.
+packages/signal/pilot/
+
 # TLS certs generated at runtime (packages/agent/cert.py)
 *.pem
 *.key
