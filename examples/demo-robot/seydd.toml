@@ -3,7 +3,7 @@
 # which consumes the generic UDP interfaces declared here.
 [agent]
 robot_id        = "seyd-demo"
-signal_url      = "ws://localhost:8080/ws"
+signal_url      = "wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws"
 credential_path = "examples/demo-robot/.robot.key"
 qos_profile     = "balanced"
 max_sessions    = 4

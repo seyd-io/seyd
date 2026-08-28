@@ -34,7 +34,8 @@ def udp_collector(port, out):
 
 async def run(args):
     collected = {}
-    threading.Thread(target=udp_collector, args=(args.command_port, collected), daemon=True).start()
+    if not args.camera_ip:
+        threading.Thread(target=udp_collector, args=(args.command_port, collected), daemon=True).start()
     profile = tempfile.mkdtemp(prefix='seyd-smoke-')
     chrome = subprocess.Popen([smoke.CHROME, '--headless=new', '--remote-debugging-port=0', f'--user-data-dir={profile}',
         '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,800', 'about:blank'],
@@ -75,19 +76,26 @@ async def run(args):
         check(fd2 > fd1 > 0, f'frames decoding: {fd1} -> {fd2} (path={st2.get("path")}, fps={st2.get("fps")}, kbps={st2.get("kbps")}, lossTrue={st2.get("lossTrue")}, g2g p50={st2.get("g2gP50")})')
         size = await cdp.eval("document.getElementById('video').canvas?.width + 'x' + document.getElementById('video').canvas?.height")
         print('  canvas', size)
-        sensor = await cdp.eval("document.getElementById('sensor')?.textContent")
-        check(sensor and 'telemetry' in sensor, f'sensor text = {sensor!r}')
+        if not args.no_sensor:
+            sensor = await cdp.eval("document.getElementById('sensor')?.textContent")
+            check(sensor and 'telemetry' in sensor, f'sensor text = {sensor!r}')
         role = await cdp.eval("document.getElementById('video').session?.role")
         has_ptz = await cdp.eval("document.getElementById('video').session?.hasCommandChannel('ptz')")
         check(role == 'driver' and has_ptz, f'role={role!r} ptz channel={has_ptz}')
         before = len(collected.get('msgs', []))
+        az0 = smoke.camera_azimuth(args.camera_ip, os.getenv('CAMERA_USER', 'admin'), os.getenv('CAMERA_PASSWORD', '')) if args.camera_ip else None
         await cdp.call('Input.dispatchKeyEvent', type='keyDown', key='ArrowRight', code='ArrowRight', windowsVirtualKeyCode=39)
-        await cdp.pump(0.6)
+        await cdp.pump(1.0)
         await cdp.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowRight', code='ArrowRight', windowsVirtualKeyCode=39)
-        await cdp.pump(0.5)
-        msgs = collected.get('msgs', [])[before:]
-        pans = [json.loads(m).get('pan') for m in msgs if m.startswith('{')]
-        check(any(p and p > 0 for p in pans) and pans and pans[-1] == 0, f'ptz on udp:{args.command_port}: {len(msgs)} msgs, pans={pans[:6]}..{pans[-1:] if pans else []}')
+        await cdp.pump(1.5)
+        if args.camera_ip:
+            az1 = smoke.camera_azimuth(args.camera_ip, os.getenv('CAMERA_USER', 'admin'), os.getenv('CAMERA_PASSWORD', ''))
+            moved = az0 is not None and az1 is not None and az0 != az1
+            check(moved, f'camera azimuth moved on ArrowRight: {az0} -> {az1}')
+        else:
+            msgs = collected.get('msgs', [])[before:]
+            pans = [json.loads(m).get('pan') for m in msgs if m.startswith('{')]
+            check(any(p and p > 0 for p in pans) and pans and pans[-1] == 0, f'ptz on udp:{args.command_port}: {len(msgs)} msgs, pans={pans[:6]}..{pans[-1:] if pans else []}')
         exceptions = [e for e in cdp.events if e['method'] == 'Runtime.exceptionThrown']
         check(not exceptions, f'no uncaught exceptions ({len(exceptions)})')
         for e in exceptions[:3]: print('   ', e['params']['exceptionDetails'].get('exception', {}).get('description', '')[:300])
@@ -105,6 +113,8 @@ def main():
     ap.add_argument('--command-port', type=int, default=5004)
     ap.add_argument('--timeout', type=float, default=15)
     ap.add_argument('--query', default='', help='extra page query, e.g. loss=0.05&burst=3')
+    ap.add_argument('--no-sensor', action='store_true', help='robot has no sensor channel')
+    ap.add_argument('--camera-ip', default=None, help='verify PTZ by reading this Hikvision camera\'s azimuth (CAMERA_USER/PASSWORD env)')
     sys.exit(asyncio.run(run(ap.parse_args())))
 
 

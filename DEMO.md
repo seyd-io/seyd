@@ -149,9 +149,14 @@ cost a reboot and buy nothing on a fixed demo scene.
 ## Running it on the Seyd stack (current)
 
 ```bash
-examples/demo-robot/run.sh                                  # seydd + Hikvision bridge, signal from seydd.toml
-SIGNAL_URL=ws://localhost:8080/ws examples/demo-robot/run.sh  # against a local cloud/api
+./demo-seyd.sh                                   # against the deployed cloud (default URL in the script)
+SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local cloud/api
+CAMERA_IP=192.168.86.237 DARC_QOS_PROFILE=latency ./demo-seyd.sh
 ```
+
+`demo-seyd.sh` preflights the camera over ISAPI (one clear line instead of a
+daemon retrying forever), derives a `seydd.toml` from
+`examples/demo-robot/seydd.toml`, and starts `seydd` plus the bridge.
 
 `seydd` (generic daemon, `examples/demo-robot/seydd.toml`) pulls the camera's
 RTSP stream and forwards `ptz` command messages to `udp://127.0.0.1:5004` and

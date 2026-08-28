@@ -158,7 +158,8 @@ VIDEO_DEVICE=lavfi DARC_QOS_PROFILE=latency ./sim/video-source.sh & python3 sim/
 packages/agent/.venv/bin/python3 tools/seyd-smoke.py --robot <robot_id> [--query loss=0.05]
 ```
 Then open `http://localhost:8080/?robot=<robot_id>&signal=ws://localhost:8080/ws`
-in Chrome. The real camera: `examples/demo-robot/run.sh` (DEMO.md).
+in Chrome. The real camera: `./demo-seyd.sh` (DEMO.md); verify with
+`tools/seyd-smoke.py --robot seyd-demo --no-sensor --camera-ip <ip>`.
 
 Harnesses for the legacy stack (`tools/pilot-smoke.py`, `demo.sh`, `robot.sh`)
 are documented in PROTOTYPE.md and DEMO.md.

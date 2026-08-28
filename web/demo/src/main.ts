@@ -5,7 +5,7 @@ import { PtzController } from './ptz.js';
 
 const params = new URLSearchParams(location.search);
 const ROBOT_ID = params.get('robot') || 'seyd-demo';
-const SIGNAL_URL = params.get('signal') || (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'ws://localhost:8080/ws' : 'wss://signal.seyd.io/ws');
+const SIGNAL_URL = params.get('signal') || (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'ws://localhost:8080/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
 const QOS_PROFILES = ['latency', 'balanced', 'quality'];
 let qos = params.get('qos') || localStorage.getItem('seyd.qos') || 'balanced';
 if (!QOS_PROFILES.includes(qos)) qos = 'balanced';
