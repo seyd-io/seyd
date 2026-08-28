@@ -191,6 +191,17 @@ Jetson/RPi builds, netem CI, and the legacy deletion (pending a run against
 the real camera). The repository directory/remote rename and DNS are owner
 actions still pending.
 
+The signal server is deployed: `https://seyd-signal-flj7s44j4a-ew.a.run.app`
+(project `seydio`, `europe-west1`, dev-mode auth), serving the demo page at `/`.
+`./demo-seyd.sh` starts the camera robot against it; verified with
+`tools/seyd-smoke.py` on the real Hikvision camera (25 fps 1280×720, PTZ moves
+the camera). **Finding:** from a public HTTPS origin Chrome blocks the `host`
+(private-IP) candidate with `ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS`
+unless the user grants the Local Network Access permission prompt, so a
+same-LAN pilot falls through to the `srflx` hairpin (12 ms instead of <1 ms
+g2g). Headed browsers show the prompt; `<seyd-connect-error>`/the HUD should
+explain it (add to §2.6 classes) — pending.
+
 ### Milestone A — the new stack runs the demo
 0. **Rename.** Repo → `seyd`; `CLAUDE.md`/`SPEC.md`/`DEMO.md` rewritten under the Seyd name (product decisions above folded in); new GCP project (`europe-west1`); DNS for `seyd.io`, `seydio.com` (redirect), `signal.`/`console.`/`demo.`/`docs.`/`wt-probe.` subdomains; npm scope `@seyd`, PyPI name `seyd`, crate prefix reserved. Legacy Python/relay code untouched.
 1. ADRs: 0001 wire v2, 0002 quinn, 0003 MoQ position, 0004 C ABI. Workspace skeleton (Cargo + pnpm), CI (`rust.yml`, `js.yml`).

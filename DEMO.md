@@ -154,6 +154,12 @@ SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local cloud/api
 CAMERA_IP=192.168.86.237 DARC_QOS_PROFILE=latency ./demo-seyd.sh
 ```
 
+The deployed pilot page is
+`https://seyd-signal-flj7s44j4a-ew.a.run.app/?robot=seyd-demo`. On the robot's
+own LAN, Chrome will ask for "local network access" before it can use the
+direct `host` candidate; denying it still works via the router hairpin
+(`srflx`), just with ~12 ms more latency.
+
 `demo-seyd.sh` preflights the camera over ISAPI (one clear line instead of a
 daemon retrying forever), derives a `seydd.toml` from
 `examples/demo-robot/seydd.toml`, and starts `seydd` plus the bridge.
