@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 
 import av
@@ -11,8 +12,10 @@ import qos
 
 log = logging.getLogger(__name__)
 
-# Assumed source framerate, used only to convert the profile's backlog threshold
+# Default source framerate, used only to convert the profile's backlog threshold
 # from frame-times into bytes. Being wrong here just scales the drop threshold.
+# Overridable per source because an IP camera is often not 30 fps — the demo
+# camera's sensor is PAL and caps at 25.
 _ASSUMED_FPS = 30
 
 # SDP descriptor for the local RTP video source.
@@ -27,6 +30,16 @@ a=rtpmap:96 H264/90000
 a=fmtp:96 packetization-mode=1
 a=framerate:30
 """
+
+# rtsp://user:pass@host/path — the credentials sit in the URL, so anything that
+# might carry one to a log has to go through here first. PyAV/libavformat puts
+# the full URL into its exception messages, which is the non-obvious leak: the
+# password ends up in the error path even when the happy path is careful.
+_CREDS_IN_URL = re.compile(r'(?<=://)[^/@\s]+:[^/@\s]+(?=@)')
+
+
+def _redact(text) -> str:
+    return _CREDS_IN_URL.sub('***:***', str(text))
 
 
 class _SensorProtocol(asyncio.DatagramProtocol):
@@ -65,10 +78,17 @@ class Relay:
     """
 
     def __init__(self, video_port: int, sensor_port: int,
-                 profile: qos.QoSProfile | None = None):
+                 profile: qos.QoSProfile | None = None,
+                 video_url: str | None = None,
+                 fps: int = _ASSUMED_FPS):
         self.video_port  = video_port
         self.sensor_port = sensor_port
         self.profile     = profile or qos.get(None)
+        # When set, video is pulled from this URL (RTSP from an IP camera)
+        # instead of from a local RTP/UDP socket. Everything downstream of
+        # container.demux() is identical — see _blocking_video_relay.
+        self.video_url   = video_url
+        self.fps         = fps or _ASSUMED_FPS
 
         # Set by agent.py when a pilot connects / disconnects.
         self.send_batch    = None  # async (chunks: list[bytes]) -> None
@@ -77,6 +97,9 @@ class Relay:
         self.drop_pending  = None  # sync  () -> None  (None on the relay path)
         self.link_stats    = None  # sync  () -> dict
         self.on_qos        = None  # async (profile: str) -> dict  (ack)
+        self.on_ptz        = None  # sync  (pan, tilt, zoom) -> None
+        self.on_ptz_home   = None  # async () -> bool
+        self.on_hello      = None  # async () -> None  (pilot announced itself)
 
         self._sensor_transport = None
         self._video_task       = None
@@ -125,11 +148,23 @@ class Relay:
         self._stats_task  = asyncio.ensure_future(self._stats_reporter())
         await self._start_sensor_relay()
         self._video_task = asyncio.ensure_future(self._video_relay_loop())
-        log.info('relay started (video :%d, sensor :%d, profile %s)',
-                 self.video_port, self.sensor_port, self.profile.name)
+        log.info('relay started (video %s, sensor :%d, profile %s, %d fps)',
+                 _redact(self.video_url) if self.video_url else f':{self.video_port}',
+                 self.sensor_port, self.profile.name, self.fps)
 
     async def handle_message(self, msg: dict):
         t = msg.get('type', 'unknown')
+        if t == 'hello':
+            # The pilot's first write on the bidi stream, and the reason this
+            # message exists at all. On the P2P path the agent learns the JSON
+            # stream's id only when data first arrives on it, so anything it
+            # tries to send between session-accept and that first write is
+            # dropped on the floor by transport.send_json. An unprompted
+            # announcement at connect time is exactly that case. Having the
+            # pilot speak first turns it into a reply, which is always safe.
+            if self.on_hello:
+                await self.on_hello()
+            return
         if t == 'pilot-stats':
             self.last_pilot_stats = msg
             return
@@ -137,6 +172,21 @@ class Relay:
             ack = await self.on_qos(msg.get('profile'))
             if self.send_json and ack:
                 await self.send_json(ack)
+            return
+        if t == 'ptz':
+            # Deliberately unacknowledged. These arrive many per second while a
+            # key is held, and an ack per command would put a round trip's worth
+            # of chatter on the same path that is carrying video, to tell the
+            # operator something the moving picture already tells them.
+            if self.on_ptz:
+                self.on_ptz(msg.get('pan', 0), msg.get('tilt', 0), msg.get('zoom', 0))
+            return
+        if t == 'ptz-home':
+            if self.on_ptz_home:
+                ok = await self.on_ptz_home()
+                if self.send_json:
+                    await self.send_json({'type': 'ack', 'cmd': 'ptz-home',
+                                          'ok': bool(ok), 'ts': msg.get('ts', '')})
             return
         ts = msg.get('ts', '')
         log.info('[cmd] type=%s ts=%s', t, ts)
@@ -194,49 +244,95 @@ class Relay:
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                log.error('video relay error: %s — retrying in %ds', e, backoff)
+                log.error('video relay error: %s — retrying in %ds', _redact(e), backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
-    def _blocking_video_relay(self, loop):
+    def _open_video(self):
         """
-        Blocking: demux H.264 from RTP via PyAV. Each complete access unit is
-        written to _latest_frame, overwriting any unprocessed frame. The asyncio
-        _frame_sender picks up the newest frame and sends it, skipping any frames
-        produced while it was busy — no queue buildup is possible.
+        Open the video source and return the PyAV container.
 
-        PyAV's H.264 RTP demuxer assembles fragmented NAL units (FU-A) and
-        outputs complete access units in Annex B format (start codes included).
-        Keyframe packets include SPS + PPS + IDR NAL units in sequence.
+        Two sources, one downstream path. A local RTP/UDP socket needs an SDP
+        descriptor written to a temp file because there is no in-band signalling
+        to describe the stream; an RTSP camera describes itself, so the URL is
+        enough. Either way what comes out of demux() is H.264 access units in
+        Annex B, which is the only thing the rest of this class knows about.
         """
+        if self.video_url:
+            container = av.open(
+                self.video_url,
+                options={
+                    # TCP, not UDP. An IP camera's RTP/UDP has no FEC of its own
+                    # and its losses would arrive as corrupt access units that
+                    # DARC would then faithfully chunk, protect, and relay —
+                    # spending parity on already-broken frames. The camera link
+                    # is a short, fast LAN hop where TCP's retransmit costs
+                    # microseconds; the lossy path worth protecting is the one
+                    # after the agent, not before it.
+                    'rtsp_transport': 'tcp',
+                    'rtsp_flags':     'prefer_tcp',
+                    'fflags':         'nobuffer',
+                    'flags':          'low_delay',
+                    'max_delay':      '0',
+                    'reorder_queue_size': '0',
+                    # Keep probing short: every millisecond here is added to
+                    # startup before the first frame reaches the operator.
+                    'analyzeduration': '500000',
+                    'probesize':       '500000',
+                    'stimeout':        '5000000',   # 5s, in microseconds
+                },
+            )
+            log.info('video relay open on %s', _redact(self.video_url))
+            return container
+
         sdp = _VIDEO_SDP_TEMPLATE.format(port=self.video_port)
         tmp = tempfile.NamedTemporaryFile(suffix='.sdp', mode='w', delete=False)
         tmp.write(sdp)
         tmp.close()
         self._sdp_tmp = tmp.name
 
+        container = av.open(
+            self._sdp_tmp,
+            format='sdp',
+            options={
+                'protocol_whitelist': 'file,crypto,data,rtp,udp',
+                'fflags': 'nobuffer',
+                'flags': 'low_delay',
+                'max_delay': '0',
+                'reorder_queue_size': '0',
+                'analyzeduration': '1000000',
+                'probesize': '1000000',
+                # A keyframe is 20+ back-to-back RTP packets. The default UDP
+                # receive buffer can overflow on that burst even over
+                # loopback, which looks identical to network loss. Verify with
+                # `netstat -sp udp | grep "full socket buffers"` rather than
+                # trusting that this option reaches the udp protocol.
+                'buffer_size': '4194304',
+            },
+        )
+        log.info('video relay open on UDP :%d', self.video_port)
+        return container
+
+    def _blocking_video_relay(self, loop):
+        """
+        Blocking: demux H.264 from the video source via PyAV. Each complete
+        access unit is written to _latest_frame, overwriting any unprocessed
+        frame. The asyncio _frame_sender picks up the newest frame and sends it,
+        skipping any frames produced while it was busy — no queue buildup is
+        possible.
+
+        PyAV's H.264 depacketiser assembles fragmented NAL units (FU-A) and
+        outputs complete access units in Annex B format (start codes included).
+        Keyframe packets include SPS + PPS + IDR NAL units in sequence.
+        """
         try:
-            container = av.open(
-                self._sdp_tmp,
-                format='sdp',
-                options={
-                    'protocol_whitelist': 'file,crypto,data,rtp,udp',
-                    'fflags': 'nobuffer',
-                    'flags': 'low_delay',
-                    'max_delay': '0',
-                    'reorder_queue_size': '0',
-                    'analyzeduration': '1000000',
-                    'probesize': '1000000',
-                    # A keyframe is 20+ back-to-back RTP packets. The default UDP
-                    # receive buffer can overflow on that burst even over
-                    # loopback, which looks identical to network loss. Verify with
-                    # `netstat -sp udp | grep "full socket buffers"` rather than
-                    # trusting that this option reaches the udp protocol.
-                    'buffer_size': '4194304',
-                },
-            )
-            log.info('video relay open on UDP :%d', self.video_port)
-            for packet in container.demux():
+            container = self._open_video()
+            # An IP camera may carry audio the operator never asked for. Select
+            # the video stream explicitly rather than relaying whatever arrives:
+            # an AAC packet chunked as if it were an access unit would be fed to
+            # a VideoDecoder as a delta frame.
+            video = container.streams.video[0]
+            for packet in container.demux(video):
                 if packet.size == 0:
                     continue
                 self._frame_id += 1
@@ -254,7 +350,7 @@ class Relay:
                 )
                 loop.call_soon_threadsafe(self._frame_event.set)
         except Exception as e:
-            log.error('video relay read error: %s', e)
+            log.error('video relay read error: %s', _redact(e))
         finally:
             if self._sdp_tmp and os.path.exists(self._sdp_tmp):
                 os.unlink(self._sdp_tmp)
@@ -286,7 +382,7 @@ class Relay:
             backlog = 0
             if self.pending_bytes:
                 backlog = self.pending_bytes()
-            threshold = profile.drop_threshold_bytes(_ASSUMED_FPS)
+            threshold = profile.drop_threshold_bytes(self.fps)
 
             if backlog > threshold:
                 if not is_keyframe:

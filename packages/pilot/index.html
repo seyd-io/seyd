@@ -40,6 +40,13 @@
        frozen picture pass as reality. */
     #video-canvas.degraded { outline-color: #ff3b30; }
 
+    /* Only shown once the robot reports PTZ support — the cursor is the only
+       affordance telling the operator the picture is draggable.
+       touch-action: none is load-bearing on a phone: without it the browser
+       claims the drag for scrolling and the camera never moves. */
+    #video-canvas.ptz        { cursor: grab; touch-action: none; }
+    #video-canvas.ptz:active { cursor: grabbing; }
+
     /* ── overlays ─────────────────────────────────────── */
 
     .overlay {

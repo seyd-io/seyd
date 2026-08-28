@@ -21,6 +21,10 @@ packages/signal/pilot/
 *.key
 *.crt
 
+# Local secrets — camera credentials etc. Never committed.
+# See DEMO.md: the camera password must not appear in agent CLI args.
+.env.local
+
 # Editor
 .vscode/
 .idea/

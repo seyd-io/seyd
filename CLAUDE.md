@@ -12,6 +12,7 @@ Before writing any code or making any architectural decision, read:
 
 - **SPEC.md** — the product specification: what DARC is, the two customer archetypes, the no-transcoding principle, technology choices, competitor landscape, and open questions.
 - **PROTOTYPE.md** — the current build target: a Mac-to-Mac teleoperation demo using FFmpeg, a Python relay agent, a browser pilot page, and a WebSocket signaling server.
+- **DEMO.md** — the always-on public demo: a real Hikvision PTZ camera over RTSP with operator pan/tilt/zoom. The first configuration where a real camera, not `sim/`, publishes the video.
 
 These documents are the source of truth for product decisions. They are not static — they must be updated whenever we make a decision, change direction, or learn something new.
 
@@ -48,6 +49,9 @@ darc/
 │
 ├── tools/                 # internal tooling and test harnesses
 │   ├── setup-machine.sh   # dev machine bootstrap
+│   ├── find-camera.py     # locate an IP camera on the LAN (SADP/ONVIF/port scan)
+│   ├── relay-pilot.py     # headless pilot exercising the relay path
+│   ├── pilot-smoke.py     # drives the real pilot in Chrome; asserts P2P + decode
 │   ├── fec-vectors.py     # emit FEC interop vectors from the agent encoder
 │   └── fec-check.js       # replay them through the pilot decoder
 │
@@ -74,6 +78,17 @@ the boundary has leaked.
 **High cohesion.** Each component does one thing. Do not add responsibilities to a component because it is convenient — create a new component or a well-defined interface.
 
 **Production-boundary awareness.** Label code clearly: is this a production DARC component, or a prototype stand-in? The `sim/` directory exists precisely to keep fake robot code out of real DARC components. Never import from `sim/` in `packages/`.
+
+**One known exception: `packages/agent/camera.py`.** It is a Hikvision ISAPI
+driver living inside a DARC component, which is against the grain of everything
+above. Elsewhere the agent states intent and lets the robot decide how to meet it
+— `PublisherControl` fires a JSON target at a UDP port and does not implement the
+publisher. A production DARC should do the same for actuation: forward a generic
+`ptz` intent over a robot-control interface and let robot-side code speak ISAPI,
+ONVIF, or ROS2. It is where it is because DEMO.md specifies it there and the demo
+needed one concrete camera to work. Nothing above `CameraControl` knows the word
+"Hikvision"; keep it that way, and move it out rather than adding a second vendor
+beside it.
 
 **No transcoding in DARC.** The DARC Agent is a pure relay. It forwards bytes. It does not decode, re-encode, or inspect media payloads.
 

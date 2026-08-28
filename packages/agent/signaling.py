@@ -39,6 +39,7 @@ class SignalingClient:
         self.on_relay_mode: Optional[object] = None          # async () -> None
         self.on_punch: Optional[object] = None               # async (pilot_ip: str|None) -> None
         self.on_qos: Optional[object] = None                 # async (profile: str) -> None
+        self.on_command: Optional[object] = None             # async (payload: dict) -> None
 
     async def run(self):
         backoff = 1
@@ -71,6 +72,18 @@ class SignalingClient:
                 await self._ws.send(json.dumps(msg))
             except Exception:
                 pass
+
+    async def send_to_pilot(self, msg: dict):
+        """
+        Robot→pilot JSON over signalling, for relay mode.
+
+        Wrapped in an envelope so the signal server can forward it without
+        interpreting it, and so it cannot be confused with the signalling
+        messages the server does act on. Matches `send_json`'s signature exactly
+        — that is what lets relay mode reuse the whole sensor/telemetry/ack path
+        instead of reimplementing it.
+        """
+        await self.send({'type': 'cmd-out', 'robotId': self.robot_id, 'payload': msg})
 
     async def send_binary_batch(self, chunks: list[bytes]):
         """Send one frame's chunks to the signal server (relay mode fallback)."""
@@ -138,6 +151,14 @@ class SignalingClient:
             log.info('QoS profile requested via signalling: %s', profile)
             if self.on_qos:
                 await self.on_qos(profile)
+        elif t == 'cmd':
+            # Pilot→robot command relayed by the signal server. The only path
+            # that exists in relay mode, where there is no WebTransport bidi
+            # stream. Payload is opaque to signalling and handed straight to the
+            # relay's normal message handler.
+            payload = msg.get('payload')
+            if isinstance(payload, dict) and self.on_command:
+                await self.on_command(payload)
         elif t == 'relay-mode':
             log.info('relay mode requested — switching video to signal server')
             if self.on_relay_mode:

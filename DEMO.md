@@ -10,13 +10,17 @@ A permanently-on demo robot that potential clients can discover on the fleet pag
 
 | Item | Model | Cost |
 |---|---|---|
-| PTZ camera | Hikvision DS-2DE2A404IWG-E (4MP, 4× optical) | ~$180 |
+| PTZ camera | Hikvision DS-2DE2A404IWG1-E (4MP, 4× optical) | ~$180 |
 | PoE injector or switch | Any 802.3af injector | ~$25 |
 | Desk / wall mount arm | Any ¼-20 ball head arm | ~$20 |
 | Agent host | Mac mini or Raspberry Pi 5 | existing / ~$80 |
 | **Total** | | **~$225–305** |
 
 The camera is always on, pointed at something visually interesting in a controlled space (a shelf, a model, a small set). Clients pan and tilt to look around.
+
+The unit on the bench is a **DS-2DE2A404IWG1-E** (note the `1`), firmware V5.9.5
+build 260129, encoder V7.3. See "Camera provisioning" below for its measured
+capabilities and the settings actually applied.
 
 ---
 
@@ -26,8 +30,8 @@ The camera is always on, pointed at something visually interesting in a controll
 Office LAN
 ┌─────────────────────┐  RTSP/TCP (H.264)   ┌──────────────────────┐
 │  Hikvision PTZ      │────────────────────► │  DARC Agent          │
-│  192.168.x.x:554    │◄────────────────────│  (Mac mini / Pi 5)   │
-│                     │  HTTP CGI (PTZ cmds) │                      │
+│  192.168.86.237:554 │◄────────────────────│  (Mac mini / Pi 5)   │
+│                     │  ISAPI/XML (PTZ cmds)│                      │
 └─────────────────────┘                      └──────────┬───────────┘
                                                         │ WSS
                                              ┌──────────▼───────────┐
@@ -40,72 +44,312 @@ Office LAN
 
 **No FFmpeg intermediary.** PyAV (libavformat) opens the camera's RTSP stream directly. The H.264 bitstream demuxed from RTSP is identical to what PyAV currently demuxes from RTP/UDP — the downstream relay path (NAL extraction → binary WebSocket → WebCodecs) is unchanged.
 
+Verified on the bench Mac: `ffmpeg 8.1` and PyAV 17.1.0 both expose the `rtsp`
+demuxer. Note RTSP is a *demuxer* in ffmpeg's taxonomy, not a protocol — it does
+not appear in `ffmpeg -protocols`, only in `-demuxers`.
+
 ---
 
-## Agent changes required (not yet implemented)
+## Camera provisioning (done — 2026-08-25)
+
+State on the bench: activated, DHCP, on the operator LAN, encoding exactly what
+the pilot's decoder expects. Credentials live in `.env.local` (gitignored, mode
+600) as `CAMERA_USER` / `CAMERA_PASSWORD` — this is the answer to open question 3.
+
+### Finding it
+
+`tools/find-camera.py` locates the camera by Hikvision SADP and ONVIF
+WS-Discovery, with an optional TCP port scan. Discovery is the part that matters:
+the camera shipped on the factory static **192.168.1.64**, which is invisible to
+any port scan of the operator subnet. SADP found it anyway because SADP works at
+layer 2, independent of addressing — which is why the tool tries it first and why
+a port scan alone is not a substitute.
+
+The corollary: **camera and agent host must share a layer-2 segment** for
+discovery to work at all. On this bench the camera was initially behind a second
+router while the Mac sat behind the Google Nest's NAT, and nothing could see it.
+The Nest's WAN address was in CGNAT space (`100.87.0.0/18`), which is the tell
+that the upstream box was bridging rather than routing. Moving the camera's PoE
+injector to the Nest's own LAN port fixed it.
+
+### Activating it — do this in the browser
+
+A factory Hikvision is **un-activated**: no password is set, and every ISAPI
+endpoint except `/ISAPI/Security/userCheck` and
+`/ISAPI/Security/sessionLogin/capabilities` returns `notActivated`.
+
+`PUT /ISAPI/System/activate` cannot be driven by hand on V5.9.5. The `<password>`
+field is always base64-decoded — proven by sending a 16-character plaintext and
+getting `password is wrong, len = 12` back, 12 being the decoded length — and the
+decoded value must be a fixed-length ciphertext. The public key needed to produce
+it lives at `/ISAPI/Security/RSA/publicKey` and `/ISAPI/Security/deviceKey`, and
+**both are themselves gated behind `notActivated`**. That circle does not close
+from outside, on HTTP or HTTPS.
+
+So activation is a one-time manual step through the camera's own web UI at
+`http://<camera-ip>/` (it redirects to `/doc/index.html`), whose JavaScript
+implements the handshake. Everything afterwards is plain **digest-auth** ISAPI and
+fully scriptable. Do not spend time reimplementing the activation crypto.
+
+Password charset note: alphanumeric-only is deliberate. It satisfies Hikvision's
+"at least two of {lower, upper, digit, special}" rule via three classes, dodges
+the undocumented per-firmware special-character allowlist, and embeds in an RTSP
+URL with no escaping.
+
+### Encoder settings applied
+
+The camera is now the video publisher, so per CLAUDE.md's boundary rule these are
+*its* settings — `packages/agent/qos.py` still states only transport targets.
+Applied to channel 101 via `PUT /ISAPI/Streaming/channels/101`:
+
+| Setting | Value | Why |
+|---|---|---|
+| codec | H.264 | H.265 is offered; WebCodecs is configured for `avc1.*` |
+| profile | **Baseline** | shipped as Main — see below |
+| resolution | 1280×720 | the `balanced` QoS profile's target |
+| frame rate | 25 fps | sensor is PAL; 2500 is the cap it offers |
+| rate control | VBR, 3000 kbps cap | `balanced` bitrate ceiling |
+| GOP | 25 | = 1000 ms, matching `balanced`'s `maxGopMs` |
+
+Measured off the wire afterwards: `profile=Baseline level=31 1280x720
+has_b_frames=0`, 25 fps, keyframes at exactly 1.000 s intervals, ~500 kbps on a
+static scene against the 3000 kbps ceiling.
+
+**Baseline rather than Main is load-bearing, not a preference.** Main permits
+B-frames, and PROTOTYPE.md's pilot gates frames into strict monotonic decode
+order — which is only correct when decode order equals display order. A stream
+with B-frames would be silently reordered into corruption by that gate. Baseline
+forbids B-frames outright, and `has_b_frames=0` confirms it. Baseline level 3.1
+is also exactly `avc1.42001f`, the codec string the pilot already hardcodes, so
+**no pilot change is needed**.
+
+**25 fps is a publisher choice, not a DARC setting.** The QoS table in
+PROTOTYPE.md says 30 fps because `sim/video-source.sh` drives a Mac webcam.
+`qos.py` specifies a bitrate ceiling, a latency budget and a max GOP — never
+resolution or frame rate. A PAL sensor answering the same request with 25 fps is
+the boundary working as intended. Switching the camera to NTSC for 30 fps would
+cost a reboot and buy nothing on a fixed demo scene.
+
+### Watch items
+
+- **`pix_fmt` is `yuvj420p`** — full-range YUV, not the usual limited range. If
+  the canvas render comes out crushed or washed out, colour range is the first
+  thing to check, not the encoder.
+- **The DHCP lease is not reserved.** The camera is at `192.168.86.237` today by
+  lease, not by contract. For an always-on demo either add a DHCP reservation on
+  the router or have the agent resolve the camera by SADP at startup — keyed on
+  MAC `8c:22:d2:5d:58:e7`, which is stable.
+- **Network changes need a reboot.** `PUT .../Network/interfaces/1/ipAddress`
+  returns `rebootRequired` and does nothing until `PUT /ISAPI/System/reboot`,
+  which needs a genuinely empty body — an XML declaration alone is rejected as
+  `badXmlFormat`.
+
+---
+
+## Running it
+
+```bash
+./demo.sh                      # robot-id defaults to darc-demo
+CAMERA_IP=192.168.86.237 ./demo.sh
+DARC_QOS_PROFILE=latency ./demo.sh
+SIGNAL_URL=ws://localhost:8080 ./demo.sh
+```
+
+`demo.sh` reads `.env.local` for credentials, probes the camera over ISAPI before
+starting anything — a wrong address, wrong password or un-activated camera becomes
+one line instead of an agent that retries forever with the reason buried in its
+log — and then starts the agent alone. There is no `sim/` here: the camera is a
+real publisher that encodes for itself, which is the first time the agent is fed
+by hardware rather than a stand-in.
+
+Because the camera encodes for itself, the QoS profile applies to DARC's
+transport half only — FEC rates, drop thresholds, pilot close-out deadlines. The
+publisher-control UDP port addresses a local process on the robot, and a camera
+reached over RTSP is not listening on it, so the agent skips that push entirely
+when `--video-url` is set. The camera's encoder is configured out of band, once
+(see "Encoder settings applied").
+
+### Operator controls
+
+| Input | Action |
+|---|---|
+| **Drag** the picture | pan/tilt — a virtual joystick, faster further from centre |
+| **Arrow keys** | pan/tilt |
+| **Shift** | hold for full speed |
+| **Wheel** or **+ / −** | zoom |
+| **H** | return to home position |
+| **Space** | snapshot |
+| **S** | stats overlay |
+
+Velocity, not position: the agent has no model of what is in frame, so "look at
+that" is not computable at either end. Press-and-hold with live video is the
+honest interface, and it is the feedback loop a prospect is here to feel.
+
+Controls appear only when the robot reports PTZ support, so pointing the pilot at
+a webcam robot shows no pan/tilt affordance rather than a dead one.
+
+---
+
+## Agent changes (implemented)
 
 ### 1. Dual video input mode
 
-Add `--video-url` as an alternative to `--video-port`. When `--video-url` is set, `peer.py` opens the RTSP URL directly via `av.open()` instead of reading from an SDP file:
+`--video-url` is an alternative to `--video-port`. When set, `peer.py` opens the RTSP URL directly via `av.open()` instead of reading from an SDP file:
 
 ```python
 # current (UDP RTP via SDP file)
 container = av.open(sdp_path, format='sdp', options={...})
 
 # new (RTSP direct)
-container = av.open('rtsp://admin:password@192.168.x.x:554/Streaming/Channels/101',
+container = av.open('rtsp://admin:password@192.168.86.237:554/Streaming/Channels/101',
                     options={'rtsp_transport': 'tcp', 'fflags': 'nobuffer', ...})
 ```
 
 Everything downstream of `container.demux()` is identical. No other changes to the relay path.
 
+Two details that are not obvious: RTSP is pulled over **TCP**, because an IP
+camera's RTP/UDP has no FEC and its losses would arrive as corrupt access units
+that DARC then spends parity protecting — the camera hop is a short LAN link
+where a retransmit is free, and the path worth protecting is the one after the
+agent. And the video stream is selected explicitly, because a camera carrying
+audio would otherwise have AAC packets chunked as access units and fed to a
+`VideoDecoder` as delta frames.
+
+Credentials are injected into the URL from `CAMERA_USER` / `CAMERA_PASSWORD` at
+startup, so nothing on the command line carries them. Anything that might log a
+URL goes through a redactor first — libavformat puts the full URL into its
+exception messages, so the password leaks on the *error* path even when the happy
+path is careful.
+
 ### 2. PTZ command handler
 
 The agent needs a camera control adapter that:
 1. Receives `{"type": "ptz", "pan": <-100…100>, "tilt": <-100…100>}` on the data channel
-2. Calls the Hikvision HTTP CGI API:
+2. Calls the Hikvision ISAPI PTZ endpoint:
 
 ```python
+import os
 import requests
+from requests.auth import HTTPDigestAuth
 
-CAMERA_IP  = os.getenv('CAMERA_IP', '192.168.1.100')
-CAMERA_AUTH = ('admin', os.getenv('CAMERA_PASSWORD', ''))
+CAMERA_IP = os.getenv('CAMERA_IP', '192.168.86.237')
+CAMERA_AUTH = HTTPDigestAuth(os.getenv('CAMERA_USER', 'admin'),
+                             os.getenv('CAMERA_PASSWORD', ''))
+
+PTZ_XML = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<PTZData><pan>{pan}</pan><tilt>{tilt}</tilt></PTZData>')
+
 
 def ptz_move(pan: int, tilt: int):
     requests.put(
         f'http://{CAMERA_IP}/ISAPI/PTZCtrl/channels/1/continuous',
-        json={'PTZData': {'pan': pan, 'tilt': tilt, 'zoom': 0}},
+        data=PTZ_XML.format(pan=pan, tilt=tilt),
+        headers={'Content-Type': 'application/xml'},
         auth=CAMERA_AUTH,
         timeout=0.5,
     )
+
 
 def ptz_stop():
     ptz_move(0, 0)
 ```
 
-Command handling in `peer.py`'s `handle_message()` dispatches on `type == 'ptz'` to these functions.
+Implemented in `packages/agent/camera.py`; `peer.py`'s `handle_message()`
+dispatches `type == 'ptz'` and `type == 'ptz-home'` to it. The snippet above is
+the shape of the request, not the shipped code — see that file for the real one,
+which uses stdlib `urllib` rather than `requests` to keep the agent on
+pure-Python wheels.
+
+**ISAPI speaks XML, not JSON.** An earlier version of this document passed
+`json={'PTZData': {...}}`; the device rejects that. Auth is **digest**, not basic
+— `requests`' `auth=(user, pass)` tuple sends basic and fails.
+
+**`momentary`, not `continuous`.** `continuous` is a velocity command with no
+expiry: the camera moves until explicitly stopped. Over the public internet, with
+an operator whose laptop can sleep and whose tab can close mid-gesture, "stop" is
+a message that sometimes does not arrive — and the failure mode is a camera that
+pans into its mechanical stop. `momentary` carries a duration and expires on its
+own, so a lost stop costs one window instead. Verified: `pan=40` for 500 ms moved
+1.89° and halted with no further command.
+
+The agent sends 600 ms windows and the pilot renews every 200 ms while held, so
+motion is smooth but an abandoned gesture dies in well under a second. An
+explicit stop still goes out as `continuous` zero, which halts immediately rather
+than letting the last window run out.
+
+**Latest-value-wins.** A held key generates commands faster than an HTTP round
+trip completes, so `camera.py` keeps one request in flight and one pending
+target, discarding superseded ones unsent — the same single-slot design the video
+frame sender uses, for the same reason. Measured: 20 rapid conflicting inputs
+collapsed to 6 requests.
+
+**Park on release.** Any way of losing the operator is a way of losing the stop
+message, so the agent stops and returns home on pilot disconnect, and the pilot
+also stops on window blur and tab hide. Verified by killing a client mid-pan: the
+camera travelled a further 3.7° and was back at home within 2 s.
+
+Measured: `pan=30` moves ~21°/s (azimuth 1800 → 1971 in 0.8 s). Azimuth and
+elevation are in hundredths of a degree via
+`GET /ISAPI/PTZCtrl/channels/1/status`; `PUT .../absolute` with an
+`<AbsoluteHigh>` block returns to an exact position, which is what `--ptz-home`
+uses.
+
+### 4. Commands in relay mode
+
+PTZ is the entire interaction here, and a client behind carrier NAT lands on the
+relay path — where, before this work, there was no pilot→robot JSON channel at
+all. Relay mode now tunnels JSON both ways through the signal server; see
+PROTOTYPE.md's `cmd` / `cmd-out` messages. Sensor data and telemetry, which had
+also been silently dead on that path despite the docs claiming otherwise, work
+there now too.
 
 ### 3. New CLI flags
 
 ```
---video-url    rtsp://... (alternative to --video-port for IP cameras)
---camera-ip    Hikvision camera IP for PTZ control
---camera-pass  Hikvision admin password (or via env CAMERA_PASSWORD)
+--video-url        rtsp://... (alternative to --video-port for IP cameras)
+--video-fps        source frame rate; scales the backlog drop threshold (25 here)
+--camera-ip        camera address for ISAPI PTZ control
+--camera-channel   PTZ channel (default 1)
+--ptz-home         park position as elevation,azimuth,zoom — e.g. 0,1800,10
 ```
+
+No `--camera-pass`. Credentials come from `CAMERA_USER` / `CAMERA_PASSWORD` in
+the environment: a password in an argument is readable by any local process via
+`ps`, which defeats the point of keeping it out of the repo.
 
 ---
 
-## Pilot changes required (not yet implemented)
+## Pilot changes (implemented)
 
-### PTZ joystick control
+### PTZ control
 
-The pilot page needs a control surface for pan/tilt. Options:
+**Drag-on-canvas plus arrow keys**, of the three options originally listed.
+Overlay arrow buttons were rejected because they cover the picture the operator
+is trying to look at and give four directions where the camera has infinitely
+many. The canvas drag is a virtual joystick measured from the centre of the
+frame, with a 12% deadzone and speed ramped from zero at the deadzone edge — a
+linear map straight from the deadzone jumps to 12% speed exactly where an
+operator makes their finest corrections.
 
-- **Click-and-hold overlay arrows** (simplest): four arrow buttons on the video overlay, `mousedown` sends `{"type":"ptz","pan":50,"tilt":0}`, `mouseup` sends stop.
-- **Mouse drag on canvas**: drag direction and distance map to pan/tilt speed.
-- **Gamepad API**: map left stick to pan/tilt — best for actual feel, good for demo.
+Pointer events rather than mouse events, so touch works: a prospect on a phone is
+a likely visitor. `touch-action: none` on the canvas is load-bearing there —
+without it the browser claims the drag for scrolling and the camera never moves.
+The pointer is captured on press so a drag leaving the canvas still delivers its
+release; an uncaptured pointer released outside the element leaves the camera
+moving.
 
-The stop command (`pan:0, tilt:0`) must be sent on `mouseup` / `touchend` / stick release, or the camera keeps moving.
+Arrow keys rather than WASD: `S` is already the stats toggle, and silently
+stealing it — or moving stats elsewhere — is worse than using the keys that need
+no explanation on a camera. Shift is a speed modifier and is re-evaluated on
+release without ending the gesture.
+
+Gamepad support was not built. It would feel best of the three and is the obvious
+next addition if the demo is shown at a stand rather than over a link, but it
+serves the fewest visitors per line of code.
+
+The stop command goes out on pointer release, key release, **window blur, and tab
+hide**. The last two matter more than they look: a closed laptop lid or a switched
+tab is the common way an operator stops steering without telling anyone.
 
 ---
 
@@ -120,8 +364,47 @@ The stop command (`pan:0, tilt:0`) must be sent on `mouseup` / `touchend` / stic
 
 ## Open questions
 
-1. **Multiple simultaneous pilots**: when two clients connect, the current signal server gives the robot to the last connected pilot. For the demo, this might be fine (last-writer-wins), or we may want queuing or read-only observer mode.
-2. **PTZ presets**: should the camera auto-return to a home position after a client disconnects? Hikvision supports preset positions via the same HTTP API.
-3. **Credentials management**: camera password should not be in the agent CLI args — use env var or a secrets file.
-4. **Gamepad vs mouse control**: decide on the primary control surface before implementing the pilot UI changes.
+1. **Multiple simultaneous pilots**: when two clients connect, the current signal server gives the robot to the last connected pilot. For the demo, this might be fine (last-writer-wins), or we may want queuing or read-only observer mode. **Now more pressing than it was:** with PTZ, two prospects don't merely share a view, they fight over the actuator, and the loser sees the camera moving on its own.
+2. ~~**PTZ presets**~~ — **settled.** The camera returns to `--ptz-home`
+   (default `0,1800,10`) on pilot disconnect and on `H`. Implemented with
+   `PUT .../absolute` rather than stored presets, so the position lives in the
+   robot's config instead of in camera state a future reset would erase.
+3. ~~**Credentials management**~~ — **settled.** `.env.local` at the repo root,
+   gitignored and mode 600, holds `CAMERA_USER` and `CAMERA_PASSWORD`. The agent
+   reads them from the environment; they never appear in CLI args, where they
+   would be visible to any local `ps`.
+4. ~~**Gamepad vs mouse control**~~ — **settled.** Canvas drag is primary, arrow
+   keys secondary, gamepad not built. See "Pilot changes" for why.
 5. **Demo branding**: should the pilot page show different copy ("You are controlling a real camera") vs the generic UI?
+
+6. **Join latency is the demo's weakest moment.** A joining pilot decodes nothing
+   until the next IDR — measured 16 consecutive `A key frame is required after
+   configure()` rejections at GOP 25, so up to a second of black canvas as the
+   first thing a prospect sees. The camera answers
+   `PUT /ISAPI/Streaming/channels/101/requestKeyFrame` with HTTP 200, so calling
+   it on `hello` would cut this to roughly one round trip. Not built; it is
+   PROTOTYPE.md's next step 3 and the highest-value one left for this demo.
+
+---
+
+## Verified end to end (2026-08-25)
+
+Both transport paths, against the real camera, via `tools/relay-pilot.py` and
+`tools/pilot-smoke.py`:
+
+| | P2P (WebTransport) | Relay (via signal server) |
+|---|---|---|
+| winning candidate | `host` | — |
+| video chunks | 1239 | 2097 |
+| frames decoded / assembled | 330 decoded, canvas 1280×720 | 250/250 complete |
+| bad chunk headers | 0 | 0 |
+| `capabilities` received | yes (via `hello`) | yes |
+| telemetry | yes | yes (`agent-stats` ×10) |
+| PTZ moves the camera | yes — 79.7° on synthetic ArrowRight | yes — 57.6° |
+| clean stop, holds position | yes | yes |
+| park on client vanishing | yes — home within 2 s | yes |
+
+Two bugs were found only because these tests exist, both on the primary P2P path
+and both silent: `capabilities` being dropped before the JSON stream id was
+known, and `hardwareAcceleration: 'prefer-hardware'` failing `configure()`
+outright where no hardware decoder exists. See PROTOTYPE.md for both.

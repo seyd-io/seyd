@@ -25,6 +25,7 @@ const errorEl   = document.getElementById('error');
 const errorEgEl = document.getElementById('error-example');
 const statsEl   = document.getElementById('stats');
 const qosSelect = document.getElementById('qos');
+const hintEl    = document.getElementById('hint');
 
 // ── guard: require params ──────────────────────────────────────────────────
 if (!ROBOT_ID || !SIGNAL_URL) {
@@ -162,7 +163,16 @@ function initDecoder() {
   decoder.configure({
     codec:                 'avc1.42001f',
     optimizeForLatency:    true,
-    hardwareAcceleration:  'prefer-hardware',
+    // 'no-preference', not 'prefer-hardware'. Chrome treats 'prefer-hardware'
+    // as a hard *requirement*: isConfigSupported returns false when no hardware
+    // H.264 decoder exists, and configure() then throws OperationError, leaving
+    // a black canvas whose only trace is a console error. Measured on this
+    // codec string: prefer-hardware → false, no-preference → true, on the same
+    // machine. 'no-preference' still gets hardware wherever it exists — the UA
+    // prefers it — but degrades to software instead of failing outright. That
+    // matters for a public demo, where operators arrive on VMs, remote
+    // desktops, and Linux boxes without VA-API.
+    hardwareAcceleration:  'no-preference',
   });
 }
 
@@ -234,11 +244,29 @@ function handleVideoChunk(value) {
     };
     _frames.set(h.frameId, f);
     stats.framesSeen++;
-    const budget = h.isKeyframe ? deadlineKey : deadlineDelta;
-    f.timer = setTimeout(() => closeFrame(f, false), budget);
   }
   if (f.closed) return;
   f.lastSeen = performance.now();
+
+  // The close-out deadline measures *silence*, not elapsed time: it is armed on
+  // every chunk, so it fires only once chunks stop arriving. A frame still
+  // receiving data has not been lost, however long it is taking.
+  //
+  // This was previously a total-duration budget armed once at frame creation,
+  // which is only survivable when a whole frame lands within one deadline. At
+  // 720p a keyframe is ~45-68 KB after parity, so the latency profile's 40 ms
+  // demanded ~10 Mbps sustained — trivial on a LAN, impossible on a hotspot.
+  // Every keyframe was killed mid-arrival: counted lost, its partial state
+  // deleted, its remaining chunks then opening a fresh entry that could never
+  // reach n. Delta frames are small enough to have kept completing, so they
+  // decoded, hit "a key frame is required after configure()", and the canvas
+  // stayed black while loss and decode-error counters climbed.
+  //
+  // Frames cannot be held indefinitely: finishFrame() closes out anything older
+  // as soon as a newer frame decodes, which is the real bound here.
+  clearTimeout(f.timer);
+  f.timer = setTimeout(() => closeFrame(f, false),
+                       f.isKeyframe ? deadlineKey : deadlineDelta);
 
   // Parity was computed over chunks zero-padded to CHUNK_SIZE, so the short
   // final data chunk must be re-padded before it can take part in recovery.
@@ -333,6 +361,12 @@ function handleSignalMessage(msg) {
       initDecoder();
       connectWebTransport(session.candidates, session.fingerprint, session.hint);
       break;
+    case 'cmd-out':
+      // Robot→pilot JSON relayed via the signal server (relay mode). Same
+      // handler as the bidi stream, so sensor data, acks and telemetry behave
+      // identically on both paths.
+      if (msg.payload) handleStreamMessage(msg.payload);
+      break;
     case 'unreachable':
       showFatalError('Cannot reach robot', msg.reason);
       break;
@@ -357,6 +391,9 @@ function handleStreamMessage(msg) {
       break;
     case 'ack':
       if (msg.cmd === 'snapshot') showToast('Snapshot saved');
+      if (msg.cmd === 'ptz-home') {
+        showToast(msg.ok ? 'Camera returned home' : 'No home position set');
+      }
       break;
     case 'agent-stats':
       // The pilot cannot see a frame whose chunks were all lost, so its own
@@ -366,6 +403,9 @@ function handleStreamMessage(msg) {
       break;
     case 'qos-applied':
       applyQosAck(msg);
+      break;
+    case 'capabilities':
+      applyCapabilities(msg);
       break;
   }
 }
@@ -614,6 +654,13 @@ async function attachSession(conn) {
   };
   wt.closed.then(onClosed).catch(onClosed);
 
+  // Speak first. The agent discovers this stream's id from inbound data, so
+  // until we write, nothing it sends on the stream reaches us — an unprompted
+  // announcement at connect time is silently discarded. `hello` makes the
+  // agent's capabilities reply a response rather than a push, which is the only
+  // ordering that is reliable on this path.
+  sendCommand({ type: 'hello' });
+
   if (wasRelay) {
     console.log('upgraded from relay to P2P');
     showToast('Upgraded to direct connection');
@@ -658,11 +705,21 @@ function scheduleP2PRetry(candidates, certFingerprintHex, hint) {
 }
 
 // ── commands ───────────────────────────────────────────────────────────────
+// Prefer the WebTransport bidi stream; fall back to the signalling socket.
+// The fallback is what makes commands work in relay mode at all — there is no
+// bidi stream there, and without this PTZ silently does nothing for every
+// operator whose robot sits behind carrier NAT. The agent runs both through the
+// same handler, so neither path has a private feature set.
 async function sendCommand(msg) {
-  if (!jsonWriter) return;
-  try {
-    await jsonWriter.write(new TextEncoder().encode(JSON.stringify(msg) + '\n'));
-  } catch {}
+  if (jsonWriter) {
+    try {
+      await jsonWriter.write(new TextEncoder().encode(JSON.stringify(msg) + '\n'));
+    } catch {}
+    return;
+  }
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'cmd', robotId: ROBOT_ID, payload: msg }));
+  }
 }
 
 function takeSnapshot() {
@@ -676,6 +733,183 @@ function takeSnapshot() {
   }, 'image/png');
   sendCommand({ type: 'snapshot', ts });
 }
+
+// ── PTZ control ────────────────────────────────────────────────────────────
+// Two input surfaces onto one velocity vector. Mouse/touch is a virtual
+// joystick over the picture — press where you want to look and the camera moves
+// that way, faster the further out you press. Keyboard is the arrow keys, for
+// precise nudges the mouse cannot do well.
+//
+// Velocity, not position: the camera has no idea what is in its frame, so
+// "look at this point" is not something either end can compute. Press-and-hold
+// with visual feedback is the honest interface for that, and it is what closes
+// the loop a prospect is here to feel.
+//
+// Repeats while held because the agent sends `momentary` commands that expire
+// on their own (see camera.py). A dropped stop message therefore costs one
+// expiry window instead of leaving the camera panning into its stop.
+const PTZ_REPEAT_MS = 200;   // must stay under camera.py's _DURATION_MS (600)
+const PTZ_DEADZONE  = 0.12;  // fraction of half-frame ignored around centre
+const PTZ_SPEED     = 55;
+const PTZ_SPEED_FAST = 100;
+
+let ptzSupported     = false;
+let ptzHomeSupported = false;
+let ptzTimer   = null;
+let ptzSent    = { pan: 0, tilt: 0, zoom: 0 };
+let pointerVec = null;       // non-null while a pointer drag owns pan/tilt
+let wheelZoom  = 0;
+const heldKeys = new Set();
+
+function applyCapabilities(msg) {
+  ptzSupported     = !!msg.ptz;
+  ptzHomeSupported = !!msg.ptzHome;
+  canvas.classList.toggle('ptz', ptzSupported);
+  updateHint();
+  if (!ptzSupported) stopPtz();
+}
+
+// Only advertise controls the robot on the other end actually has. The same
+// agent serves a fixed webcam and a PTZ dome, and offering pan/tilt on a webcam
+// teaches an operator that the UI lies.
+function updateHint() {
+  if (!hintEl) return;
+  const parts = [];
+  if (ptzSupported) {
+    parts.push('DRAG or ARROWS — look', 'SHIFT — fast', 'WHEEL or +/− — zoom');
+    if (ptzHomeSupported) parts.push('H — home');
+  }
+  parts.push('SPACE — snapshot', 'S — stats');
+  hintEl.textContent = parts.join(' · ');
+}
+
+function clampAxis(v) {
+  return Math.max(-100, Math.min(100, Math.round(v || 0)));
+}
+
+function samePtz(a, b) {
+  return a.pan === b.pan && a.tilt === b.tilt && a.zoom === b.zoom;
+}
+
+function sendPtz() {
+  sendCommand({ type: 'ptz', ...ptzSent });
+}
+
+function setPtz(pan, tilt, zoom) {
+  const next = { pan: clampAxis(pan), tilt: clampAxis(tilt), zoom: clampAxis(zoom) };
+  const changed = !samePtz(next, ptzSent);
+  const moving  = next.pan !== 0 || next.tilt !== 0 || next.zoom !== 0;
+  ptzSent = next;
+
+  // Stop the repeat before the support check, not after: a robot that reports
+  // PTZ and later reports none would otherwise leave this interval running
+  // forever, sending commands nothing is listening for.
+  if (!moving || !ptzSupported) {
+    clearInterval(ptzTimer);
+    ptzTimer = null;
+  }
+  if (!ptzSupported) return;
+
+  if (moving) {
+    // Fire on change so a new direction takes effect now rather than at the
+    // next tick, then keep renewing the camera's expiry window while held.
+    if (changed) sendPtz();
+    if (!ptzTimer) ptzTimer = setInterval(sendPtz, PTZ_REPEAT_MS);
+    return;
+  }
+
+  // One explicit stop. The agent turns this into a `continuous` zero, which
+  // halts immediately instead of letting the last momentary window run out.
+  if (changed) sendPtz();
+}
+
+function keyboardVector() {
+  const speed = heldKeys.has('Shift') ? PTZ_SPEED_FAST : PTZ_SPEED;
+  let pan = 0, tilt = 0, zoom = 0;
+  if (heldKeys.has('ArrowLeft'))  pan  -= speed;
+  if (heldKeys.has('ArrowRight')) pan  += speed;
+  if (heldKeys.has('ArrowUp'))    tilt += speed;
+  if (heldKeys.has('ArrowDown'))  tilt -= speed;
+  if (heldKeys.has('Equal'))      zoom += speed;
+  if (heldKeys.has('Minus'))      zoom -= speed;
+  return { pan, tilt, zoom };
+}
+
+// Pointer owns pan/tilt while it is down; zoom always comes from keys or wheel,
+// so you can zoom mid-pan without letting go.
+function refreshPtz() {
+  const keys = keyboardVector();
+  const zoom = wheelZoom || keys.zoom;
+  if (pointerVec) setPtz(pointerVec.pan, pointerVec.tilt, zoom);
+  else            setPtz(keys.pan, keys.tilt, zoom);
+}
+
+function stopPtz() {
+  heldKeys.clear();
+  pointerVec = null;
+  wheelZoom  = 0;
+  setPtz(0, 0, 0);
+}
+
+// Map a pointer position to a velocity, relative to the centre of the picture.
+function pointerVector(e) {
+  const r = canvas.getBoundingClientRect();
+  if (!r.width || !r.height) return { pan: 0, tilt: 0 };
+  const nx = ((e.clientX - r.left) / r.width)  * 2 - 1;   // −1 … 1
+  const ny = ((e.clientY - r.top)  / r.height) * 2 - 1;
+  const mag = Math.hypot(nx, ny);
+  if (mag < PTZ_DEADZONE) return { pan: 0, tilt: 0 };
+  // Rescale so speed ramps from zero at the deadzone edge rather than jumping
+  // straight to 12% — otherwise the control has a step in it right where an
+  // operator makes their finest corrections.
+  const ramp = Math.min(1, (mag - PTZ_DEADZONE) / (1 - PTZ_DEADZONE)) / mag;
+  return {
+    pan:  nx * ramp * 100,
+    // Screen Y grows downward, the camera's tilt axis grows upward.
+    tilt: -ny * ramp * 100,
+  };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!ptzSupported) return;
+  e.preventDefault();
+  // Capture so a drag that leaves the canvas keeps steering and, more
+  // importantly, still delivers its pointerup — an uncaptured pointer released
+  // outside the element leaves the camera moving.
+  try { canvas.setPointerCapture(e.pointerId); } catch {}
+  pointerVec = pointerVector(e);
+  refreshPtz();
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointerVec) return;
+  pointerVec = pointerVector(e);
+  refreshPtz();
+});
+
+for (const evt of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  canvas.addEventListener(evt, () => {
+    if (!pointerVec) return;
+    pointerVec = null;
+    refreshPtz();
+  });
+}
+
+let wheelZoomTimer = null;
+canvas.addEventListener('wheel', (e) => {
+  if (!ptzSupported) return;
+  e.preventDefault();
+  wheelZoom = e.deltaY < 0 ? PTZ_SPEED : -PTZ_SPEED;
+  refreshPtz();
+  clearTimeout(wheelZoomTimer);
+  // A wheel has no release event, so the zoom is self-cancelling.
+  wheelZoomTimer = setTimeout(() => { wheelZoom = 0; refreshPtz(); }, 220);
+}, { passive: false });
+
+// Any way of losing the page is a way of losing the stop message. A sleeping
+// laptop or a switched tab must not leave a camera panning.
+window.addEventListener('blur', stopPtz);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopPtz(); });
 
 // ── QoS selection ──────────────────────────────────────────────────────────
 let activeQos    = qosProfile;
@@ -764,12 +998,51 @@ setInterval(() => {
   });
 }, 1000);
 
+// Arrow keys and +/- rather than WASD: 'S' is already the stats toggle, and
+// silently stealing it — or moving stats to another key — would be worse than
+// using the keys that need no explanation on a camera.
+const PTZ_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+                          'Equal', 'Minus']);
+
 document.addEventListener('keydown', (e) => {
+  if (e.repeat) {
+    // The OS autorepeat rate is not ours to inherit; PTZ_REPEAT_MS drives the
+    // renewals, and held keys are already in the set.
+    if (PTZ_KEYS.has(e.code)) e.preventDefault();
+    return;
+  }
+  // Shift is a modifier, so it has to be tracked on its own keydown too —
+  // sampling it only when an arrow goes down means pressing Shift mid-gesture
+  // does nothing until the operator releases and re-presses the arrow.
+  if (e.key === 'Shift') { heldKeys.add('Shift'); refreshPtz(); return; }
+
+  if (PTZ_KEYS.has(e.code)) {
+    e.preventDefault();          // arrows would otherwise scroll the page
+    if (!ptzSupported) return;
+    heldKeys.add(e.code);
+    if (e.shiftKey) heldKeys.add('Shift');
+    refreshPtz();
+    return;
+  }
   if (e.code === 'Space') { e.preventDefault(); takeSnapshot(); }
+  if (e.code === 'KeyH' && ptzHomeSupported) {
+    e.preventDefault();
+    sendCommand({ type: 'ptz-home', ts: Date.now() });
+  }
   if (e.code === 'KeyS')  {
     statsVisible = !statsVisible;
     localStorage.setItem('darc.stats', statsVisible ? '1' : '0');
     renderStats();
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  // Shift changes speed rather than direction, so releasing it mid-gesture has
+  // to re-evaluate without ending the movement.
+  if (e.key === 'Shift') { heldKeys.delete('Shift'); refreshPtz(); return; }
+  if (PTZ_KEYS.has(e.code)) {
+    heldKeys.delete(e.code);
+    refreshPtz();
   }
 });
 

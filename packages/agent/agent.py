@@ -16,17 +16,25 @@ Optional:
     --webtransport-port   UDP port for the WebTransport server (default: 4433)
     --webtransport-host   Override the public host sent to pilots (default: STUN)
     --video-port          RTP video input port (default: 5000)
+    --video-url           RTSP URL to pull from instead of --video-port
     --sensor-port         Sensor UDP input port (default: 5002)
+    --camera-ip           PTZ camera address for operator control
+
+Credentials are read from the environment (CAMERA_USER / CAMERA_PASSWORD), never
+from arguments — anything on the command line is visible to any local `ps`.
 """
 
 import asyncio
 import argparse
 import json
 import logging
+import os
 import socket
+from urllib.parse import quote
 
 import portmap
 import qos
+from camera import CameraControl
 from cert import generate_cert
 from stun import discover_nat, format_host, get_local_ips, is_ipv6
 from transport import WebTransportServer
@@ -71,6 +79,35 @@ class PublisherControl:
             return False
 
 
+def resolve_video_url(url: str | None) -> str | None:
+    """
+    Fill in RTSP credentials from the environment if the URL has none.
+
+    Lets the URL stay free of secrets in scripts, shell history and `ps` output
+    while still producing what libavformat needs, which is credentials inline.
+    A URL that already carries them is left alone.
+    """
+    if not url or '@' in url.split('://', 1)[-1].split('/', 1)[0]:
+        return url
+    user = os.environ.get('CAMERA_USER')
+    password = os.environ.get('CAMERA_PASSWORD')
+    if not user or not password:
+        return url
+    scheme, rest = url.split('://', 1)
+    return f'{scheme}://{quote(user, safe="")}:{quote(password, safe="")}@{rest}'
+
+
+def parse_ptz_home(raw: str | None) -> tuple | None:
+    if not raw:
+        return None
+    try:
+        elevation, azimuth, zoom = (int(p) for p in raw.split(','))
+        return (elevation, azimuth, zoom)
+    except ValueError:
+        log.warning('ignoring malformed --ptz-home %r (want elevation,azimuth,zoom)', raw)
+        return None
+
+
 def parse_args():
     p = argparse.ArgumentParser(description='DARC Agent')
     p.add_argument('--robot-id',           required=True)
@@ -79,7 +116,21 @@ def parse_args():
     p.add_argument('--webtransport-host',  default=None,
                    help='Override public host for WebTransport (skips STUN)')
     p.add_argument('--video-port',         type=int, default=5000)
+    p.add_argument('--video-url',          default=None,
+                   help='RTSP URL to pull video from (replaces --video-port). '
+                        'Credentials may be embedded, or supplied via '
+                        'CAMERA_USER / CAMERA_PASSWORD')
+    p.add_argument('--video-fps',          type=int, default=30,
+                   help='Source frame rate; scales the backlog drop threshold')
     p.add_argument('--sensor-port',        type=int, default=5002)
+    p.add_argument('--camera-ip',          default=None,
+                   help='PTZ camera address for ISAPI control (enables operator '
+                        'pan/tilt/zoom). Password from CAMERA_PASSWORD')
+    p.add_argument('--camera-channel',     type=int, default=1,
+                   help='PTZ channel on the camera (default: 1)')
+    p.add_argument('--ptz-home',           default=None,
+                   help='Home position as elevation,azimuth,zoom in ISAPI units '
+                        '(e.g. 0,1800,10). Returned to when a pilot disconnects')
     p.add_argument('--no-port-mapping',    action='store_true',
                    help='Skip PCP/NAT-PMP/UPnP router port mapping')
     p.add_argument('--no-ipv6',            action='store_true',
@@ -229,8 +280,28 @@ async def main():
     # ── Step 4: Start relay + WebTransport server ─────────────────────────────
     publisher = PublisherControl(args.publisher_control_port)
     relay = Relay(video_port=args.video_port, sensor_port=args.sensor_port,
-                  profile=qos.get(args.qos_profile))
+                  profile=qos.get(args.qos_profile),
+                  video_url=resolve_video_url(args.video_url),
+                  fps=args.video_fps)
     wt    = WebTransportServer()
+
+    # ── optional PTZ camera ───────────────────────────────────────────────────
+    camera = None
+    if args.camera_ip:
+        password = os.environ.get('CAMERA_PASSWORD')
+        if not password:
+            log.error('--camera-ip given but CAMERA_PASSWORD is unset — '
+                      'PTZ control disabled')
+        else:
+            camera = CameraControl(
+                host=args.camera_ip,
+                user=os.environ.get('CAMERA_USER', 'admin'),
+                password=password,
+                channel=args.camera_channel,
+                home=parse_ptz_home(args.ptz_home),
+            )
+            relay.on_ptz      = camera.move
+            relay.on_ptz_home = camera.go_home
 
     def detach_sinks():
         relay.send_batch    = None
@@ -238,6 +309,28 @@ async def main():
         relay.pending_bytes = None
         relay.drop_pending  = None
         relay.link_stats    = None
+
+    def capabilities() -> dict:
+        # Lets the pilot show PTZ controls only where they do something. A demo
+        # camera and a webcam-on-a-Mac run the same agent, and a UI that offers
+        # pan/tilt on a fixed webcam teaches the operator to distrust the UI.
+        return {
+            'type': 'capabilities',
+            'ptz':  camera is not None,
+            'ptzHome': bool(camera and camera.home),
+        }
+
+    async def release_camera():
+        """Stop any motion, then park. Called whenever an operator goes away."""
+        if not camera:
+            return
+        camera.move(0, 0, 0)
+        await camera.go_home()
+
+    async def on_hello():
+        """Pilot announced itself on the JSON channel — tell it what we can do."""
+        if relay.send_json:
+            await relay.send_json(capabilities())
 
     async def on_wt_connected(session):
         relay.send_batch    = session.send_datagram_batch
@@ -249,13 +342,24 @@ async def main():
 
     async def on_wt_disconnected():
         detach_sinks()
+        # A pilot whose link drops mid-gesture has no way to send a stop, and
+        # `momentary` only bounds how long that runs for — parking it is what
+        # makes the demo safe to leave unattended.
+        await release_camera()
         log.info('pilot disconnected from WebTransport')
 
     async def on_qos(profile_name: str) -> dict:
         """Apply a profile: DARC's half immediately, the publisher's best-effort."""
         profile = qos.get(profile_name)
         relay.set_profile(profile)
-        delivered = await publisher.send(profile.publisher_config())
+        # The publisher control port addresses a local process on the robot. A
+        # camera pulled over RTSP is not that process and is not listening on
+        # it, so firing the datagram anyway only produces a log line claiming a
+        # reconfiguration that cannot have happened. Report it honestly instead:
+        # the pilot then shows "(transport only)", which is the truth — the
+        # camera keeps encoding whatever it was configured with out of band.
+        delivered = (False if relay.video_url
+                     else await publisher.send(profile.publisher_config()))
         return {
             'type':      'qos-applied',
             'profile':   profile.name,
@@ -270,6 +374,7 @@ async def main():
     wt.on_disconnected = on_wt_disconnected
     wt.on_message      = relay.handle_message
     relay.on_qos       = on_qos
+    relay.on_hello     = on_hello
 
     await relay.start()
     await wt.start(socks, cert=cert, key=key)
@@ -291,6 +396,7 @@ async def main():
     async def on_pilot_disconnected():
         wt.stop_probing()
         detach_sinks()
+        await release_camera()
 
     async def on_punch(pilot_ip: str | None):
         # P2P retry from a pilot already on relay. Only reopen the hole; the
@@ -307,7 +413,21 @@ async def main():
         relay.pending_bytes = signaling.pending_bytes
         relay.drop_pending  = None
         relay.link_stats    = None
-        log.info('relay mode — video now flows via signal server')
+        # The JSON path goes through signalling too. Previously it was left
+        # unset here, so relay mode silently had no robot→pilot JSON at all —
+        # no sensor data, no telemetry, no acks — despite PROTOTYPE.md claiming
+        # sensor data worked on both paths. For this demo it is load-bearing:
+        # PTZ is the entire interaction, and a client behind carrier NAT lands
+        # on relay.
+        relay.send_json     = signaling.send_to_pilot
+        await signaling.send_to_pilot(capabilities())
+        log.info('relay mode — video and JSON now flow via signal server')
+
+    async def on_command(payload: dict):
+        # Pilot→robot JSON arriving over signalling rather than the WebTransport
+        # bidi stream. Same handler, so a command behaves identically on both
+        # paths and neither one has a private feature set.
+        await relay.handle_message(payload)
 
     async def on_qos_signal(profile_name: str):
         # Arrives via the signal server, so it works in relay mode too — where
@@ -319,9 +439,18 @@ async def main():
     signaling.on_relay_mode         = on_relay_mode
     signaling.on_punch              = on_punch
     signaling.on_qos                = on_qos_signal
+    signaling.on_command            = on_command
 
     # Push the startup profile to the publisher so it is not left on its default.
-    await publisher.send(relay.profile.publisher_config())
+    # Skipped for an IP camera: the publisher control port addresses a local
+    # process on the robot, and a camera reached over RTSP is not listening on
+    # it. Its encoder is configured out of band (see DEMO.md).
+    if not relay.video_url:
+        await publisher.send(relay.profile.publisher_config())
+
+    if camera:
+        await camera.start()
+        await camera.go_home()
 
     # ── Step 6: Run ───────────────────────────────────────────────────────────
     try:
@@ -331,6 +460,8 @@ async def main():
     finally:
         wt.stop()
         await relay.stop()
+        if camera:
+            await camera.stop()
 
 
 if __name__ == '__main__':

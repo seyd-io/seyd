@@ -155,6 +155,10 @@ Both paths use identical chunk format; the pilot's reassembly and decoder path i
 | Pilot → server | `probe-request` | `robotId` (retrying P2P from relay — punch again) |
 | Pilot → server | `qos` | `robotId`, `profile` |
 | Server → robot | `qos` | `profile` — forwarded verbatim |
+| Pilot → server | `cmd` | `robotId`, `payload` — opaque JSON for the robot |
+| Server → robot | `cmd` | `payload` — forwarded verbatim |
+| Robot → server | `cmd-out` | `robotId`, `payload` — opaque JSON for the pilot |
+| Server → pilot | `cmd-out` | `payload` — forwarded verbatim |
 | Server → pilot | `ready` | `candidates`, `certFingerprint`, `p2pHint` |
 | Server → pilot | `unreachable` | `reason` |
 | Server → pilot | `peer-disconnected` | — |
@@ -180,6 +184,20 @@ pilot→robot JSON channel at all. The signal server has no opinion about QoS; i
 stores the name on the session (so it can be delivered before the first frame is
 encoded) and forwards it.
 
+`cmd` / `cmd-out` generalise that idea into a bidirectional opaque JSON tunnel,
+which is what makes relay mode a full-featured path rather than video-only.
+Before it existed, a relayed session had no JSON in either direction: commands
+did nothing, and sensor data and telemetry never arrived. The server forwards
+`payload` without inspecting it, exactly as it does for `qos`.
+
+**The envelope is kept, not stripped.** It would be tempting to deliver the bare
+payload so the receiver's handler is identical on both paths, and it nearly is —
+both ends unwrap into the same dispatcher. But application messages and
+signalling messages share this socket, and delivering payloads bare puts them in
+one namespace. The day a signalling message is named `sensor` or `ack`, the
+receiver routes it wrong and nothing errors. One wrapper keeps the two sets
+provably disjoint.
+
 **Cloud Run specifics:**
 - `X-Forwarded-For` header used for real client IP (load balancer sets `remoteAddress` to `169.254.169.126`)
 - 30s WebSocket pings prevent Cloud Run's 60-minute idle timeout
@@ -201,6 +219,7 @@ encoded) and forwards it.
 | `portmap.py` | Router port mapping via PCP, NAT-PMP, and UPnP-IGD |
 | `fec.py` | Reed-Solomon over GF(256) + the video chunk wire format |
 | `qos.py` | QoS profile table (DARC's half — transport targets, no resolution) |
+| `camera.py` | PTZ adapter (Hikvision ISAPI): coalescing, expiry, park-on-release |
 | `transport.py` | aioquic WebTransport server (`WebTransportServer`, `DARCProtocol`, `_Session`) |
 | `peer.py` | `Relay` class: video chunking + sender, sensor relay, command handling |
 | `signaling.py` | `SignalingClient`: WebSocket to darc-signal, relay mode send |
@@ -341,14 +360,41 @@ frame's bits. Only the publisher's bitrate cap bounds bandwidth; both are needed
 --webtransport-port  <int>       UDP port for WebTransport (default: 4433)
 --webtransport-host  <host>      Override discovery (skip STUN, use this IP)
 --video-port         <int>       RTP video input (default: 5000)
+--video-url          <rtsp://>   Pull video from an IP camera instead of --video-port
+--video-fps          <int>       Source frame rate; scales the backlog threshold (30)
 --sensor-port        <int>       Sensor UDP input (default: 5002)
+--camera-ip          <host>      PTZ camera for operator control (enables PTZ)
+--camera-channel     <int>       PTZ channel on the camera (default: 1)
+--ptz-home           <e,a,z>     Park position, e.g. 0,1800,10
 --no-port-mapping                Skip PCP/NAT-PMP/UPnP
 --no-ipv6                        Do not listen on or advertise IPv6
 --qos-profile        <name>      latency | balanced | quality (default: balanced)
 --publisher-control-port <int>   UDP port the video publisher listens on (5003)
 ```
 
-**Dependencies:** `av` (PyAV), `websockets`, `aioquic`, `cryptography`, `ifaddr`
+Camera credentials come from the environment (`CAMERA_USER`, `CAMERA_PASSWORD`),
+never from flags — a command line is readable by any local process via `ps`.
+
+**Two video sources, one downstream path.** `--video-port` reads RTP from a local
+UDP socket and needs an SDP descriptor written to a temp file, because nothing in
+that stream describes itself. `--video-url` opens an RTSP camera, which does
+describe itself, so the URL suffices. Both hand `container.demux()` H.264 access
+units in Annex B, and nothing after that knows which was used.
+
+RTSP is pulled over **TCP** (`rtsp_transport: tcp`). An IP camera's RTP/UDP has
+no FEC of its own, so its losses arrive as corrupt access units — which DARC
+would then faithfully chunk, protect with parity, and relay, spending scarce
+uplink protecting frames that were already broken. The camera link is a short LAN
+hop where a TCP retransmit costs microseconds; the lossy path worth protecting is
+the one *after* the agent.
+
+The video stream is selected explicitly (`demux(video)`) rather than demuxing
+everything: an IP camera may carry audio, and an AAC packet chunked as if it were
+an access unit would reach the pilot's `VideoDecoder` as a delta frame.
+
+**Dependencies:** `av` (PyAV), `websockets`, `aioquic`, `cryptography`, `ifaddr`.
+PTZ control adds none — `camera.py` uses stdlib `urllib` with digest auth, to
+keep the agent on pure-Python wheels for the ARM cross-compile.
 
 ---
 
@@ -408,17 +454,53 @@ interfaces, and networks all change under a robot in the field.
 decoder.configure({
     codec: 'avc1.42001f',          // H.264 Baseline Level 3.1
     optimizeForLatency: true,      // no reorder wait — render immediately
-    hardwareAcceleration: 'prefer-hardware',
+    hardwareAcceleration: 'no-preference',
 });
 ```
 `optimizeForLatency: true` is critical — without it the browser may buffer frames before rendering.
+
+`hardwareAcceleration` is **`no-preference`, not `prefer-hardware`.** Despite the
+name, Chrome treats `prefer-hardware` as a hard requirement: where no hardware
+H.264 decoder exists, `isConfigSupported()` returns `false` and `configure()`
+throws `OperationError`. The operator then sees a black canvas whose only trace
+is a console error — video chunks arrive, reassemble, and are counted, and
+nothing on screen says why nothing is on screen. Measured on one machine with
+this exact codec string:
+
+| `hardwareAcceleration` | supported |
+|---|---|
+| `prefer-hardware` | **false** |
+| `prefer-software` | true |
+| `no-preference` | true |
+
+`no-preference` still gets hardware wherever it exists — the UA prefers it — but
+degrades to software instead of failing. That is the difference between a demo
+that works for a prospect on a VM or a remote desktop and one that shows them
+nothing.
 
 **Commands (P2P mode only):**
 - Pilot creates a bidirectional stream via `wt.createBidirectionalStream()`
 - Commands sent as newline-delimited JSON: `{"type": "snapshot", "ts": <ms>}`
 - Agent writes acks to the same stream: `{"type": "ack", "cmd": "snapshot", "ts": ...}`
 
-**Note:** Commands are not forwarded in relay mode (no bidi stream without WebTransport). This is a known prototype limitation — in relay mode, Space bar snapshot has no effect. Sensor data still works (flows via JSON WebSocket in both modes).
+**Both paths, one handler.** `sendCommand()` prefers the bidi stream and falls
+back to wrapping the message in a `cmd` envelope on the signalling socket, so
+every command works in relay mode too. The agent runs both through
+`Relay.handle_message`, which is what keeps the two paths from drifting into
+different feature sets.
+
+**The pilot must speak first.** On the P2P path the agent learns the JSON
+stream's id from inbound data (`transport.py` sets `_stream_id` in
+`stream_data_received`), so anything it tries to send between session-accept and
+the pilot's first write is silently dropped by `send_json`. The pilot therefore
+sends `{"type":"hello"}` immediately after creating the stream, and the agent's
+`capabilities` reply is a response rather than a push.
+
+This is not hypothetical: announcing capabilities unprompted at connect time was
+discarded every single time on P2P while working perfectly on relay, which would
+have left PTZ controls dead on the primary path. Pre-existing telemetry survived
+only by accident — the pilot's 1 Hz `pilot-stats` happened to establish the
+stream within a second.
 
 ---
 
@@ -644,8 +726,28 @@ Neither stats direction works in relay mode (no pilot↔robot JSON path there).
 
 ### Commands (pilot → robot, JSON via bidi stream or WebSocket)
 ```json
+{ "type": "hello" }
 { "type": "snapshot", "ts": 1723456789123 }
+{ "type": "ptz", "pan": -100..100, "tilt": -100..100, "zoom": -100..100 }
+{ "type": "ptz-home", "ts": 1723456789123 }
 ```
+
+`ptz` is a **velocity**, not a position: the agent has no model of what is in
+frame, so "look at this point" is not computable at either end. Zero on all three
+axes is an explicit stop.
+
+`ptz` is deliberately **unacknowledged**. A held key produces several per second,
+and an ack apiece would put a round trip of chatter on the same path carrying
+video, to tell the operator something the moving picture already tells them.
+
+### Capabilities (robot → pilot, JSON)
+```json
+{ "type": "capabilities", "ptz": true, "ptzHome": true }
+```
+
+Sent in reply to `hello`. The pilot shows PTZ controls only when the robot has
+them — the same agent serves a fixed webcam and a PTZ dome, and offering pan/tilt
+on a webcam teaches an operator that the UI lies.
 
 ### Acknowledgments (robot → pilot, JSON)
 ```json
@@ -675,6 +777,7 @@ darc/
 │   │   ├── peer.py        # Relay class: video chunking, sensor, commands
 │   │   ├── fec.py         # Reed-Solomon GF(256) + chunk wire format
 │   │   ├── qos.py         # QoS profiles (DARC half)
+│   │   ├── camera.py      # PTZ adapter (Hikvision ISAPI) — see DEMO.md
 │   │   ├── signaling.py   # SignalingClient
 │   │   └── requirements.txt  # av, websockets, aioquic, cryptography, ifaddr
 │   └── pilot/             # darc-pilot (HTML/JS, served by darc-signal)
@@ -686,9 +789,13 @@ darc/
 │   └── sensor-source.py   # Counter → UDP :5002 at 10 Hz
 ├── tools/
 │   ├── setup-machine.sh   # Dev machine bootstrap
+│   ├── find-camera.py     # Locate an IP camera on the LAN (SADP / ONVIF / port scan)
+│   ├── relay-pilot.py     # Headless pilot exercising the relay path (+ PTZ)
+│   ├── pilot-smoke.py     # Drives the real pilot in Chrome; asserts P2P + decode
 │   ├── fec-vectors.py     # Emit FEC interop vectors (agent side)
 │   └── fec-check.js       # Replay them through the pilot decoder
 ├── robot.sh               # Starts sensor-sim + video-sim + agent (robot Mac)
+├── demo.sh                # Starts the always-on PTZ demo robot (real camera)
 ├── CLAUDE.md
 ├── SPEC.md
 └── PROTOTYPE.md
@@ -711,6 +818,29 @@ The script kills any stale processes, then starts sensor-sim, video-sim, and
 agent. `DARC_QOS_PROFILE` deliberately drives *both* halves — the publisher reads
 it directly and it is passed to the agent as `--qos-profile` — because FEC
 overhead and video bitrate are one budget and must not drift apart.
+
+### Automated path tests
+
+Both transport paths can now be asserted without a human watching a canvas.
+
+```bash
+# Relay path: video chunks, FEC headers, frame completeness, JSON both ways, PTZ
+tools/relay-pilot.py --robot darc-demo --signal ws://localhost:8080 --ptz
+
+# P2P path: drives the real pilot page in headless Chrome over the DevTools
+# Protocol — asserts WebTransport wins (not relay), frames decode, capabilities
+# arrive, and synthetic arrow keys move a real camera.
+CAMERA_IP=… tools/pilot-smoke.py --robot darc-demo \
+    --signal ws://localhost:8080 --expect-ptz
+```
+
+`pilot-smoke.py` exists because everything unique to P2P — the candidate race,
+the bidi stream, the `hello` handshake, WebCodecs decode — has no non-browser
+equivalent, which made silent regressions on the *primary* path cheap to
+introduce and expensive to notice. It found two: the dropped `capabilities`
+message and the `prefer-hardware` decoder failure. It drives Chrome over a raw
+DevTools WebSocket rather than pulling in puppeteer, and passes `--disable-gpu`
+deliberately, so the software-decode fallback is what gets exercised.
 
 ### Testing loss resilience without a cellular link
 
@@ -745,8 +875,16 @@ The pilot static files are copied from `packages/pilot/` into the signal build c
 ### Relay path — unbounded latency on congested links
 On the WebSocket relay path, the TCP layer can buffer chunks if the signal server or the final WebSocket link is congested. The `flush_datagrams()` mechanism that prevents queue buildup is only effective on the P2P QUIC path. On relay, the signal server could add growing latency under sustained load. **For the prototype this is acceptable** — the relay is a last resort for unreachable robots. In production, a proper TURN relay or direct QUIC relay would replace it.
 
-### Commands not forwarded in relay mode
-The pilot's bidirectional JSON command stream is a WebTransport stream; it doesn't exist in relay mode. Snapshot (Space bar) silently does nothing. Sensor data still flows. Fixing this requires routing commands via the signaling WebSocket JSON path (signal server relays JSON pilot→robot and robot→pilot).
+### ~~Commands not forwarded in relay mode~~ — fixed
+Relay mode now carries JSON in both directions via the `cmd` / `cmd-out`
+envelopes described above, so commands, sensor data, telemetry and acks behave
+the same on both paths. Required by the PTZ demo, where a client behind carrier
+NAT lands on relay and PTZ *is* the interaction.
+
+Note this section previously also claimed sensor data still flowed in relay mode.
+It did not. `on_relay_mode` rewired the video sinks but left `send_json` unset,
+so a relayed session had no robot→pilot JSON at all — no sensor values, no
+`agent-stats`, no acks. The symptom was easy to miss because video looked fine.
 
 ### Bursty loss defeats FEC on small delta frames
 The `latency` profile's delta frames are only ~6 data chunks, so 25% parity gives
@@ -796,8 +934,17 @@ Session state is in-memory on the single Cloud Run instance. The signal server t
 
 ### Immediate (prototype improvements)
 1. **Characterise real cellular loss** — run the `?burst=` control on the 5G hotspot. Whether loss is bursty or independent decides how much the point above actually costs, and whether delta parity should rise.
-2. **Relay-mode commands and telemetry** — route JSON both ways via the signalling WebSocket in relay mode. Currently snapshot silently no-ops and neither stats direction works there.
-3. **Keyframe on request** — `{"type":"request-keyframe"}` is specified but implemented on neither side. Worth doing on its own merits (join-to-first-frame drops from a GOP to ~1 RTT) and it is the prerequisite for intra-refresh.
+2. ~~**Relay-mode commands and telemetry**~~ — **done.** `cmd` / `cmd-out`
+   envelopes carry JSON both ways in relay mode; commands, sensor data, acks and
+   both stats directions now work on either path.
+3. **Keyframe on request** — still unimplemented, and now the largest remaining
+   flaw in the demo's *first impression*. A joining pilot decodes nothing until
+   the next IDR: measured 16 consecutive `A key frame is required after
+   configure()` rejections on join at GOP 25, i.e. up to a second of black
+   canvas as the very first thing a prospect sees. The demo camera answers
+   `PUT /ISAPI/Streaming/channels/101/requestKeyFrame` with HTTP 200, so on this
+   hardware the fix is to call it when the pilot says `hello`. Also the
+   prerequisite for intra-refresh.
 4. **Live publisher reconfiguration** — `sim/video-source.sh` reads `DARC_QOS_PROFILE` once at start, so the encoder half of a profile switch needs a restart. A supervisor listening on the control port would close this; note that a real camera node changes bitrate live through its encoder API, so the restart hiccup is a simulation artefact and must not become a claim about DARC.
 5. **Adaptive bitrate** — all the inputs now exist (`cwnd`/`srtt`, true loss, `frames_dropped_backlog`). This is the real answer to a hotspot whose capacity varies 5× minute to minute, and it turns a profile from a fixed setting into a ceiling the link finds its own level under.
 6. **Latency measurement** — a send timestamp in the chunk header gives relative jitter and intra-frame spread immediately. True glass-to-glass needs clock sync between the two Macs, which is separate work.
