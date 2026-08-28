@@ -56,7 +56,7 @@ session.close(code, reason); session.closed().await
 ```
 cargo test -p seyd-transport
 cargo build -p seyd-transport --example wt-server
-packages/agent/.venv/bin/python3 packages/seyd-transport/examples/wt-check.py
+tools/.venv/bin/python3 packages/seyd-transport/examples/wt-check.py
 ```
 
 `wt-check.py` starts the echo server, drives real headless Chrome over the

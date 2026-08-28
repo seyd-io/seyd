@@ -6,7 +6,7 @@ WebTransport spike check: real Chrome ↔ seyd-transport echo server.
     python3 packages/seyd-transport/examples/wt-check.py
 
 Starts examples/wt-server, drives headless Chrome over the DevTools Protocol
-(plain WebSocket, no puppeteer — same approach as tools/pilot-smoke.py), opens
+(plain WebSocket, no puppeteer — same approach as tools/cdp.py), opens
 a WebTransport session pinned by serverCertificateHashes, sends 20 datagrams
 and 3 control lines, and asserts every echo returns. Prints datagram RTT.
 """

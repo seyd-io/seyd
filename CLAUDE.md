@@ -8,10 +8,10 @@ point-to-point video, sensor and command streaming between robot systems and
 human operators over the public internet, delivered as SDKs plus a signaling
 cloud. Domains: `seyd.io`, `seydio.com`.
 
-The repo is **mid-migration**. A Python/JS proof of concept (still under
-`packages/agent`, `packages/pilot`, `packages/signal`) proved the architecture;
-the product is being rebuilt as a Rust core with a C ABI, a TypeScript web pilot
-SDK, and a portable cloud. `PLAN.md` is the plan; follow it.
+The product is a Rust core with a C ABI, a TypeScript web pilot SDK, and a
+portable cloud. The Python/JS proof of concept that preceded it has been
+deleted (git history before 2026-08-28 has it; PROTOTYPE.md describes it);
+its measurements remain valid. `PLAN.md` is the plan; follow it.
 
 ## Key documents — read these first
 
@@ -43,7 +43,6 @@ SDK, and a portable cloud. `PLAN.md` is the plan; follow it.
   or services in application code; auth behind an OIDC abstraction, provider
   not yet chosen.
 - **No timeline/headcount planning.** Plans are ordered work.
-- **Do not harden the Python prototype.** Effort goes into the new stack.
 
 ## Keeping documentation current — mandatory
 
@@ -54,7 +53,7 @@ future developer reading only PLAN.md, the ADRs and SPEC.md would be surprised
 by the code, the docs are out of date.** Every measured number quoted in a doc
 must be re-measured when the code it describes changes.
 
-## Monorepo structure (target; items marked *legacy* exist today and go away)
+## Monorepo structure
 
 ```
 seyd/
@@ -69,10 +68,7 @@ seyd/
 │   ├── seyd-signal-client/    # WS client to the cloud, signal v2, Ed25519 robot auth
 │   ├── seyd-core/             # engine: channels, sessions, callbacks — pure Rust API
 │   ├── seyd-ffi/              # C ABI → sdks/c/include/seyd.h
-│   ├── seydd/                 # daemon: TOML config, RTP/RTSP/UDP inputs
-│   ├── agent/                 # *legacy* Python prototype agent (reference implementation)
-│   ├── pilot/                 # *legacy* vanilla-JS pilot (reference implementation)
-│   └── signal/                # *legacy* Node signaling + relay server
+│   └── seydd/                 # daemon: TOML config, RTP/RTSP/UDP inputs
 ├── sdks/                      # thin wrappers — NO protocol logic here, ever
 │   ├── c/  cpp/  python/  ros2/
 │   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
@@ -84,7 +80,8 @@ seyd/
 ├── sim/                       # robot simulation — NOT part of Seyd
 │   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
-└── tools/                     # harnesses: fec-vectors.py, fec-check.js, pilot-smoke.py, find-camera.py …
+├── demo-seyd.sh               # start the camera demo robot
+└── tools/                     # harnesses: seyd-smoke.py, cdp.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
 ```
 
 **Import direction:** `tools/` may reach into `packages/`. `packages/` and
@@ -110,8 +107,8 @@ the wire protocol, the signal protocol, the C ABI, UDP sockets.
 `seyd-fec` never parses a header; `seyd-qos` does no I/O.
 
 **Production-boundary awareness.** `sim/` keeps fake robot code out of Seyd.
-Vendor drivers (the Hikvision ISAPI code in `packages/agent/camera.py`) belong
-in `examples/`, not in a Seyd component — the agent states intent
+Vendor drivers (the Hikvision ISAPI code in `examples/demo-robot/hikvision.py`)
+belong in `examples/`, not in a Seyd component — the agent states intent
 (`on_recovery_request`, `on_requested_config`, commands) and robot-side code
 decides how to meet it.
 
@@ -132,14 +129,14 @@ Keyframes are never dropped.
 | Web pilot SDK | TypeScript, WebTransport, WebCodecs `VideoDecoder`, Web Worker + OffscreenCanvas | No jitter buffer; off-main-thread so host apps cannot jank video |
 | Loss resilience | Reed-Solomon GF(256), Cauchy, per FEC block; NACK-driven LTR/intra-refresh/IDR recovery | FEC pays bandwidth, not round trips; recovery in one RTT for what FEC misses |
 | Cloud | TypeScript (Fastify + ws), Postgres, Redis, OIDC (provider TBD), Docker | Portable by construction; `docker compose` runs the whole cloud |
-| Legacy prototype | Python (PyAV, aioquic), vanilla JS, Node ws | Reference implementation until parity; then deleted |
 
 ## Hosting (current)
 
-The legacy signal server runs on Google Cloud Run (`europe-west1`, project
-`darc-platform`) — see `packages/signal/DEPLOY.md`. The new cloud will run on
-Cloud Run in `europe-west1` under a new project, with the GCP dependency
-isolated to one Terraform module and a compose file as the portability proof.
+`cloud/api` runs on Google Cloud Run in `europe-west1`, project `seydio`:
+`https://seyd-signal-flj7s44j4a-ew.a.run.app` (deploy with
+`GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`; dev-mode auth). It is a plain
+container on Postgres/Redis-shaped seams with the GCP dependency isolated to
+the deploy script; `cloud/docker-compose.yml` is the portability proof.
 
 ## Verifying work
 
@@ -155,14 +152,13 @@ pnpm -r build && pnpm -r test                                           # @seyd/
    SEYD_STATIC_DIR=$PWD/../../web/demo/dist node dist/index.js &)
 VIDEO_DEVICE=lavfi DARC_QOS_PROFILE=latency ./sim/video-source.sh & python3 sim/sensor-source.py &
 ./target/debug/seydd --config <a seydd.toml with rtp://127.0.0.1:5000, udp://127.0.0.1:5002, ptz → udp://127.0.0.1:5004> &
-packages/agent/.venv/bin/python3 tools/seyd-smoke.py --robot <robot_id> [--query loss=0.05]
+tools/.venv/bin/python3 tools/seyd-smoke.py --robot <robot_id> [--query loss=0.05]   # venv: tools/setup-machine.sh
 ```
 Then open `http://localhost:8080/?robot=<robot_id>&signal=ws://localhost:8080/ws`
 in Chrome. The real camera: `./demo-seyd.sh` (DEMO.md); verify with
 `tools/seyd-smoke.py --robot seyd-demo --no-sensor --camera-ip <ip>`.
 
-Harnesses for the legacy stack (`tools/pilot-smoke.py`, `demo.sh`, `robot.sh`)
-are documented in PROTOTYPE.md and DEMO.md.
+Field testing off the LAN: `docs/field-test.md`.
 
 ## What we do not build
 

@@ -11,13 +11,14 @@ headless Chrome against a running signal server + seydd, and asserts that
     tools/seyd-smoke.py --robot sim --page http://localhost:8080/ \
         --signal ws://localhost:8080/ws --command-port 5004
 
-Uses the raw DevTools Protocol helper from tools/pilot-smoke.py (no puppeteer).
+Uses tools/cdp.py (raw DevTools Protocol, no puppeteer). Needs `websockets`:
+    python3 -m venv tools/.venv && tools/.venv/bin/pip install websockets
 """
 import argparse, asyncio, importlib.util, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location('smoke', os.path.join(HERE, 'pilot-smoke.py'))
-smoke = importlib.util.module_from_spec(spec); spec.loader.exec_module(smoke)
+sys.path.insert(0, HERE)
+import cdp as smoke  # noqa: E402
 import websockets  # noqa: E402
 
 
@@ -36,17 +37,7 @@ async def run(args):
     collected = {}
     if not args.camera_ip:
         threading.Thread(target=udp_collector, args=(args.command_port, collected), daemon=True).start()
-    profile = tempfile.mkdtemp(prefix='seyd-smoke-')
-    chrome = subprocess.Popen([smoke.CHROME, '--headless=new', '--remote-debugging-port=0', f'--user-data-dir={profile}',
-        '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--window-size=1280,800', 'about:blank'],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    ws_url = None
-    for _ in range(80):
-        line = chrome.stdout.readline()
-        if 'ws://' in line: ws_url = 'ws://' + line.strip().split('ws://', 1)[1]; break
-    base = ws_url.replace('ws://', 'http://').rsplit('/devtools', 1)[0]
-    info = json.loads(urllib.request.urlopen(base + '/json/list').read())
-    page_ws = next(t['webSocketDebuggerUrl'] for t in info if t['type'] == 'page')
+    chrome, profile, page_ws = smoke.launch_chrome()
     ok = True
     def check(cond, label):
         nonlocal ok
@@ -98,11 +89,26 @@ async def run(args):
             msgs = collected.get('msgs', [])[before:]
             pans = [json.loads(m).get('pan') for m in msgs if m.startswith('{')]
             check(any(p and p > 0 for p in pans) and pans and pans[-1] == 0, f'ptz on udp:{args.command_port}: {len(msgs)} msgs, pans={pans[:6]}..{pans[-1:] if pans else []}')
+        if args.record > 0:
+            print(f'  recording lastStats to {args.record_file} for {args.record:.0f}s (Ctrl-C to stop early)')
+            t0 = time.time()
+            with open(args.record_file, 'a') as f:
+                try:
+                    while time.time() - t0 < args.record:
+                        await cdp.pump(1.0)
+                        raw = await cdp.eval("JSON.stringify(document.getElementById('video').session?.lastStats ?? null)")
+                        st = json.loads(raw or 'null') or {}
+                        st['t'] = round(time.time() - t0, 1); st['state'] = await cdp.eval("document.getElementById('video').session?.state")
+                        f.write(json.dumps(st) + '\n'); f.flush()
+                        if int(st['t']) % 10 == 0:
+                            print(f"  t={st['t']:>5} path={st.get('path')} fps={st.get('fps')} kbps={st.get('kbps')} loss={st.get('lossTrue')} g2g={st.get('g2gP50')}/{st.get('g2gP95')} rtt={st.get('rttMs')} lost={st.get('framesIncomplete')} rec={st.get('framesRecovered')}")
+                except KeyboardInterrupt:
+                    pass
         exceptions = [e for e in cdp.events if e['method'] == 'Runtime.exceptionThrown']
         check(not exceptions, f'no uncaught exceptions ({len(exceptions)})')
         for e in exceptions[:3]: print('   ', e['params']['exceptionDetails'].get('exception', {}).get('description', '')[:300])
     collected['stop'] = True
-    chrome.kill(); shutil.rmtree(profile, ignore_errors=True)
+    smoke.stop_chrome(chrome, profile)
     print('RESULT', 'PASS' if ok else 'FAIL')
     return 0 if ok else 1
 
@@ -116,6 +122,8 @@ def main():
     ap.add_argument('--timeout', type=float, default=15)
     ap.add_argument('--query', default='', help='extra page query, e.g. loss=0.05&burst=3')
     ap.add_argument('--no-sensor', action='store_true', help='robot has no sensor channel')
+    ap.add_argument('--record', type=float, default=0, metavar='SECONDS', help='after the checks, keep the session open and append lastStats once per second to --record-file (field tests)')
+    ap.add_argument('--record-file', default='seyd-record.jsonl')
     ap.add_argument('--camera-ip', default=None, help='verify PTZ by reading this Hikvision camera\'s azimuth (CAMERA_USER/PASSWORD env)')
     sys.exit(asyncio.run(run(ap.parse_args())))
 

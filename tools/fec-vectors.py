@@ -2,17 +2,15 @@
 """
 Generate FEC interop test vectors: agent encodes, pilot must decode.
 
-The agent (packages/agent/fec.py) and the pilot (packages/pilot/fec.js) each
-implement GF(256) Reed-Solomon independently, in different languages. If their
+The reference coder (tools/fec-reference/fec.py), seyd-fec (Rust) and
+@seyd/core (TypeScript) each implement GF(256) Reed-Solomon independently. If their
 field tables, Cauchy construction, or header layout ever drift apart, nothing
 fails loudly — the pilot reconstructs plausible-looking wrong bytes and the only
 symptom is unexplained video corruption in the field. This harness makes that
 failure mode a test.
 
     python3 tools/fec-vectors.py | node tools/fec-check.js
-
-Import direction: tools/ may reach into packages/. packages/ must never reach
-into tools/ or sim/.
+    python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check
 """
 
 import json
@@ -20,7 +18,7 @@ import os
 import random
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'packages', 'agent'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'fec-reference'))
 
 import fec  # noqa: E402
 

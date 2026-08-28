@@ -184,11 +184,10 @@ in-house RFC 6184 RTP, UDP sensors/commands, publisher control), `cloud/api`
 `@seyd/web` + `web/demo` (worker-hosted pilot), and `examples/demo-robot`
 (seydd config + Hikvision bridge outside core). `tools/seyd-smoke.py` drives
 the demo page in headless Chrome against the real stack and passes on the
-`sim/` source, including with 5 % injected loss. Not yet done from Milestone
-A: PMTUD-driven `chunk_len`, cert rotation, network-change re-gather, the
-cloud prober, the console UI (login/sign-up), `seyd-ffi` + `sdks/python`,
-Jetson/RPi builds, netem CI, and the legacy deletion (pending a run against
-the real camera). The repository directory/remote rename and DNS are owner
+`sim/` source, including with 5 % injected loss. Legacy Python/JS code deleted after the camera run. Not yet done from
+Milestone A: PMTUD-driven `chunk_len`, cert rotation, network-change re-gather,
+the cloud prober, the console UI (login/sign-up), `seyd-ffi` + `sdks/python`,
+Jetson/RPi builds, netem CI. The repository directory/remote rename and DNS are owner
 actions still pending.
 
 The signal server is deployed: `https://seyd-signal-flj7s44j4a-ew.a.run.app`

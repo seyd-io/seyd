@@ -1,5 +1,10 @@
 """
-Reed-Solomon erasure coding over GF(256), plus the video chunk wire format.
+REFERENCE IMPLEMENTATION — not shipped. The original prototype coder, kept as
+the generator for tools/fec-vectors.py so seyd-fec (Rust) and @seyd/core (TS)
+are checked against it byte for byte. Do not change the construction here
+without an ADR; the wire header below is the legacy v1 layout.
+
+Reed-Solomon erasure coding over GF(256), plus the (v1) video chunk wire format.
 
 A frame is split into 1000-byte chunks sent as unreliable QUIC datagrams, and
 the pilot can only decode a frame it received in full. Without redundancy a

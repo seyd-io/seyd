@@ -4,7 +4,7 @@
 
 ## Context
 
-The prototype's chunk header (`packages/agent/fec.py`, `packages/pilot/fec.js`)
+The prototype's chunk header (now `tools/fec-reference/fec.py` and `fec.js`)
 is 10 bytes: flags/version, `frame_id`, `chunk_idx`, `n`, `k`, `last_len`. It
 carries one video channel, FEC is computed per whole frame, and there is no
 timestamp. Three product requirements break it:

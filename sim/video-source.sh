@@ -6,7 +6,7 @@
 # NOT part of DARC. This stands in for the robot's video publisher, and it owns
 # the encoder settings: per SPEC.md, DARC states a bitrate ceiling and a latency
 # budget, and the publisher decides how to meet them (resolution, preset, VBV,
-# GOP). That is why the resolution table lives here and not in packages/agent/qos.py.
+# GOP). That is why the resolution table lives here and not in packages/seyd-qos (the Seyd half).
 set -euo pipefail
 
 PORT=${VIDEO_PORT:-5000}
@@ -14,7 +14,7 @@ DEVICE=${VIDEO_DEVICE:-0}
 PROFILE=${DARC_QOS_PROFILE:-balanced}
 
 # ── QoS profile → encoder settings ───────────────────────────────────────────
-# Bitrate ceilings mirror packages/agent/qos.py. Keep the two in step: DARC sizes
+# Bitrate ceilings mirror packages/seyd-qos (the Seyd half). Keep the two in step: DARC sizes
 # its FEC overhead against these numbers, and the pair has to fit the uplink as
 # one budget.
 case "$PROFILE" in

@@ -1,3 +1,8 @@
+> **Historical document (frozen 2026-08-28).** This describes the Python/JS
+> proof of concept that has since been deleted from the tree. Its measurements
+> and design rationale remain the reference; the code paths it names no longer
+> exist. The product is described by PLAN.md, docs/protocol/ and the ADRs.
+
 # DARC Prototype — Mac-to-Mac Teleoperation
 
 ## Current Status (as of 2026-08-22)

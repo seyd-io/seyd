@@ -1,3 +1,5 @@
+// REFERENCE IMPLEMENTATION — not shipped. The prototype pilot decoder, kept so
+// tools/fec-check.js can replay tools/fec-vectors.py output through it.
 // Reed-Solomon erasure decoding over GF(256) + video chunk header parsing.
 //
 // The receiving half of packages/agent/fec.py. Read that file first — it carries

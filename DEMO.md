@@ -99,7 +99,7 @@ URL with no escaping.
 ### Encoder settings applied
 
 The camera is now the video publisher, so per CLAUDE.md's boundary rule these are
-*its* settings — `packages/agent/qos.py` still states only transport targets.
+*its* settings — `packages/seyd-qos` still states only transport targets.
 Applied to channel 101 via `PUT /ISAPI/Streaming/channels/101`:
 
 | Setting | Value | Why |
@@ -175,49 +175,11 @@ Keyframe-on-join is therefore automatic: the pilot's `request-keyframe` on
 `web/demo` (`?robot=seyd-demo`). Verify with
 `tools/seyd-smoke.py --robot seyd-demo`.
 
-## Running it on the legacy prototype
+## Legacy notes (the Python prototype, deleted 2026-08-28)
 
-```bash
-./demo.sh                      # robot-id defaults to darc-demo
-CAMERA_IP=192.168.86.237 ./demo.sh
-DARC_QOS_PROFILE=latency ./demo.sh
-SIGNAL_URL=ws://localhost:8080 ./demo.sh
-```
-
-`demo.sh` reads `.env.local` for credentials, probes the camera over ISAPI before
-starting anything — a wrong address, wrong password or un-activated camera becomes
-one line instead of an agent that retries forever with the reason buried in its
-log — and then starts the agent alone. There is no `sim/` here: the camera is a
-real publisher that encodes for itself, which is the first time the agent is fed
-by hardware rather than a stand-in.
-
-Because the camera encodes for itself, the QoS profile applies to DARC's
-transport half only — FEC rates, drop thresholds, pilot close-out deadlines. The
-publisher-control UDP port addresses a local process on the robot, and a camera
-reached over RTSP is not listening on it, so the agent skips that push entirely
-when `--video-url` is set. The camera's encoder is configured out of band, once
-(see "Encoder settings applied").
-
-### Operator controls
-
-| Input | Action |
-|---|---|
-| **Drag** the picture | pan/tilt — a virtual joystick, faster further from centre |
-| **Arrow keys** | pan/tilt |
-| **Shift** | hold for full speed |
-| **Wheel** or **+ / −** | zoom |
-| **H** | return to home position |
-| **Space** | snapshot |
-| **S** | stats overlay |
-
-Velocity, not position: the agent has no model of what is in frame, so "look at
-that" is not computable at either end. Press-and-hold with live video is the
-honest interface, and it is the feedback loop a prospect is here to feel.
-
-Controls appear only when the robot reports PTZ support, so pointing the pilot at
-a webcam robot shows no pan/tilt affordance rather than a dead one.
-
----
+The sections below describe the prototype that first ran this demo; the
+mechanisms (RTSP over TCP, momentary PTZ windows, latest-value-wins, park on
+release) carried over into `seydd` and `examples/demo-robot/`.
 
 ## Agent changes (implemented)
 
@@ -283,7 +245,7 @@ def ptz_stop():
     ptz_move(0, 0)
 ```
 
-Implemented in `packages/agent/camera.py`; `peer.py`'s `handle_message()`
+Implemented in `examples/demo-robot/hikvision.py` (formerly `packages/agent/camera.py`); `peer.py`'s `handle_message()`
 dispatches `type == 'ptz'` and `type == 'ptz-home'` to it. The snippet above is
 the shape of the request, not the shipped code — see that file for the real one,
 which uses stdlib `urllib` rather than `requests` to keep the agent on
@@ -418,8 +380,8 @@ tab is the common way an operator stops steering without telling anyone.
 
 ## Verified end to end (2026-08-25)
 
-Both transport paths, against the real camera, via `tools/relay-pilot.py` and
-`tools/pilot-smoke.py`:
+Both transport paths of the prototype, against the real camera (its harnesses
+are gone with it; today's check is `tools/seyd-smoke.py`):
 
 | | P2P (WebTransport) | Relay (via signal server) |
 |---|---|---|

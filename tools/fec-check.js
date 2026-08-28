@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Replay FEC interop vectors from tools/fec-vectors.py through the pilot's decoder.
+// Replay FEC interop vectors from tools/fec-vectors.py through the reference JS decoder.
 //
 //     python3 tools/fec-vectors.py | node tools/fec-check.js
 //
@@ -8,7 +8,7 @@
 // last_len trimming that a reconstructed final chunk depends on.
 
 const path = require('path');
-const FEC = require(path.join(__dirname, '..', 'packages', 'pilot', 'fec.js'));
+const FEC = require(path.join(__dirname, 'fec-reference', 'fec.js'));
 
 function readStdin() {
   return new Promise((resolve, reject) => {
