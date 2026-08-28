@@ -1,0 +1,30 @@
+[package]
+name = "seyd-transport"
+description = "Seyd QUIC/WebTransport transport on quinn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+quinn = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+h3 = { workspace = true }
+h3-quinn = { workspace = true, features = ["datagram"] }
+h3-webtransport = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+futures = "0.3"
+http = "1"
+h3-datagram = "0.0.2"
+time = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }

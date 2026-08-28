@@ -1,0 +1,11 @@
+[package]
+name = "seyd-qos"
+description = "Seyd QoS profiles: transport-observable targets and Seyd's own transport policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

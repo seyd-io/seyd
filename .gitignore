@@ -37,3 +37,6 @@ packages/signal/pilot/
 
 # Rust
 target/
+
+# JS build output
+dist/

@@ -1,0 +1,25 @@
+# Seyd demo robot — Hikvision PTZ camera (DEMO.md). Nothing in this file is
+# vendor-specific; the Hikvision driver is examples/demo-robot/ptz_bridge.py,
+# which consumes the generic UDP interfaces declared here.
+[agent]
+robot_id        = "seyd-demo"
+signal_url      = "ws://localhost:8080/ws"
+credential_path = "examples/demo-robot/.robot.key"
+qos_profile     = "balanced"
+max_sessions    = 4
+
+[[channel]]
+kind  = "video"
+name  = "main"
+input = "rtsp://192.168.86.237:554/Streaming/Channels/101"   # credentials from SEYD_RTSP_USER / SEYD_RTSP_PASSWORD
+codec = "avc1.42001f"
+fps   = 25
+
+[[channel]]
+kind   = "command"
+name   = "ptz"
+output = "udp://127.0.0.1:5004"
+codec  = "json"
+
+[publisher_control]
+udp = "127.0.0.1:5003"

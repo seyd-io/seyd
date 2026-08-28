@@ -144,10 +144,22 @@ isolated to one Terraform module and a compose file as the portability proof.
 ## Verifying work
 
 ```bash
-cargo test --workspace
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check   # Rust ↔ Python FEC interop
-python3 tools/fec-vectors.py | node tools/fec-check.js                  # JS ↔ Python FEC interop
+pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo
+(cd cloud/api && npm test)
+
+# End to end on this machine (sim source, no camera):
+(cd cloud/api && PORT=8080 SEYD_DEV_OPEN_ENROLMENT=1 SEYD_DEV_ALLOW_ANONYMOUS=1 \
+   SEYD_STATIC_DIR=$PWD/../../web/demo/dist node dist/index.js &)
+VIDEO_DEVICE=lavfi DARC_QOS_PROFILE=latency ./sim/video-source.sh & python3 sim/sensor-source.py &
+./target/debug/seydd --config <a seydd.toml with rtp://127.0.0.1:5000, udp://127.0.0.1:5002, ptz → udp://127.0.0.1:5004> &
+packages/agent/.venv/bin/python3 tools/seyd-smoke.py --robot <robot_id> [--query loss=0.05]
 ```
+Then open `http://localhost:8080/?robot=<robot_id>&signal=ws://localhost:8080/ws`
+in Chrome. The real camera: `examples/demo-robot/run.sh` (DEMO.md).
+
 Harnesses for the legacy stack (`tools/pilot-smoke.py`, `demo.sh`, `robot.sh`)
 are documented in PROTOTYPE.md and DEMO.md.
 

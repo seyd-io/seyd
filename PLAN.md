@@ -175,12 +175,21 @@ Agent `NatReport` in `announce` (refreshed on network change): ipv4 `{local, pub
 
 ## Part 3 — Ordered work
 
-**Status (2026-08-28):** step 0 done at the document level (CLAUDE.md, SPEC.md
-banner, PLAN.md, ADRs 0001–0004); the repository directory/remote rename, DNS
-and the new GCP project are owner actions still pending. Step 1 done (Cargo
-workspace, `rust.yml` CI). Step 2 done: `seyd-fec` and `seyd-wire` pass all 55
-Python-generated interop vectors and their own tests. Next: step 3, the
-WebTransport spike.
+**Status (2026-08-28, later):** Milestone A steps 0–9 have a first working
+implementation: `seyd-fec`, `seyd-wire`, `seyd-qos`, `seyd-nat`,
+`seyd-transport` (quinn + h3-webtransport, verified with real Chrome),
+`seyd-signal-client`, `seyd-core` (engine, packer), `seydd` (RTSP via retina,
+in-house RFC 6184 RTP, UDP sensors/commands, publisher control), `cloud/api`
+(signal v2, dev-mode auth, presence, static hosting), `@seyd/core` +
+`@seyd/web` + `web/demo` (worker-hosted pilot), and `examples/demo-robot`
+(seydd config + Hikvision bridge outside core). `tools/seyd-smoke.py` drives
+the demo page in headless Chrome against the real stack and passes on the
+`sim/` source, including with 5 % injected loss. Not yet done from Milestone
+A: PMTUD-driven `chunk_len`, cert rotation, network-change re-gather, the
+cloud prober, the console UI (login/sign-up), `seyd-ffi` + `sdks/python`,
+Jetson/RPi builds, netem CI, and the legacy deletion (pending a run against
+the real camera). The repository directory/remote rename and DNS are owner
+actions still pending.
 
 ### Milestone A — the new stack runs the demo
 0. **Rename.** Repo → `seyd`; `CLAUDE.md`/`SPEC.md`/`DEMO.md` rewritten under the Seyd name (product decisions above folded in); new GCP project (`europe-west1`); DNS for `seyd.io`, `seydio.com` (redirect), `signal.`/`console.`/`demo.`/`docs.`/`wt-probe.` subdomains; npm scope `@seyd`, PyPI name `seyd`, crate prefix reserved. Legacy Python/relay code untouched.

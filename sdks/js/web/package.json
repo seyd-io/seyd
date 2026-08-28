@@ -1,0 +1,14 @@
+{
+  "name": "@seyd/web",
+  "version": "0.1.0",
+  "description": "Seyd pilot web components: <seyd-video>, <seyd-hud>, <seyd-connect-error>",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "echo 'no unit tests (browser-only elements)'" },
+  "dependencies": { "@seyd/core": "workspace:*" },
+  "devDependencies": { "@types/dom-webcodecs": "^0.1.13", "typescript": "^5.6.0" }
+}

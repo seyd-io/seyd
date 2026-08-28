@@ -1,0 +1,29 @@
+[package]
+name = "seydd"
+description = "Seyd robot-side daemon: media/sensor inputs, command outputs, publisher control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+seyd-wire = { workspace = true }
+seyd-fec = { workspace = true }
+seyd-qos = { workspace = true }
+seyd-core = { workspace = true }
+seyd-nat = { workspace = true }
+seyd-transport = { workspace = true }
+seyd-signal-client = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+url = "2"
+clap = { version = "4", features = ["derive"] }
+retina = "0.4"
+futures-util = "0.3"

@@ -146,7 +146,25 @@ cost a reboot and buy nothing on a fixed demo scene.
 
 ---
 
-## Running it
+## Running it on the Seyd stack (current)
+
+```bash
+examples/demo-robot/run.sh                                  # seydd + Hikvision bridge, signal from seydd.toml
+SIGNAL_URL=ws://localhost:8080/ws examples/demo-robot/run.sh  # against a local cloud/api
+```
+
+`seydd` (generic daemon, `examples/demo-robot/seydd.toml`) pulls the camera's
+RTSP stream and forwards `ptz` command messages to `udp://127.0.0.1:5004` and
+publisher-control messages (`recovery-request`, `session`) to
+`udp://127.0.0.1:5003`; `examples/demo-robot/bridge.py` consumes both and
+speaks ISAPI (`examples/demo-robot/hikvision.py`, moved out of the agent).
+Keyframe-on-join is therefore automatic: the pilot's `request-keyframe` on
+`hello` becomes a `recovery-request` which the bridge turns into
+`PUT /ISAPI/Streaming/channels/101/requestKeyFrame`. The pilot page is
+`web/demo` (`?robot=seyd-demo`). Verify with
+`tools/seyd-smoke.py --robot seyd-demo`.
+
+## Running it on the legacy prototype
 
 ```bash
 ./demo.sh                      # robot-id defaults to darc-demo

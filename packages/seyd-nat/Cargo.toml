@@ -1,0 +1,20 @@
+[package]
+name = "seyd-nat"
+description = "Reachability for the Seyd agent: socket binding, STUN + NAT classification, PCP/NAT-PMP/UPnP port mapping, candidate gathering, NatReport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+socket2 = { version = "0.5", features = ["all"] }
+if-addrs = "0.13"
+rand = "0.8"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }

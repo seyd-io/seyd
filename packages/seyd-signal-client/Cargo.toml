@@ -1,0 +1,22 @@
+[package]
+name = "seyd-signal-client"
+description = "Robot-side client for the Seyd signal protocol v2 (docs/protocol/signal-v2.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+base64 = "0.22"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
