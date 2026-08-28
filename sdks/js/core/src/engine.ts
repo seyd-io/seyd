@@ -28,6 +28,9 @@ export interface EngineOptions {
   emitFrames?: boolean;
   loss?: { rate: number; burst: number } | null;
   qosProfile?: string | null;
+  trace?: boolean;
+  /** Debug: only race candidates with these labels. */
+  paths?: string[] | null;
   clientName?: string;
   token?: string;
 }
@@ -57,6 +60,15 @@ export class Engine {
   // Synthetic loss injection: xorshift so runs are reproducible.
   private rngState = 0x9e3779b9;
   private burstLeft = 0;
+  private traceBuf: string[] = [];
+  private lastFrameIdIn: number | null = null;
+  private lastOutTs = -1;
+  private outIndex = 0;
+  private t0 = performance.now();
+  private tr(line: string): void {
+    if (!this.o.trace) return;
+    if (this.traceBuf.length < 20000) this.traceBuf.push(`${(performance.now() - this.t0).toFixed(1)} ${line}`);
+  }
 
   constructor(private sink: (ev: EngineEvent, transfer?: Transferable[]) => void, private o: EngineOptions) {
     if (o.canvas) this.ctx = (o.canvas as OffscreenCanvas).getContext('2d') as OffscreenCanvasRenderingContext2D;
@@ -64,10 +76,19 @@ export class Engine {
 
   // ── connection ──────────────────────────────────────────────────────────
 
-  async connect(offer: Offer): Promise<void> {
+  private raceGen = 0;
+
+  async connect(offerIn: Offer): Promise<void> {
+    let offer = offerIn;
+    if (this.closed) return;
+    // A second connect supersedes whatever is live or racing: tear it down so
+    // two sessions can never decode into one canvas.
+    if (this.wt) this.teardownTransport();
+    const gen = ++this.raceGen;
     this.offer = offer;
     this.sessionId = offer.session_id;
     this.channels = offer.channels ?? [];
+    if (this.o.paths?.length) offer = { ...offer, candidates: (offer.candidates ?? []).filter((c) => this.o.paths!.includes(c.label)) };
     this.sink({ t: 'state', state: 'connecting', detail: `trying ${offer.candidates?.length ?? 0} path(s)` });
     let res;
     try {
@@ -78,7 +99,7 @@ export class Engine {
       this.sink({ t: 'state', state: 'p2p-failed', detail: err.message });
       return;
     }
-    if (this.closed) { try { res.wt.close(); } catch { /* ignore */ } return; }
+    if (this.closed || gen !== this.raceGen) { try { res.wt.close(); } catch { /* ignore */ } return; }
     await this.attach(res.wt, res.label);
   }
 
@@ -156,6 +177,7 @@ export class Engine {
         break;
       case 'agent-stats':
         this.stats.noteAgentStats(m as never);
+        this.tr(`AGENT sent=${m.frames_sent} dropB=${m.frames_dropped_backlog} stale=${m.frames_skipped_stale} kf=${m.keyframes_requested} chunks=${m.chunks_sent} lost=${m.lost_packets} rtt=${m.rtt_ms} minrtt=${m.min_rtt_ms} cwnd=${m.cwnd} kbps=${m.delivery_kbps}`);
         break;
       default:
         this.sink({ t: 'control', msg: m });
@@ -170,7 +192,7 @@ export class Engine {
       this.decoder = new Decoder({
         codec: video.codec || 'avc1.42001f',
         onFrame: (f) => this.onDecoded(f),
-        onError: (e) => this.sink({ t: 'error', message: `decoder: ${e.message}`, fatal: false }),
+        onError: (e) => { this.tr(`DECERR ${e.message}`); this.sink({ t: 'error', message: `decoder: ${e.message}`, fatal: false }); },
         onNeedKeyframe: () => this.control?.send({ type: 'request-keyframe', ch: video.id }),
       });
       try { this.decoder.configure(); } catch (e) { this.sink({ t: 'error', message: `decoder configure: ${(e as Error).message}`, fatal: true }); }
@@ -191,7 +213,12 @@ export class Engine {
         deadlineKeyMs: this.qos?.deadline_key_ms ?? 60,
         onFrame: (f) => this.onFrame(channelId, f),
         onLoss: (l) => {
+          this.tr(`LOSS id=${l.frameId} key=${l.keyframe} superseded=${l.superseded} missing=${l.chunksMissing}`);
           this.degraded = true;
+          // Any unrecoverable frame breaks the reference chain until the next
+          // IDR, so ask for one now (the agent rate-limits to 250 ms) rather
+          // than smearing for the rest of the GOP.
+          this.decoder?.requestRecovery();
           this.control?.send({ type: 'loss', ch: channelId, frame_id: l.frameId, key: l.keyframe });
         },
       });
@@ -256,6 +283,11 @@ export class Engine {
     const g2g = this.clock.oneWayMs(f.sendTsFirst);
     if (g2g !== null) this.stats.noteG2g(g2g);
     if (f.keyframe) this.degraded = false;
+    if (this.o.trace) {
+      const order = this.lastFrameIdIn === null ? 'first' : ((f.frameId - this.lastFrameIdIn) & 0xffff) === 1 ? 'ok' : `GAP(${(f.frameId - this.lastFrameIdIn) & 0xffff})`;
+      this.lastFrameIdIn = f.frameId;
+      this.tr(`IN id=${f.frameId} key=${f.keyframe ? 1 : 0} bytes=${f.data.length} rec=${f.recovered ? 1 : 0} spread=${(f.lastSeenMs - f.firstSeenMs).toFixed(1)} g2g=${g2g === null ? '-' : g2g.toFixed(1)} q=${this.decoder?.queueSize ?? '-'} ${order}`);
+    }
     if (!this.decoder) return;
     if (this.qos?.on_loss === 'freeze-until-idr' && this.degraded && !f.keyframe) return;
     this.decoder.decode(f.data, f.keyframe, nowUs());
@@ -263,6 +295,11 @@ export class Engine {
 
   private onDecoded(frame: VideoFrame): void {
     this.stats.framesDecoded++;
+    if (this.o.trace) {
+      const ts = frame.timestamp;
+      this.tr(`OUT #${this.outIndex++} ts=${ts} ${ts < this.lastOutTs ? 'BACKWARDS' : 'ok'} q=${this.decoder?.queueSize ?? '-'}`);
+      this.lastOutTs = ts;
+    }
     const canvas = this.o.canvas;
     if (canvas && this.ctx) {
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
@@ -304,6 +341,7 @@ export class Engine {
 
   private emitStats(): void {
     const s = this.snapshot();
+    if (this.o.trace) { s.trace = this.traceBuf; this.traceBuf = []; }
     this.sink({ t: 'stats', stats: s });
     const loss = s.lossTruePct ?? s.lossEstPct;
     const state: LinkQuality['state'] = !this.wt ? 'lost' : loss >= 5 || s.keyframesLost > 0 && this.degraded ? 'poor' : loss >= 1 || this.degraded ? 'degraded' : 'good';

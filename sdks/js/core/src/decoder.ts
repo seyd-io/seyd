@@ -44,6 +44,15 @@ export class Decoder {
     this.o.onNeedKeyframe();
   }
 
+  /** Ask for a keyframe without gating decode (used after an unrecoverable delta frame). */
+  requestRecovery(): void {
+    const now = performance.now();
+    if (now - this.lastKeyReqMs < 250) return;
+    this.lastKeyReqMs = now;
+    this.keyframesRequested++;
+    this.o.onNeedKeyframe();
+  }
+
   /** Returns false if the frame was skipped (no keyframe yet). */
   decode(data: Uint8Array, keyframe: boolean, timestampUs: number): boolean {
     if (!this.dec || this.dec.state !== 'configured') return false;

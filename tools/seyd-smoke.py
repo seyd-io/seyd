@@ -80,6 +80,8 @@ async def run(args):
             sensor = await cdp.eval("document.getElementById('sensor')?.textContent")
             check(sensor and 'telemetry' in sensor, f'sensor text = {sensor!r}')
         role = await cdp.eval("document.getElementById('video').session?.role")
+        badge = await cdp.eval("(function(){const b=document.getElementById('role'); return b && !b.hidden ? b.textContent : null})()")
+        print('  badge', repr(badge))
         has_ptz = await cdp.eval("document.getElementById('video').session?.hasCommandChannel('ptz')")
         check(role == 'driver' and has_ptz, f'role={role!r} ptz channel={has_ptz}')
         before = len(collected.get('msgs', []))
@@ -108,7 +110,7 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--robot', default='seyd-demo')
-    ap.add_argument('--page', default='http://localhost:8080/')
+    ap.add_argument('--page', default='http://localhost:8080/pilot/')
     ap.add_argument('--signal', default='ws://localhost:8080/ws')
     ap.add_argument('--command-port', type=int, default=5004)
     ap.add_argument('--timeout', type=float, default=15)

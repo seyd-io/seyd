@@ -3,39 +3,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Seyd demo — live PTZ camera</title>
+  <title>Seyd</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 14px/1.4 system-ui, sans-serif; }
-    #app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
-    header { display: flex; gap: 16px; align-items: center; padding: 8px 14px; background: #1b1b1b; }
-    header .brand { font-weight: 700; letter-spacing: .04em; }
-    header .spacer { flex: 1; }
-    select { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; }
-    main { position: relative; min-height: 0; }
-    seyd-video { width: 100%; height: 100%; }
-    seyd-hud { position: absolute; top: 10px; left: 10px; }
-    seyd-connect-error { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); }
-    footer { padding: 6px 14px; background: #1b1b1b; color: #aaa; font-size: 12px; display: flex; gap: 16px; }
-    footer #sensor { color: #7d7; }
-    .notice { position: absolute; right: 10px; bottom: 10px; font-size: 12px; color: #bbb; background: rgba(0,0,0,.5); padding: 3px 8px; border-radius: 4px; }
+    [hidden] { display: none !important; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #eee; font: 13px/1.5 ui-monospace, 'SF Mono', Menlo, monospace; min-height: 100dvh; }
+    .page { display: grid; grid-template-columns: 1fr 380px; min-height: 100dvh; }
+    .left { padding: 72px 64px; display: flex; flex-direction: column; gap: 44px; border-right: 1px solid rgba(255,255,255,.07); }
+    .right { padding: 72px 40px; }
+    @media (max-width: 760px) { .page { grid-template-columns: 1fr; } .left { border-right: none; border-bottom: 1px solid rgba(255,255,255,.07); padding: 48px 28px; } .right { padding: 40px 28px; } }
+    .wordmark { font-size: 22px; letter-spacing: .18em; }
+    .tagline { font-size: 20px; line-height: 1.45; opacity: .75; max-width: 480px; }
+    .body-text { opacity: .45; line-height: 1.85; max-width: 460px; }
+    .attrs { display: flex; flex-direction: column; gap: 12px; }
+    .attr { display: grid; grid-template-columns: 130px 1fr; gap: 12px; opacity: .5; }
+    .attr-key { opacity: .6; }
+    .panel-heading { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; opacity: .35; margin-bottom: 26px; }
+    .robot-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+    .robot-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: #555; }
+    .dot.available { background: #34c759; box-shadow: 0 0 6px #34c75966; }
+    .dot.in-use { background: #ff9f0a; }
+    .robot-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .robot-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .robot-status { font-size: 11px; opacity: .45; }
+    .connect-btn { background: rgba(255,255,255,.09); color: #fff; border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 11px; text-decoration: none; white-space: nowrap; flex-shrink: 0; }
+    .connect-btn:hover { background: rgba(255,255,255,.17); }
+    .connect-btn.disabled { opacity: .35; pointer-events: none; }
+    .empty { opacity: .3; padding: 20px 0; line-height: 1.6; }
+    .signal-status { margin-top: 40px; font-size: 11px; opacity: .3; display: flex; align-items: center; gap: 8px; }
+    .signal-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
   </style>
 </head>
 <body>
-  <div id="app">
-    <header>
-      <span class="brand">SEYD</span>
-      <span id="robot"></span>
-      <span class="spacer"></span>
-      <label>QoS <select id="qos"><option value="latency">latency</option><option value="balanced">balanced</option><option value="quality">quality</option></select></label>
-    </header>
-    <main>
-      <seyd-video id="video"></seyd-video>
-      <seyd-hud id="hud"></seyd-hud>
-      <seyd-connect-error id="err"></seyd-connect-error>
-      <div class="notice">You are controlling a physical camera. Response latency reflects your connection.</div>
-    </main>
-    <footer><span id="hint">SPACE — snapshot · S — stats</span><span id="sensor"></span></footer>
+  <div class="page">
+    <div class="left">
+      <div class="wordmark">SEYD</div>
+      <div class="tagline">Remote operation infrastructure<br>for autonomous vehicles and robots.</div>
+      <div class="body-text">
+        Seyd is a connectivity layer — an agent SDK on the robot, a pilot SDK in
+        the browser, and a signaling cloud that brokers a direct, point-to-point
+        connection between them over the public internet. Low-latency video,
+        sensor data and commands. No transcoding. No relay. Your stack, your UI.
+      </div>
+      <div class="attrs">
+        <div class="attr"><span class="attr-key">Video</span><span>H.264 · single encode chain · no jitter buffer · WebCodecs</span></div>
+        <div class="attr"><span class="attr-key">Transport</span><span>QUIC datagrams over WebTransport, peer to peer</span></div>
+        <div class="attr"><span class="attr-key">Resilience</span><span>Reed-Solomon FEC per block · recovery in one round trip</span></div>
+        <div class="attr"><span class="attr-key">Integration</span><span>Rust core with a C ABI · <code>seydd</code> daemon · web components</span></div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="panel-heading">Robots</div>
+      <div id="robot-list"><div class="empty">Connecting…</div></div>
+      <div class="signal-status"><div class="signal-dot"></div><span id="signal-text">connecting</span></div>
+    </div>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="./src/landing.ts"></script>
 </body>
 </html>

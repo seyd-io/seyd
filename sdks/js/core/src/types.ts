@@ -77,6 +77,8 @@ export interface AgentStats {
 }
 
 export interface PilotStats {
+  /** Present only with the `trace` option: pipeline trace lines since the last snapshot. */
+  trace?: string[];
   chunksRx: number; bytesRx: number; parityRx: number; chunksDup: number; chunksBadHeader: number;
   chunksDropped: number; chunksMissing: number; chunksTooOld: number;
   framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number;

@@ -7,11 +7,14 @@ import { SeydSession, SeydSessionOptions, SessionState } from '@seyd/core';
  * Properties: `.session` (SeydSession), `.canvas`.
  */
 export class SeydVideoElement extends HTMLElement {
-  static observedAttributes = ['robot-id', 'signal-url', 'qos', 'token', 'loss', 'burst', 'host'];
+  static observedAttributes = ['robot-id', 'signal-url', 'qos', 'token', 'loss', 'burst', 'host', 'trace', 'paths'];
   session: SeydSession | null = null;
   readonly canvas: HTMLCanvasElement;
   private statusEl: HTMLDivElement;
   private connected = false;
+  private restartQueued = false;
+  private readonly onPageHide = () => this.stop();
+  private readonly onPrerenderingChange = () => this.start();
 
   constructor() {
     super();
@@ -30,26 +33,55 @@ export class SeydVideoElement extends HTMLElement {
     this.statusEl = root.querySelector('.status')!;
   }
 
-  connectedCallback(): void { this.connected = true; this.start(); }
+  private startScheduled = false;
+  private liveKey: string | null = null;
+
+  connectedCallback(): void { this.connected = true; this.scheduleStart(); }
   disconnectedCallback(): void { this.connected = false; this.stop(); }
-  attributeChangedCallback(): void {
+  attributeChangedCallback(name: string): void {
     if (!this.connected) return;
-    // Attributes commonly arrive after upgrade (frameworks set them one by one);
-    // start once both required ones exist, restart if a live session's config changes.
-    if (this.session) { this.stop(); this.start(); }
-    else if (this.getAttribute('robot-id') && this.getAttribute('signal-url')) this.start();
+    // `qos` changes apply live; anything else is coalesced into one (re)start.
+    if (name === 'qos' && this.session && this.getAttribute('qos')) { this.session.setQos(this.getAttribute('qos')!); return; }
+    this.scheduleStart();
+  }
+
+  // Attributes commonly arrive one by one after upgrade (frameworks, or a
+  // script setting robot-id, signal-url, qos in sequence). Every setAttribute
+  // used to spawn a fresh session and leave the previous one running — two
+  // decoders on one canvas and a zombie driver session on the robot. Coalesce
+  // to a single start per task, and restart only when the identity changes.
+  private scheduleStart(): void {
+    if (this.startScheduled) return;
+    this.startScheduled = true;
+    queueMicrotask(() => {
+      this.startScheduled = false;
+      if (!this.connected) return;
+      const key = ['signal-url', 'robot-id', 'token', 'loss', 'burst', 'host', 'trace', 'paths'].map((a) => this.getAttribute(a)).join('|');
+      if (this.session && key === this.liveKey) return;
+      this.stop();
+      this.liveKey = key;
+      this.start();
+    });
   }
 
   private start(): void {
     const robotId = this.getAttribute('robot-id');
     const signalUrl = this.getAttribute('signal-url');
     if (!robotId || !signalUrl) { this.setStatus('Waiting for robot-id and signal-url…', ''); return; }
+    // Chrome may prerender this page from an omnibox prediction; a prerendered
+    // document must not take a driver slot the user never asked for.
+    if ((document as Document & { prerendering?: boolean }).prerendering) {
+      document.addEventListener('prerenderingchange', this.onPrerenderingChange, { once: true });
+      this.setStatus('Waiting for page to be shown…', '');
+      return;
+    }
+    if (this.session) return;
     const lossRate = parseFloat(this.getAttribute('loss') ?? '0') || 0;
     const opts: SeydSessionOptions = {
       signalUrl, token: this.getAttribute('token') ?? undefined, canvas: this.canvas,
       qos: this.getAttribute('qos'), host: (this.getAttribute('host') as 'auto' | 'worker' | 'inline') ?? 'auto',
       loss: lossRate > 0 ? { rate: Math.min(1, lossRate), burst: Math.max(1, parseInt(this.getAttribute('burst') ?? '1', 10) || 1) } : null,
-      clientName: '@seyd/web',
+      clientName: '@seyd/web', trace: this.hasAttribute('trace'), paths: this.getAttribute('paths')?.split(',').filter(Boolean) ?? null,
     };
     const s = new SeydSession(opts);
     this.session = s;
@@ -60,7 +92,7 @@ export class SeydVideoElement extends HTMLElement {
     void s.connect(robotId);
   }
 
-  private stop(): void { this.session?.close(); this.session = null; }
+  private stop(): void { this.session?.close(); this.session = null; this.liveKey = null; }
 
   private statusText(state: SessionState, detail?: string): string {
     switch (state) {

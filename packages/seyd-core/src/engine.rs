@@ -10,7 +10,7 @@ use bytes::Bytes;
 use seyd_qos::Profile;
 use seyd_transport::{Endpoint, SendError, Session};
 use seyd_wire::v2::{ChunkHeader, FrameMeta};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -90,12 +90,32 @@ struct SessionState {
     signal_id: String,
     role: Role,
     lines: mpsc::UnboundedSender<String>,
+    /// Set after a delta frame was dropped for this session; every following
+    /// delta is useless to its decoder until a keyframe arrives.
+    skip_until_key: std::sync::atomic::AtomicBool,
 }
 
 struct Pending {
     role: Role,
     since: Instant,
 }
+
+/// Bounded, in-order frame queue between the input and the sender.
+///
+/// The prototype used a single slot ("latest frame wins"). That is wrong for
+/// H.264: a skipped delta frame breaks the reference chain and every later
+/// frame decodes against the wrong picture until the next IDR — measured as
+/// 10 % of frames skipped on the demo camera (bursty RTSP delivery), i.e. a
+/// visible warp/"replay" every few hundred milliseconds. Frames are therefore
+/// sent in order; when the queue is full the *new* delta is dropped and every
+/// following delta too, until a keyframe (which clears the queue — an IDR
+/// makes queued deltas irrelevant) and a recovery request goes out.
+struct FrameQueue {
+    frames: VecDeque<(u8, VideoFrame)>,
+    skip_until_key: bool,
+}
+
+const MAX_QUEUED_FRAMES: usize = 6;
 
 struct Inner {
     cfg: EngineConfig,
@@ -107,7 +127,7 @@ struct Inner {
     counters: Counters,
     events: mpsc::Sender<Event>,
     last_recovery: Mutex<HashMap<u8, Instant>>,
-    slot: Mutex<Option<(u8, VideoFrame)>>,
+    queue: Mutex<FrameQueue>,
     slot_notify: Notify,
     epoch: Instant,
 }
@@ -140,7 +160,10 @@ impl Engine {
             counters: Counters::default(),
             events,
             last_recovery: Mutex::new(HashMap::new()),
-            slot: Mutex::new(None),
+            queue: Mutex::new(FrameQueue {
+                frames: VecDeque::new(),
+                skip_until_key: false,
+            }),
             slot_notify: Notify::new(),
             epoch: Instant::now(),
         });
@@ -222,23 +245,41 @@ impl Engine {
         }
     }
 
-    /// Offer a new frame. Single slot: if the sender has not picked up the
-    /// previous frame yet it is overwritten whole — the pilot always gets the
-    /// most recent complete picture and latency cannot accumulate.
+    /// Offer a new frame. In-order bounded queue (see `FrameQueue`): a
+    /// keyframe flushes stale deltas; an overflowing delta is dropped together
+    /// with every delta after it until the next keyframe, and a recovery
+    /// request is raised so that keyframe arrives in ~1 RTT.
     pub fn push_video(&self, channel: u8, frame: VideoFrame) {
         self.inner
             .counters
             .frames_in
             .fetch_add(1, Ordering::Relaxed);
-        let mut slot = self.inner.slot.lock().unwrap();
-        if slot.is_some() {
+        let mut q = self.inner.queue.lock().unwrap();
+        if frame.keyframe {
+            let flushed = q.frames.len();
+            q.frames.clear();
+            q.skip_until_key = false;
+            if flushed > 0 {
+                self.inner
+                    .counters
+                    .frames_skipped_stale
+                    .fetch_add(flushed as u64, Ordering::Relaxed);
+            }
+        } else if q.skip_until_key || q.frames.len() >= MAX_QUEUED_FRAMES {
+            let first = !q.skip_until_key;
+            q.skip_until_key = true;
             self.inner
                 .counters
                 .frames_skipped_stale
                 .fetch_add(1, Ordering::Relaxed);
+            drop(q);
+            if first {
+                self.request_recovery(channel, "sender-backlog");
+            }
+            return;
         }
-        *slot = Some((channel, frame));
-        drop(slot);
+        q.frames.push_back((channel, frame));
+        drop(q);
         self.inner.slot_notify.notify_one();
     }
 
@@ -263,11 +304,11 @@ impl Engine {
 
     async fn frame_sender(self) {
         loop {
-            self.inner.slot_notify.notified().await;
-            let Some((channel, frame)) = self.inner.slot.lock().unwrap().take() else {
-                continue;
-            };
-            self.send_frame(channel, frame).await;
+            let next = self.inner.queue.lock().unwrap().frames.pop_front();
+            match next {
+                Some((channel, frame)) => self.send_frame(channel, frame).await,
+                None => self.inner.slot_notify.notified().await,
+            }
         }
     }
 
@@ -320,6 +361,14 @@ impl Engine {
         let wire_bytes: usize = pack.chunks.iter().map(|c| c.len()).sum();
         let threshold = profile.drop_threshold_bytes(fps);
         let mut sent_any = false;
+        tracing::trace!(
+            frame_id,
+            keyframe = frame.keyframe,
+            bytes = frame.data.len(),
+            wire_bytes,
+            chunks = pack.chunks.len(),
+            "frame"
+        );
 
         for s in &sessions {
             // Admission control before the first chunk leaves: whole frame or
@@ -327,11 +376,28 @@ impl Engine {
             // buffer — or arrives while the backlog exceeds the profile's
             // byte budget — is skipped cleanly. Keyframes always go.
             let space = s.transport.send_buffer_space();
-            if !frame.keyframe && (wire_bytes > space || space < threshold) {
+            if frame.keyframe {
+                s.skip_until_key.store(false, Ordering::Relaxed);
+            } else if s.skip_until_key.load(Ordering::Relaxed) {
                 self.inner
                     .counters
                     .frames_dropped_backlog
                     .fetch_add(1, Ordering::Relaxed);
+                continue;
+            } else if wire_bytes > space || space < threshold {
+                self.inner
+                    .counters
+                    .frames_dropped_backlog
+                    .fetch_add(1, Ordering::Relaxed);
+                s.skip_until_key.store(true, Ordering::Relaxed);
+                tracing::debug!(
+                    frame_id,
+                    wire_bytes,
+                    space,
+                    threshold,
+                    "delta frame dropped: backlog; skipping until keyframe"
+                );
+                self.request_recovery(channel, "backlog");
                 continue;
             }
             let mut ok = true;
@@ -433,6 +499,7 @@ impl Engine {
             signal_id: signal_id.clone(),
             role,
             lines: lines_tx,
+            skip_until_key: std::sync::atomic::AtomicBool::new(false),
         });
         self.inner
             .sessions
@@ -546,9 +613,7 @@ impl Engine {
                         Ok(FromPilot::Ping { t1 }) => {
                             let _ = state.lines.send(encode_line(&ToPilot::Pong { t1, t2: self.now_us() }));
                         }
-                        Ok(FromPilot::Loss { ch, key, .. }) => {
-                            if key { self.request_recovery(ch, "pilot-loss"); }
-                        }
+                        Ok(FromPilot::Loss { ch, .. }) => self.request_recovery(ch, "pilot-loss"),
                         Ok(FromPilot::RequestKeyframe { ch }) => self.request_recovery(ch, "pilot-request"),
                         Ok(FromPilot::SetQos { profile }) => {
                             match seyd_qos::get(&profile) {

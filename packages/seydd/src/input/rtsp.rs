@@ -89,7 +89,13 @@ async fn session(url: &str, tx: &mpsc::Sender<VideoAu>) -> anyhow::Result<()> {
     tracing::info!(url = %redact(url), "rtsp input playing");
 
     let mut frames: u64 = 0;
+    let mut last_at = std::time::Instant::now();
     while let Some(item) = demuxed.next().await {
+        let gap = last_at.elapsed();
+        last_at = std::time::Instant::now();
+        if gap.as_millis() > 120 {
+            tracing::debug!(gap_ms = gap.as_millis() as u64, "rtsp inter-frame gap");
+        }
         if let CodecItem::VideoFrame(f) = item? {
             {
                 if f.stream_id() != video_idx {

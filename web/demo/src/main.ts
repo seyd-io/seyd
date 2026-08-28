@@ -16,6 +16,8 @@ const err = document.getElementById('err') as SeydConnectErrorElement;
 const qosSelect = document.getElementById('qos') as HTMLSelectElement;
 const hintEl = document.getElementById('hint')!;
 const sensorEl = document.getElementById('sensor')!;
+const roleEl = document.getElementById('role')!;
+const lanHintEl = document.getElementById('lan-hint')!;
 document.getElementById('robot')!.textContent = ROBOT_ID;
 qosSelect.value = qos;
 
@@ -27,13 +29,24 @@ video.addEventListener('seyd-session', (e) => {
   err.session = session;
   ptz?.dispose();
   ptz = new PtzController(session, video.canvas, video);
-  session.on('welcome', () => {
+  session.on('welcome', ({ role, pathLabel }) => {
     const hasPtz = session.hasCommandChannel('ptz');
-    ptz?.setEnabled(hasPtz);
+    ptz?.setEnabled(hasPtz && role === 'driver');
+    roleEl.textContent = role === 'driver' ? 'driver' : 'observer — someone else is driving; controls disabled';
+    roleEl.className = `badge ${role}`;
+    roleEl.hidden = false;
+    // Chrome refuses a public-origin page a direct connection to a private IP
+    // (Local Network Access) unless the user allows it; the race then falls
+    // through to the hairpin. Only meaningful when a LAN candidate was offered.
+    const hadHost = session.candidates.some((c) => c.label === 'host');
+    const viaHairpin = pathLabel === 'srflx' || pathLabel === 'portmap';
+    lanHintEl.textContent = 'Chrome blocked the direct LAN connection (local network access); if you are on the robot\'s network, allow it in the site permissions for lowest latency.';
+    lanHintEl.hidden = !(hadHost && viaHairpin && location.protocol === 'https:');
     hintEl.textContent = (hasPtz ? 'DRAG or ARROWS — look · SHIFT — fast · WHEEL or +/− — zoom · H — home · ' : '') + 'SPACE — snapshot · S — stats';
   });
+  session.on('stats', (s) => { const w = window as unknown as { __seydTrace?: string[] }; if (w.__seydTrace && s.trace) w.__seydTrace.push(...s.trace); });
   session.on('sensor', ({ channel, data }) => { sensorEl.textContent = `${channel.name}: ${typeof data === 'string' ? data : JSON.stringify(data)}`; });
-  session.on('state', ({ state }) => { if (state !== 'connected') ptz?.setEnabled(false); });
+  session.on('state', ({ state }) => { if (state !== 'connected') { ptz?.setEnabled(false); roleEl.hidden = true; lanHintEl.hidden = true; } });
 });
 
 qosSelect.addEventListener('change', () => {
@@ -60,6 +73,8 @@ function snapshot(): void {
 }
 
 const loss = parseFloat(params.get('loss') ?? '0') || 0;
+if (params.get('paths')) video.setAttribute('paths', params.get('paths')!);
+if (params.get('trace')) { video.setAttribute('trace', '1'); (window as unknown as { __seydTrace: string[] }).__seydTrace = []; }
 if (loss > 0) { video.setAttribute('loss', String(loss)); video.setAttribute('burst', params.get('burst') ?? '1'); }
 video.setAttribute('qos', qos);
 video.setAttribute('signal-url', SIGNAL_URL);

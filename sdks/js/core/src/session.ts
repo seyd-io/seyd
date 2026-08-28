@@ -19,9 +19,21 @@ export interface SeydSessionOptions {
   worker?: Worker;
   qos?: string | null;
   loss?: { rate: number; burst: number } | null;
+  /** Collect a per-frame pipeline trace in `lastStats.trace` (debugging). */
+  trace?: boolean;
+  /** Debug: only race candidates with these labels (e.g. ['srflx']). */
+  paths?: string[] | null;
   clientName?: string;
   retryMs?: number;
+  /** Allow more than one live session to the same robot from this document (multi-view). Default: a new session closes the previous one. */
+  allowMultiple?: boolean;
 }
+
+// One live session per (signal URL, robot) per document unless opted out.
+// Two sessions on one page mean two decoders on one canvas and a second
+// signaling subject that the cloud gives the observer role — exactly the
+// "picture replays / controls dead" failure seen in the field.
+const liveSessions = new Map<string, SeydSession>();
 
 type Handler<T> = (ev: T) => void;
 
@@ -33,6 +45,8 @@ export class SeydSession {
   sessionId: string | null = null;
   robotId: string | null = null;
   pathLabel: string | null = null;
+  /** Candidates the robot advertised in the last offer (label/url/priority). */
+  candidates: Offer['candidates'] = [];
   lastStats: PilotStats | null = null;
   lastFailure: P2pFailure | null = null;
 
@@ -60,9 +74,15 @@ export class SeydSession {
       this.host = new InlineHost();
     }
     this.host.onEvent((ev) => this.onEngine(ev));
-    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token } }, transfer);
+    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, trace: !!o.trace, paths: o.paths ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token } }, transfer);
 
-    this.signal.on('auth-ok', () => { if (this.robotId) { this.setState('waiting-robot'); this.signal.connectRobot(this.robotId); } });
+    this.signal.on('auth-ok', () => {
+      // A signaling reconnect while the P2P session is racing or live must not
+      // ask for a second offer: the QUIC session survives signaling drops.
+      if (!this.robotId || this.state === 'connecting' || this.state === 'connected') return;
+      this.setState('waiting-robot');
+      this.signal.connectRobot(this.robotId);
+    });
     this.signal.on('offer', (offer) => this.onOffer(offer));
     this.signal.on('robot-offline', () => this.fail('robot-offline', null));
     this.signal.on('denied', ({ reason }) => { this.emit('error', { message: `signaling denied: ${reason}`, fatal: true }); this.fail('token-rejected', null, reason); });
@@ -80,16 +100,32 @@ export class SeydSession {
   private setState(state: SessionState, detail?: string): void { this.state = state; this.emit('state', { state, detail }); }
 
   async connect(robotId: string): Promise<void> {
+    if (this.closed) throw new Error('session is closed');
     this.robotId = robotId;
+    const key = `${this.o.signalUrl}|${robotId}`;
+    this.liveKey = key;
+    if (!this.o.allowMultiple) {
+      const prev = liveSessions.get(key);
+      if (prev && prev !== this) { console.warn('[seyd] closing previous session to', robotId); prev.close(); }
+      liveSessions.set(key, this);
+    }
     this.setState('signaling');
     this.signal.connect();
   }
+  private liveKey: string | null = null;
 
   private onOffer(offer: Offer): void {
     if (this.closed) return;
+    if (this.state === 'connecting' || this.state === 'connected') {
+      // Already racing or live: this offer is a duplicate (or a stale retry);
+      // taking it would replace sessionId/role with a second session's.
+      this.signal.abort(offer.session_id);
+      return;
+    }
     this.offer = offer;
     this.sessionId = offer.session_id;
     this.role = offer.role;
+    this.candidates = offer.candidates ?? [];
     this.channels = offer.channels ?? [];
     this.clearRetry();
     this.host.post({ t: 'connect', offer });
@@ -122,7 +158,7 @@ export class SeydSession {
       case 'state':
         if (ev.state === 'connecting') this.setState('connecting', ev.detail);
         else if (ev.state === 'connected') this.setState('connected');
-        else if (ev.state === 'closed') this.setState('closed');
+        else if (ev.state === 'closed') { if (this.onClosedAck) { const k = this.onClosedAck; this.onClosedAck = null; k(); } else this.setState('closed'); }
         break;
       case 'welcome':
         this.channels = ev.channels; this.qos = ev.qos; this.role = ev.role; this.pathLabel = ev.pathLabel;
@@ -165,12 +201,21 @@ export class SeydSession {
   requestKeyframe(): void { this.host.post({ t: 'request-keyframe' }); }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
     this.clearRetry();
+    if (this.liveKey && liveSessions.get(this.liveKey) === this) liveSessions.delete(this.liveKey);
     if (this.sessionId) this.signal.abort(this.sessionId);
+    // Let the engine close the WebTransport before the worker is terminated —
+    // terminating first leaves a zombie QUIC session on the robot until idle
+    // timeout. The engine answers with state 'closed'; 300 ms is the backstop.
     this.host.post({ t: 'close' });
-    this.host.terminate();
+    const kill = () => { if (this.terminateTimer) clearTimeout(this.terminateTimer); this.terminateTimer = null; this.host.terminate(); };
+    this.terminateTimer = setTimeout(kill, 300);
+    this.onClosedAck = kill;
     this.signal.close();
     this.setState('closed');
   }
+  private terminateTimer: ReturnType<typeof setTimeout> | null = null;
+  private onClosedAck: (() => void) | null = null;
 }
