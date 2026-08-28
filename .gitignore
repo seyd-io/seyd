@@ -34,3 +34,6 @@ packages/signal/pilot/
 
 # Logs
 *.log
+
+# Rust
+target/

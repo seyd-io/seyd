@@ -1,4 +1,25 @@
-# DARC — Distributed Autonomous Remote Control
+# Seyd (formerly DARC) — Product Specification
+
+> **Product decisions, 2026-08-28.** This document was written under the
+> working name DARC. The product is now **Seyd** (`seyd.io`). The following
+> decisions supersede anything below that contradicts them; PLAN.md carries the
+> full plan and docs/adr/ the individual decisions.
+>
+> - **P2P only.** No relay fallback in the product. When a direct connection
+>   cannot be made the pilot explains why (NAT type, port mapping result, IPv6,
+>   cloud reachability probe) and how to fix it. Relays are a future,
+>   separately priced tier. The "TURN relay" rows below are that future tier.
+> - **Rust core with a C ABI** (ADR 0004) on **quinn** (ADR 0002), replacing
+>   the "C + MsQuic" plan below. All other agent form factors are thin wrappers.
+> - **Wire protocol v2** (ADR 0001): channel ids, per-block FEC for sub-frame
+>   pipelining, send timestamps.
+> - **Recovery in one RTT:** NACK-driven LTR / intra-refresh / keyframe
+>   requests to the publisher, closed-loop ABR inside the QoS ceiling.
+> - **Web pilot SDK first**; iOS/Android/Flutter on customer demand.
+> - **Portable cloud, EU residency likely, no Google lock-in:** Cloud Run in
+>   `europe-west1` for now, plain containers on Postgres + Redis, OIDC auth with
+>   the provider not yet chosen.
+> - **MoQ not adopted** for v2 (ADR 0003).
 
 ## Product Vision
 
@@ -49,7 +70,7 @@ Both archetypes ride the same DARC transport layer. The difference is how much o
 | Vehicle discovery & fleet registry | The vehicle hardware |
 | Session authentication & authorization | The operator UI (except optional SDK components) |
 | Fleet presence & status signaling | The fleet management business logic |
-| TURN relay fallback | Managed human operators |
+| Relay fallback (future paid tier — not in v1) | Managed human operators |
 | Optional pilot UI components (React, SwiftUI) | Transcoding or format conversion |
 
 DARC exposes SDKs and APIs. Integrators build the robot agent and the operator application on top.
@@ -138,7 +159,7 @@ A single operator is connected to more than one vehicle at once, switching focus
 - **Fleet registry:** Persistent record of vehicles, their owners, and configuration
 - **Presence service:** Real-time vehicle online/offline/busy/help-requested status
 - **Auth service:** Issues short-lived session tokens; enforces who can connect to what
-- **TURN relay:** Fallback for environments where direct P2P is blocked by NAT/firewall (media touches cloud only here)
+- **Relay (future tier):** not part of v1. Sessions that cannot go direct fail with a diagnosis.
 
 ---
 
@@ -279,10 +300,11 @@ The Mac-to-Mac prototype now runs this transport architecture end-to-end, using 
 - Latest-frame-only sender: single-slot frame buffer + aioquic datagram queue flush before each frame — no latency growth on congested paths
 - WebSocket relay fallback: automatic once the P2P deadline passes; same chunk format; pilot detects ArrayBuffer on WebSocket and routes through the same decoder path. Not a one-way door — the pilot keeps retrying P2P every 30s and upgrades live if it succeeds.
 
-**What the production version adds:**
-- Native QUIC via **MsQuic** (C library, Microsoft) on the agent — Python/aioquic replaced for ARM embedded targets
-- WebRTC fallback for environments where UDP is blocked entirely
-- Desktop and iOS operator SDKs (currently browser-only)
+**What the production version adds (see PLAN.md):**
+- A Rust core on **quinn** with a C ABI (ADRs 0002, 0004) — Python/aioquic replaced for ARM embedded targets
+- Wire protocol v2 with channel ids, per-block FEC and send timestamps (ADR 0001)
+- NACK-driven recovery, closed-loop ABR, BBR + PMTUD, off-main-thread pilot
+- No relay fallback: P2P failures are diagnosed, not papered over
 
 #### NAT traversal: why DARC does not implement ICE
 
@@ -486,10 +508,10 @@ The Mac-to-Mac prototype is complete and working. See PROTOTYPE.md for full impl
 ### Short-term (prototype polish)
 1. **Relay-mode commands** — route pilot→robot JSON commands through the signaling WebSocket in relay mode (currently commands silently no-op when P2P fails)
 2. **Latency display** — embed a wall-clock timestamp in the chunk header; display glass-to-glass latency on the pilot page to confirm QUIC path advantage over relay
-3. **Port agent to C with MsQuic** — Python/aioquic is prototype-quality; the production agent needs to run on ARM Linux (Jetson, RPi 5, RK3588) with MsQuic for sub-10ms QUIC processing overhead
+3. **Port agent to Rust on quinn** (ADR 0002) — Python/aioquic is prototype-quality; the production agent needs to run on ARM Linux (Jetson, RPi 5, RK3588)
 
 ### Medium-term (path to product)
-4. **Standard TURN relay** — replace the WebSocket relay fallback with coturn or Cloudflare TURN. Note this is a better *relay*, not better traversal: a browser WebTransport client cannot allocate or use a TURN relay, so this means a QUIC-forwarding relay with a public address rather than TURN proper. Real ICE across all NAT types requires the WebRTC DataChannel path described under "NAT traversal" above.
+4. ~~**Standard TURN relay**~~ — *deferred to a future paid tier (2026-08-28). Not in v1.* Original note: replace the WebSocket relay fallback with coturn or Cloudflare TURN. Note this is a better *relay*, not better traversal: a browser WebTransport client cannot allocate or use a TURN relay, so this means a QUIC-forwarding relay with a public address rather than TURN proper. Real ICE across all NAT types requires the WebRTC DataChannel path described under "NAT traversal" above.
 5. **Agent API surface** — define the integration contract: configuration, lifecycle, stream hooks, command callbacks. This determines what ROS2 node or Linux daemon integrators would call.
 6. **Operator SDK API surface** — TypeScript first (browser + Electron); what does a 10-line integration look like?
 7. **Fleet registry data model** — vehicle identity, owner, operator RBAC, presence events; Postgres + Redis pub/sub

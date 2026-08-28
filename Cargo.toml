@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/seyd-fec",
+    "packages/seyd-wire",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "UNLICENSED"
+repository = "https://github.com/seyd-io/seyd"
+
+[workspace.dependencies]
+seyd-fec = { path = "packages/seyd-fec" }
+seyd-wire = { path = "packages/seyd-wire" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,137 +1,157 @@
-# DARC — Monorepo Guide for Claude
+# Seyd — Monorepo Guide for Claude
 
 ## What this repo is
 
-This is the monorepo for DARC (Distributed Autonomous Remote Control), a SaaS connectivity platform for remote operation of autonomous vehicles and robots. DARC provides low-latency, peer-to-peer video and data tunneling between robot systems and human operators over the public internet.
+This is the monorepo for **Seyd** (formerly DARC), a SaaS connectivity platform
+for remote operation of autonomous vehicles and robots: hyper-low-latency,
+point-to-point video, sensor and command streaming between robot systems and
+human operators over the public internet, delivered as SDKs plus a signaling
+cloud. Domains: `seyd.io`, `seydio.com`.
 
-The repo will grow to include the core product, SDKs, a signaling server, a web-based pilot application, landing pages, marketing assets, tooling, and infrastructure configuration. Everything lives here.
+The repo is **mid-migration**. A Python/JS proof of concept (still under
+`packages/agent`, `packages/pilot`, `packages/signal`) proved the architecture;
+the product is being rebuilt as a Rust core with a C ABI, a TypeScript web pilot
+SDK, and a portable cloud. `PLAN.md` is the plan; follow it.
 
 ## Key documents — read these first
 
-Before writing any code or making any architectural decision, read:
+- **PLAN.md** — the approved product plan: fixed decisions, the technology
+  upgrades that define "world-class", the target architecture, ordered work,
+  and verification. Start here.
+- **docs/adr/** — architecture decision records. ADR 0001 (wire protocol v2),
+  0002 (quinn), 0003 (MoQ), 0004 (C ABI). Add one for every decision of that
+  weight; never change a wire format or public API without one.
+- **SPEC.md** — product specification: customers, use cases, no-transcoding
+  principle, competitor landscape. Written under the DARC name; the product
+  decisions section at the top records what changed on 2026-08-28.
+- **PROTOTYPE.md** — the proof-of-concept build, frozen as history. Its
+  measurements (FEC, NAT reachability table, decoder gotchas) remain valid
+  inputs; its component descriptions describe the legacy Python/JS code only.
+- **DEMO.md** — the always-on Hikvision PTZ demo. The first customer program
+  the new stack must run.
 
-- **SPEC.md** — the product specification: what DARC is, the two customer archetypes, the no-transcoding principle, technology choices, competitor landscape, and open questions.
-- **PROTOTYPE.md** — the current build target: a Mac-to-Mac teleoperation demo using FFmpeg, a Python relay agent, a browser pilot page, and a WebSocket signaling server.
-- **DEMO.md** — the always-on public demo: a real Hikvision PTZ camera over RTSP with operator pan/tilt/zoom. The first configuration where a real camera, not `sim/`, publishes the video.
+## Fixed product decisions (2026-08-28) — do not re-open without the owner
 
-These documents are the source of truth for product decisions. They are not static — they must be updated whenever we make a decision, change direction, or learn something new.
+- **P2P only.** No relay fallback. On P2P failure the pilot shows a diagnosis
+  and concrete network fixes. Relays are a future, separately priced tier.
+- **Rust core + C ABI.** All protocol logic in Rust crates; every other agent
+  form factor (C++, Python, ROS 2, daemon) is a thin wrapper with no protocol
+  logic. See ADR 0004.
+- **Web pilot SDK first.** Mobile SDKs when a customer needs them.
+- **Portable cloud, EU residency likely, no Google lock-in.** Cloud Run in
+  `europe-west1` today; plain containers on Postgres + Redis; no GCP-only SDKs
+  or services in application code; auth behind an OIDC abstraction, provider
+  not yet chosen.
+- **No timeline/headcount planning.** Plans are ordered work.
+- **Do not harden the Python prototype.** Effort goes into the new stack.
 
 ## Keeping documentation current — mandatory
 
-When you make a decision during implementation that isn't reflected in SPEC.md or PROTOTYPE.md, update the relevant document before moving on. This applies to:
+When you make a decision that isn't reflected in PLAN.md, the ADRs or SPEC.md,
+update the relevant document before moving on: technology choices, interface
+changes, scope changes, discoveries, architectural pivots. The rule: **if a
+future developer reading only PLAN.md, the ADRs and SPEC.md would be surprised
+by the code, the docs are out of date.** Every measured number quoted in a doc
+must be re-measured when the code it describes changes.
 
-- Technology choices (e.g. "we chose library X over Y and here's why")
-- Interface changes (e.g. "the signaling message format changed")
-- Scope changes (e.g. "we added a feature" or "we cut something")
-- Discoveries (e.g. "STUN failed in this scenario, so we added TURN")
-- Architectural pivots (e.g. "we moved from Python to Go for the agent")
-
-The rule: **if a future developer reading only SPEC.md and PROTOTYPE.md would be surprised by the code, the docs are out of date.** Fix the docs.
-
-## Monorepo structure
+## Monorepo structure (target; items marked *legacy* exist today and go away)
 
 ```
-darc/
-├── CLAUDE.md              # this file
-├── SPEC.md                # product specification
-├── PROTOTYPE.md           # prototype build spec
-│
-├── packages/              # core DARC product components
-│   ├── signal/            # darc-signal: WebSocket signaling server (Node.js)
-│   ├── agent/             # darc-agent: robot-side relay daemon (Python)
-│   └── pilot/             # darc-pilot: browser operator application (HTML/JS)
-│
-├── sim/                   # robot simulation — NOT part of DARC
-│   ├── video-source.sh    # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
-│   └── sensor-source.py   # counter → UDP :5002 at 10 Hz
-│
-├── deploy/                # cloud infrastructure and deployment config
-│
-├── tools/                 # internal tooling and test harnesses
-│   ├── setup-machine.sh   # dev machine bootstrap
-│   ├── find-camera.py     # locate an IP camera on the LAN (SADP/ONVIF/port scan)
-│   ├── relay-pilot.py     # headless pilot exercising the relay path
-│   ├── pilot-smoke.py     # drives the real pilot in Chrome; asserts P2P + decode
-│   ├── fec-vectors.py     # emit FEC interop vectors from the agent encoder
-│   └── fec-check.js       # replay them through the pilot decoder
-│
-├── web/                   # (future) landing page and marketing site
-└── docs/                  # (future) developer documentation and SDK guides
+seyd/
+├── CLAUDE.md  PLAN.md  SPEC.md  PROTOTYPE.md  DEMO.md
+├── Cargo.toml                 # Rust workspace
+├── packages/                  # Seyd core — Rust, production
+│   ├── seyd-wire/             # wire protocol v2 headers + legacy v1 decode (ADR 0001)
+│   ├── seyd-fec/              # Reed-Solomon GF(256), Cauchy; must pass tools/fec-vectors.py
+│   ├── seyd-qos/              # QoS profiles + closed-loop ABR controller (pure)
+│   ├── seyd-nat/              # STUN, NAT classification, PCP/NAT-PMP/UPnP, candidates, NatReport
+│   ├── seyd-transport/        # quinn: WebTransport (h3) + native QUIC (seyd/2); block sender
+│   ├── seyd-signal-client/    # WS client to the cloud, signal v2, Ed25519 robot auth
+│   ├── seyd-core/             # engine: channels, sessions, callbacks — pure Rust API
+│   ├── seyd-ffi/              # C ABI → sdks/c/include/seyd.h
+│   ├── seydd/                 # daemon: TOML config, RTP/RTSP/UDP inputs
+│   ├── agent/                 # *legacy* Python prototype agent (reference implementation)
+│   ├── pilot/                 # *legacy* vanilla-JS pilot (reference implementation)
+│   └── signal/                # *legacy* Node signaling + relay server
+├── sdks/                      # thin wrappers — NO protocol logic here, ever
+│   ├── c/  cpp/  python/  ros2/
+│   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
+├── cloud/api  cloud/prober  cloud/monitor  cloud/db
+├── web/site  web/console  web/demo
+├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
+├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
+├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
+├── sim/                       # robot simulation — NOT part of Seyd
+│   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
+│   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
+└── tools/                     # harnesses: fec-vectors.py, fec-check.js, pilot-smoke.py, find-camera.py …
 ```
 
-**Import direction:** `tools/` may reach into `packages/`. `packages/` must never
-reach into `tools/` or `sim/`.
+**Import direction:** `tools/` may reach into `packages/`. `packages/` and
+`sdks/` must never reach into `tools/` or `sim/`. `sdks/` may only call the
+C ABI or `@seyd/core`; if a wrapper grows a parser or a heuristic, move it into
+a crate.
 
 ## Where QoS settings live
 
 Encoder settings (resolution, preset, VBV, GOP) belong to the robot's video
-publisher — `sim/video-source.sh` in the prototype. DARC states only
-transport-observable *targets* (`packages/agent/qos.py`: bitrate ceiling, latency
-budget, max GOP) plus its own transport policy (FEC rate, drop threshold). If you
-find yourself putting a resolution in `qos.py`, or an FEC percentage in `sim/`,
-the boundary has leaked.
+publisher — `sim/video-source.sh` in the simulation, the camera in the demo.
+Seyd states only transport-observable *targets* (bitrate ceiling, latency
+budget, max GOP) via `on_requested_config`, plus its own transport policy (FEC
+rate, drop threshold). If you find yourself putting a resolution in
+`seyd-qos`, or an FEC percentage in `sim/`, the boundary has leaked.
 
 ## Component philosophy
 
-**Loose coupling.** Components communicate only through defined interfaces: UDP sockets and WebSocket messages. No component imports or calls into another's internals.
+**Loose coupling.** Components communicate only through defined interfaces:
+the wire protocol, the signal protocol, the C ABI, UDP sockets.
 
-**High cohesion.** Each component does one thing. Do not add responsibilities to a component because it is convenient — create a new component or a well-defined interface.
+**High cohesion.** Each crate does one thing. `seyd-wire` is layout only;
+`seyd-fec` never parses a header; `seyd-qos` does no I/O.
 
-**Production-boundary awareness.** Label code clearly: is this a production DARC component, or a prototype stand-in? The `sim/` directory exists precisely to keep fake robot code out of real DARC components. Never import from `sim/` in `packages/`.
+**Production-boundary awareness.** `sim/` keeps fake robot code out of Seyd.
+Vendor drivers (the Hikvision ISAPI code in `packages/agent/camera.py`) belong
+in `examples/`, not in a Seyd component — the agent states intent
+(`on_recovery_request`, `on_requested_config`, commands) and robot-side code
+decides how to meet it.
 
-**One known exception: `packages/agent/camera.py`.** It is a Hikvision ISAPI
-driver living inside a DARC component, which is against the grain of everything
-above. Elsewhere the agent states intent and lets the robot decide how to meet it
-— `PublisherControl` fires a JSON target at a UDP port and does not implement the
-publisher. A production DARC should do the same for actuation: forward a generic
-`ptz` intent over a robot-control interface and let robot-side code speak ISAPI,
-ONVIF, or ROS2. It is where it is because DEMO.md specifies it there and the demo
-needed one concrete camera to work. Nothing above `CameraControl` knows the word
-"Hikvision"; keep it that way, and move it out rather than adding a second vendor
-beside it.
+**No transcoding in Seyd.** The agent is a pure relay of encoded bytes. It may
+depacketize RTP and split NAL units into chunks; it never decodes, re-encodes
+or inspects media payloads beyond that.
 
-**No transcoding in DARC.** The DARC Agent is a pure relay. It forwards bytes. It does not decode, re-encode, or inspect media payloads.
+**Whole frame or nothing.** A frame is admitted before its first chunk leaves
+and then sent in full; a torn frame costs a GOP, a skipped frame costs a frame.
+Keyframes are never dropped.
 
 ## Technology choices (current)
 
-| Component | Language / runtime | Rationale |
+| Component | Stack | Rationale |
 |---|---|---|
-| darc-signal | Node.js | Fast iteration, good WebSocket support, easy cloud deploy |
-| darc-agent | Python + PyAV (av) + aioquic + websockets | PyAV demuxes H.264 from RTP; forwarded byte-for-byte. NAT traversal (STUN, PCP/NAT-PMP/UPnP) and Reed-Solomon FEC implemented directly — no miniupnpc, no numpy — to stay on pure-Python wheels for the ARM cross-compile |
-| darc-pilot | Vanilla HTML/JS + WebCodecs | WebCodecs VideoDecoder eliminates jitter buffer; canvas render, no `<video>` element |
-| Loss resilience | Reed-Solomon over GF(256), Cauchy matrix | FEC not retransmission: a retransmit costs a round trip, which teleoperation cannot spend. Paired implementations in `packages/agent/fec.py` and `packages/pilot/fec.js` — they must agree byte-for-byte, enforced by `tools/fec-check.js` |
-| Video source (sim) | FFmpeg | Standard RTP/H.264 output; matches what real robot camera nodes produce. Bitrate is **capped** — CRF mode produced unbounded 8–14 Mbps spikes on motion |
-
-**Video path (prototype):** FFmpeg H.264 encode → RTP UDP → PyAV demux → binary WebSocket → signal relay → WebCodecs VideoDecoder → canvas. Single encode chain. No transcoding, no jitter buffer.
-
-**Video path (production):** FFmpeg H.264 encode → QUIC datagrams (MsQuic) → WebTransport → WebCodecs VideoDecoder → canvas. P2P, no relay.
-
-Technology choices may change. When they do, update this table and document the reason in SPEC.md.
+| Core (`packages/seyd-*`) | Rust, quinn + h3/h3-webtransport, rustls, rcgen | ADR 0002: only Rust stack with WebTransport; pure Rust → trivial ARM cross-builds and self-contained wheels |
+| Agent form factors | C ABI via cbindgen; C++/Python(cffi)/ROS 2 wrappers; `seydd` daemon | ADR 0004 |
+| Web pilot SDK | TypeScript, WebTransport, WebCodecs `VideoDecoder`, Web Worker + OffscreenCanvas | No jitter buffer; off-main-thread so host apps cannot jank video |
+| Loss resilience | Reed-Solomon GF(256), Cauchy, per FEC block; NACK-driven LTR/intra-refresh/IDR recovery | FEC pays bandwidth, not round trips; recovery in one RTT for what FEC misses |
+| Cloud | TypeScript (Fastify + ws), Postgres, Redis, OIDC (provider TBD), Docker | Portable by construction; `docker compose` runs the whole cloud |
+| Legacy prototype | Python (PyAV, aioquic), vanilla JS, Node ws | Reference implementation until parity; then deleted |
 
 ## Hosting (current)
 
-| Component | Platform | Notes |
-|---|---|---|
-| darc-signal | Google Cloud Run | WSS out of the box, scales to zero, no server management |
+The legacy signal server runs on Google Cloud Run (`europe-west1`, project
+`darc-platform`) — see `packages/signal/DEPLOY.md`. The new cloud will run on
+Cloud Run in `europe-west1` under a new project, with the GCP dependency
+isolated to one Terraform module and a compose file as the portability proof.
 
-**Cloud Run specifics:**
-- Container images stored in Google Artifact Registry (`europe-west1`)
-- `--max-instances 1` for prototype (in-memory session state; revisit when sessions move to a shared store)
-- `--allow-unauthenticated` for prototype; production adds token auth
-- 30s WebSocket pings prevent Cloud Run's 60-minute idle timeout from closing active sessions
+## Verifying work
 
-**Portability:** The server is a plain Docker container. Moving to another platform means pushing the same image to a different registry and updating the `--signal-url` config in agent and pilot. No application code changes.
-
-Deployment instructions and one-time GCP setup: `packages/signal/DEPLOY.md`.
+```bash
+cargo test --workspace
+python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check   # Rust ↔ Python FEC interop
+python3 tools/fec-vectors.py | node tools/fec-check.js                  # JS ↔ Python FEC interop
+```
+Harnesses for the legacy stack (`tools/pilot-smoke.py`, `demo.sh`, `robot.sh`)
+are documented in PROTOTYPE.md and DEMO.md.
 
 ## What we do not build
 
-- The robot hardware or vehicle
-- The camera or sensor hardware
-- The operator control algorithms or autopilot
-- A managed human operator network
-- A transcoding or media processing layer
-
-## Current build target
-
-See PROTOTYPE.md. The prototype is a Mac-to-Mac demo: one Mac on an iPhone 5G hotspot acts as the robot, one Mac on broadband acts as the pilot. Video is relayed through the signaling server (not P2P) — this is an explicit POC compromise. P2P via WebTransport is the phase 2 target.
+The robot or vehicle, the camera or sensors, the control algorithms or
+autopilot, a managed human-operator network, a transcoding layer.

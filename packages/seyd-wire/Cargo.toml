@@ -1,0 +1,9 @@
+[package]
+name = "seyd-wire"
+description = "Seyd wire protocol: chunk headers (v2, legacy v1) and frame metadata"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

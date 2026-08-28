@@ -1,0 +1,17 @@
+[package]
+name = "seyd-fec"
+description = "Reed-Solomon erasure coding over GF(256) with a Cauchy generator matrix — the Seyd wire contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+seyd-wire = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[example]]
+name = "check"

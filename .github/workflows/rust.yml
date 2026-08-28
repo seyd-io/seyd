@@ -1,0 +1,30 @@
+name: rust
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: FEC interop vectors (Python reference → Rust)
+        run: python3 tools/fec-vectors.py | cargo run -q -p seyd-fec --example check
+      - name: FEC interop vectors (Python reference → JS)
+        run: python3 tools/fec-vectors.py | node tools/fec-check.js
+  cross-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - run: cargo install cross --locked
+      - run: cross build --workspace --release --target aarch64-unknown-linux-gnu
