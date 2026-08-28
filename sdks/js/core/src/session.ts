@@ -54,6 +54,7 @@ export class SeydSession {
   private host: Host;
   private handlers = new Map<string, Set<Handler<unknown>>>();
   private offer: Offer | null = null;
+  private peerGone = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private decoderText = new TextDecoder();
@@ -86,7 +87,10 @@ export class SeydSession {
     this.signal.on('offer', (offer) => this.onOffer(offer));
     this.signal.on('robot-offline', () => this.fail('robot-offline', null));
     this.signal.on('denied', ({ reason }) => { this.emit('error', { message: `signaling denied: ${reason}`, fatal: true }); this.fail('token-rejected', null, reason); });
-    this.signal.on('peer-disconnected', () => { /* the transport close is what we act on */ });
+    // The transport close is what tears the session down; remembering the
+    // cloud's notice makes the resulting failure report say 'robot-offline'
+    // instead of blaming the re-race ('handshake-timeout').
+    this.signal.on('peer-disconnected', () => { this.peerGone = true; });
     this.signal.on('close', () => { if (this.state === 'signaling' || this.state === 'waiting-robot') this.setState('signaling', 'reconnecting'); });
   }
 
@@ -115,6 +119,7 @@ export class SeydSession {
   private liveKey: string | null = null;
 
   private onOffer(offer: Offer): void {
+    this.peerGone = false;
     if (this.closed) return;
     if (this.state === 'connecting' || this.state === 'connected') {
       // Already racing or live: this offer is a duplicate (or a stale retry);
@@ -132,6 +137,7 @@ export class SeydSession {
   }
 
   private fail(reason: FailureReason, failure: P2pFailure | null, detail?: string): void {
+    if (this.peerGone && reason !== 'robot-offline') { reason = 'robot-offline'; failure = null; detail = 'robot went offline'; }
     const f: P2pFailure = failure ?? { reason, natReport: this.offer?.nat_report ?? null, candidates: this.offer?.candidates ?? [], detail };
     this.lastFailure = f;
     if (this.sessionId) this.signal.report(this.sessionId, 'failed', { failure_reason: f.reason });
