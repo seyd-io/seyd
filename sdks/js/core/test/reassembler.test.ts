@@ -94,7 +94,7 @@ d2('adaptive close-out', () => {
       r.push(a.header, a.payload); now += 25; r.push(b.header, b.payload); now += 15;
     }
     e2(frames.length).toBe(20);
-    e2(r.counters.deadlineDeltaEffectiveMs).toBeGreaterThanOrEqual(110); // 4 × 25 + 10
+    e2(r.counters.deadlineDeltaEffectiveMs).toBeGreaterThanOrEqual(95); // 3 × 25 + 20
     e2(r.counters.deadlineDeltaEffectiveMs).toBeLessThanOrEqual(250);
   });
 });

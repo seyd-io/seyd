@@ -648,10 +648,11 @@ impl Engine {
     }
 
     fn request_recovery(&self, channel: u8, reason: &'static str) {
-        // A recovery point only helps if it arrives sooner than the next
-        // periodic one, so one request per half GOP is the useful maximum;
-        // more just turns loss into keyframe floods on a bandwidth-limited link.
-        let min_gap = Duration::from_millis((self.profile().max_gop_ms / 2).max(250) as u64);
+        // One request per 250 ms: a lost delta frame smears the picture until
+        // a recovery point arrives, so waiting longer costs the operator more
+        // than the keyframe costs the link. Spurious requests are avoided at
+        // the source (adaptive close-out in the pilot), not by waiting here.
+        let min_gap = Duration::from_millis(250);
         let mut last = self.inner.last_recovery.lock().unwrap();
         if let Some(t) = last.get(&channel) {
             if t.elapsed() < min_gap {

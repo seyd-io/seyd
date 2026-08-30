@@ -204,9 +204,12 @@ export class Reassembler {
   private effectiveDeadline(keyframe: boolean): number {
     const base = keyframe ? this.deadlineKeyMs : this.deadlineDeltaMs;
     if (this.gaps.length < 10) return base;
+    // p99 of recent max intra-frame gaps, ×3 + 20 ms: cellular schedulers
+    // deliver in bursts, and a timeout costs a keyframe round trip while a
+    // longer wait costs nothing when the next frame arrives whole.
     const sorted = [...this.gaps].sort((a, b) => a - b);
-    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
-    const adaptive = Math.min(250, Math.max(base, Math.ceil(p95 * 4 + 10)));
+    const p99 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
+    const adaptive = Math.min(250, Math.max(base, Math.ceil(p99 * 3 + 20)));
     if (!keyframe) this.counters.deadlineDeltaEffectiveMs = adaptive;
     return keyframe ? Math.max(adaptive, base) : adaptive;
   }
