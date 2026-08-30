@@ -40,3 +40,7 @@ target/
 
 # JS build output
 dist/
+
+# local robot identities
+.seyd-sim.key
+examples/demo-robot/.robot.key
