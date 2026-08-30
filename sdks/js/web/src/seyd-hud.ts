@@ -49,11 +49,11 @@ export class SeydHudElement extends HTMLElement {
       `video  ${s.kbps} kbps  ${s.fps} fps   fec ${fecPct}%   g2g ${g2g}\n` +
       `loss   <span class="${col(loss, 1, 3)}">${s.lossTruePct === null ? '—' : s.lossTruePct.toFixed(1) + '% true'}  ${s.lossEstPct.toFixed(1)}% est</span>` +
       `   spread p50 ${s.spreadP50Ms.toFixed(0)}ms p95 ${s.spreadP95Ms.toFixed(0)}ms\n` +
-      `frames ${s.framesClean} ok  ${s.framesRecovered} rec  ${s.framesIncomplete} lost   late parity ${s.chunksLate}   timed out ${s.framesTimedOut ?? 0}  deadline ${s.deadlineDeltaMs ?? '-'}ms\n` +
-      `key    <span class="${col(s.keyframesLost, 1, 3)}">${s.keyframesClean} ok  ${s.keyframesLost} lost</span>   decodeQ ${s.decodeQueue}  err ${s.decodeErrors}  keyreq ${s.keyframesRequested}\n` +
+      `frames ${s.framesClean} ok  ${s.framesRecovered} rec  ${s.framesIncomplete} lost   late parity ${s.chunksLate}   timed out ${s.framesTimedOut ?? 0} (${s.framesTimedOutLate ?? 0} jitter)  deadline ${s.deadlineDeltaMs ?? '-'}ms\n` +
+      `key    <span class="${col(s.keyframesLost, 1, 3)}">${s.keyframesClean} ok  ${s.keyframesLost} lost (${s.keyframesTimedOut ?? 0} timed out)</span>   decodeQ ${s.decodeQueue}  err ${s.decodeErrors}  keyreq ${s.keyframesRequested}\n` +
       (a ? `agent  ${a.frames_sent ?? 0} sent  ${a.frames_dropped_backlog ?? 0} dropped  ${a.frames_skipped_stale ?? 0} stale\n` +
            `link   cwnd ${a.cwnd ?? '—'}  rtt ${a.rtt_ms ?? '—'}ms  min ${a.min_rtt_ms ?? '—'}ms  rate ${a.delivery_kbps ?? '—'} kbps\n` +
-           (a.abr_bitrate_kbps !== undefined ? `abr    ${a.abr_bitrate_kbps} kbps (ceiling ${a.abr_ceiling_kbps})  fec ${a.abr_fec_delta}/${a.abr_fec_key}  reason ${a.abr_reason}\n` : '') : '') +
+           (a.abr_bitrate_kbps !== undefined ? `abr    ${a.abr_bitrate_kbps} kbps (ceiling ${a.abr_ceiling_kbps})  fec ${a.abr_fec_delta}/${a.abr_fec_key}  reason ${a.abr_reason}  loss ${a.abr_loss_pct ?? '—'}% (pilot est ${a.abr_loss_pilot_pct ?? '—'}%)\n` : '') : '') +
       (s.injecting ? `\nINJECTING ${(s.injecting.rate * 100).toFixed(1)}% LOSS (burst ${s.injecting.burst}) — ${s.chunksDropped} dropped\n` : '');
   }
 }

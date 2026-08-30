@@ -17,7 +17,7 @@ first inbound line, and nothing it writes before then is delivered.
 | P→A | `set-qos` | `profile` |
 | A→P | `qos-ack` | `profile`, `qos: {…}` as in `welcome`, `publisher: "requested"\|"unavailable"` |
 | A→P | `agent-stats` | 1 Hz; `frames_in, frames_sent, frames_dropped_backlog, frames_skipped_stale, keyframes_requested, chunks_sent, parity_sent, bytes_sent, rtt_ms, min_rtt_ms, cwnd, delivery_kbps` |
-| P→A | `pilot-stats` | 1 Hz; `chunks_rx, chunks_missing, frames_clean, frames_recovered, frames_incomplete, keyframes_lost, kbps, fps, g2g_ms, decode_q` |
+| P→A | `pilot-stats` | 1 Hz; `chunks_rx, chunks_missing, chunks_late, frames_clean, frames_recovered, frames_incomplete, frames_timed_out, frames_timed_out_late, keyframes_lost, keyframes_timed_out, kbps, fps, g2g_ms, decode_q` — the agent pairs `chunks_rx` against what it had sent ≥ RTT earlier to measure true loss |
 | P→A | `bye` | — |
 
 Anything unknown is ignored and counted. Commands and sensors do **not** travel

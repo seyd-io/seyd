@@ -26,6 +26,10 @@ export interface ReassemblerCounters {
   keyframesClean: number; keyframesLost: number;
   /** Frames closed by the silence timer (as opposed to superseded by a newer decodable frame). */
   framesTimedOut: number;
+  /** Keyframes among the timed-out frames (the rest of keyframesLost were genuinely incomplete). */
+  keyframesTimedOut: number;
+  /** Timed-out frames whose missing chunks then arrived: jitter, not loss. */
+  framesTimedOutLate: number;
   /** Current adaptive silence deadline for delta frames (ms). */
   deadlineDeltaEffectiveMs: number;
 }
@@ -60,13 +64,15 @@ export class Reassembler {
   readonly counters: ReassemblerCounters = {
     chunksDup: 0, chunksTooOld: 0, chunksTooLate: 0, chunksMissing: 0,
     framesSeen: 0, framesClean: 0, framesRecovered: 0, framesIncomplete: 0, framesTooLate: 0,
-    keyframesClean: 0, keyframesLost: 0, framesTimedOut: 0, deadlineDeltaEffectiveMs: 0,
+    keyframesClean: 0, keyframesLost: 0, framesTimedOut: 0, keyframesTimedOut: 0, framesTimedOutLate: 0, deadlineDeltaEffectiveMs: 0,
   };
   private frames = new Map<number, FrameState>();
   private newestId: number | null = null;
   private lastDecodedId: number | null = null;
   /** Ring of per-frame max chunk gaps (ms) over recent frames; p95 drives the adaptive deadline. */
   private gaps: number[] = [];
+  /** Recently timed-out frame ids, until a late chunk proves them jitter. */
+  private timedOut = new Map<number, boolean>();
   deadlineDeltaMs: number;
   deadlineKeyMs: number;
   private now: () => number;
@@ -88,7 +94,7 @@ export class Reassembler {
   push(h: ChunkHeader, payload: Uint8Array): void {
     if (this.newestId === null || seqDelta(h.frameId, this.newestId) > 0) this.newestId = h.frameId;
     if (seqDelta(this.newestId, h.frameId) > MAX_REORDER) { this.counters.chunksTooOld++; return; }
-    if (this.lastDecodedId !== null && seqDelta(h.frameId, this.lastDecodedId) <= 0) { this.counters.chunksTooLate++; return; }
+    if (this.lastDecodedId !== null && seqDelta(h.frameId, this.lastDecodedId) <= 0) { this.counters.chunksTooLate++; if (this.timedOut.get(h.frameId) === false) { this.timedOut.set(h.frameId, true); this.counters.framesTimedOutLate++; } return; }
 
     const t = this.now();
     let f = this.frames.get(h.frameId);
@@ -99,7 +105,12 @@ export class Reassembler {
       this.frames.set(h.frameId, f);
       this.counters.framesSeen++;
     }
-    if (f.closed) return;
+    if (f.closed) {
+      // A chunk for a frame already closed by the silence timer: that frame
+      // was jitter, not loss.
+      if (this.timedOut.get(f.id) === false) { this.timedOut.set(f.id, true); this.counters.framesTimedOutLate++; }
+      return;
+    }
     f.maxGapMs = Math.max(f.maxGapMs, t - f.lastSeen);
     f.lastSeen = t;
     f.sendTsLast = h.sendTs;
@@ -204,12 +215,12 @@ export class Reassembler {
   private effectiveDeadline(keyframe: boolean): number {
     const base = keyframe ? this.deadlineKeyMs : this.deadlineDeltaMs;
     if (this.gaps.length < 10) return base;
-    // p99 of recent max intra-frame gaps, ×3 + 20 ms: cellular schedulers
-    // deliver in bursts, and a timeout costs a keyframe round trip while a
-    // longer wait costs nothing when the next frame arrives whole.
-    const sorted = [...this.gaps].sort((a, b) => a - b);
-    const p99 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
-    const adaptive = Math.min(250, Math.max(base, Math.ceil(p99 * 3 + 20)));
+    // 2 × the largest intra-frame gap seen over the last 200 frames + 20 ms:
+    // a p99 still left ~1 timeout per 100 frames on cellular, and every
+    // timeout costs a keyframe round trip while a longer wait costs nothing
+    // when the next frame arrives whole (it closes older frames itself).
+    const maxGap = Math.max(...this.gaps);
+    const adaptive = Math.min(250, Math.max(base, Math.ceil(maxGap * 2 + 20)));
     if (!keyframe) this.counters.deadlineDeltaEffectiveMs = adaptive;
     return keyframe ? Math.max(adaptive, base) : adaptive;
   }
@@ -228,8 +239,8 @@ export class Reassembler {
     for (const b of f.blocks.values()) if (!b.done) missing += b.n - b.dataRx;
     this.counters.chunksMissing += missing;
     this.counters.framesIncomplete++;
-    if (!superseded) this.counters.framesTimedOut++;
-    if (f.keyframe) this.counters.keyframesLost++;
+    if (!superseded) { this.counters.framesTimedOut++; this.timedOut.set(f.id, false); if (this.timedOut.size > 64) this.timedOut.delete(this.timedOut.keys().next().value!); }
+    if (f.keyframe) { this.counters.keyframesLost++; if (!superseded) this.counters.keyframesTimedOut++; }
     this.o.onLoss({ frameId: f.id, keyframe: f.keyframe, superseded, chunksMissing: missing });
   }
 }

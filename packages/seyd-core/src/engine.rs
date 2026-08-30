@@ -100,11 +100,16 @@ struct SessionState {
 
 #[derive(Default)]
 struct PilotSample {
-    /// (agent chunks_sent, pilot chunks_rx, pilot frames_incomplete) at the
-    /// last two `pilot-stats` arrivals — the deltas are the true chunk loss
-    /// and residual frame loss over that window.
-    last: Option<(u64, u64, u64)>,
+    /// (time, cumulative chunks the pilot had a chance to receive, pilot
+    /// chunks_rx) at recent `pilot-stats` arrivals; loss is measured across a
+    /// sliding window of them (≥ 3 s), so a keyframe burst in flight at one
+    /// boundary cannot read as 10 % loss.
+    pairs: VecDeque<(Instant, u64, u64)>,
     loss_pct: Option<f64>,
+    /// The pilot's own `chunks_missing`-based estimate, for cross-checking.
+    loss_pilot_pct: Option<f64>,
+    last_incomplete: Option<(u64, u64)>,
+    /// Genuinely incomplete frames (timed-out ones excluded) since last tick.
     incomplete_delta: u64,
     /// Lifetime QUIC lost packets at the last ABR tick (for the delta).
     prev_lost_packets: u64,
@@ -114,6 +119,8 @@ struct AbrView {
     bitrate_kbps: u32,
     fec: (u32, u32),
     reason: &'static str,
+    loss_pct: Option<f64>,
+    loss_pilot_pct: Option<f64>,
 }
 
 /// ABR state shared between the 1 Hz loop, the sender and the stats task.
@@ -124,6 +131,12 @@ struct AbrState {
     bitrate_kbps: u32,
     reason: &'static str,
     prev_backlog: u64,
+    loss_pct: Option<f64>,
+    loss_pilot_pct: Option<f64>,
+    /// (time, cumulative chunks_sent) per frame — the reference for "chunks
+    /// that have had time to arrive" in the loss pairing.
+    sent_log: VecDeque<(Instant, u64)>,
+    last_keyframe_sent: Option<Instant>,
 }
 
 struct Pending {
@@ -205,6 +218,10 @@ impl Engine {
                 bitrate_kbps: profile.max_bitrate_kbps,
                 reason: "steady",
                 prev_backlog: 0,
+                loss_pct: None,
+                loss_pilot_pct: None,
+                sent_log: VecDeque::new(),
+                last_keyframe_sent: None,
             }),
         });
         let engine = Engine { inner };
@@ -343,8 +360,14 @@ impl Engine {
         // Counted once (not per session): the pilot pairs its own datagram
         // count with `chunks_sent` to measure true loss, and it receives
         // sensor datagrams on the same socket as video chunks.
-        self.inner.counters.chunks_sent.fetch_add(1, Ordering::Relaxed);
-        self.inner.counters.bytes_sent.fetch_add(dg.len() as u64, Ordering::Relaxed);
+        self.inner
+            .counters
+            .chunks_sent
+            .fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .counters
+            .bytes_sent
+            .fetch_add(dg.len() as u64, Ordering::Relaxed);
         for s in self.inner.sessions.lock().unwrap().values() {
             let _ = s.transport.send_datagram(dg.clone());
         }
@@ -485,6 +508,16 @@ impl Engine {
             c.parity_sent
                 .fetch_add(pack.parity_chunks as u64, Ordering::Relaxed);
             c.bytes_sent.fetch_add(wire_bytes as u64, Ordering::Relaxed);
+            let mut abr = self.inner.abr.lock().unwrap();
+            let now = Instant::now();
+            abr.sent_log
+                .push_back((now, c.chunks_sent.load(Ordering::Relaxed)));
+            while abr.sent_log.len() > 400 {
+                abr.sent_log.pop_front();
+            }
+            if frame.keyframe {
+                abr.last_keyframe_sent = Some(now);
+            }
         }
     }
 
@@ -641,12 +674,13 @@ impl Engine {
                 let p = st.transport.stats();
                 let abr = {
                     let a = engine.inner.abr.lock().unwrap();
-                    (a.bitrate_kbps, a.fec, a.reason)
-                };
-                let abr = AbrView {
-                    bitrate_kbps: abr.0,
-                    fec: abr.1,
-                    reason: abr.2,
+                    AbrView {
+                        bitrate_kbps: a.bitrate_kbps,
+                        fec: a.fec,
+                        reason: a.reason,
+                        loss_pct: a.loss_pct,
+                        loss_pilot_pct: a.loss_pilot_pct,
+                    }
                 };
                 let v = serde_json::json!({
                     "frames_in": c.frames_in.load(Ordering::Relaxed),
@@ -661,6 +695,8 @@ impl Engine {
                     "delivery_kbps": p.delivery_kbps, "lost_packets": p.lost_packets, "mtu": p.current_mtu,
                     "abr_bitrate_kbps": abr.bitrate_kbps, "abr_ceiling_kbps": engine.profile().max_bitrate_kbps,
                     "abr_fec_delta": abr.fec.0, "abr_fec_key": abr.fec.1, "abr_reason": abr.reason,
+                    "abr_loss_pct": abr.loss_pct.map(|x| (x * 10.0).round() / 10.0),
+                    "abr_loss_pilot_pct": abr.loss_pilot_pct.map(|x| (x * 10.0).round() / 10.0),
                 });
                 if st.lines.send(encode_line(&ToPilot::AgentStats(v))).is_err() {
                     break;
@@ -719,22 +755,56 @@ impl Engine {
     /// between two reports is the true chunk loss over that window (a frame
     /// whose chunks were *all* lost is invisible to the pilot alone).
     fn note_pilot_stats(&self, st: &SessionState, v: &serde_json::Value) {
-        let rx = v.get("chunks_rx").and_then(|x| x.as_u64()).unwrap_or(0);
-        let incomplete = v
-            .get("frames_incomplete")
-            .and_then(|x| x.as_u64())
-            .unwrap_or(0);
-        let sent = self.inner.counters.chunks_sent.load(Ordering::Relaxed);
+        let get = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let rx = get("chunks_rx");
+        let missing = get("chunks_missing");
+        let incomplete = get("frames_incomplete");
+        // Timed-out frames whose chunks then arrived late are jitter, not loss.
+        let timed_out = get("frames_timed_out_late");
+        let now = Instant::now();
+        let rtt = st.transport.stats().rtt_ms;
+        // Only chunks that have had time to arrive: the cumulative sent count
+        // as of (now − rtt − 100 ms).
+        let cutoff = now - Duration::from_millis((rtt as u64).saturating_add(100));
+        let sent_then = {
+            let abr = self.inner.abr.lock().unwrap();
+            abr.sent_log
+                .iter()
+                .rev()
+                .find(|(t, _)| *t <= cutoff)
+                .map(|(_, n)| *n)
+                .or_else(|| abr.sent_log.front().map(|(_, n)| *n))
+        };
         let mut ps = st.pilot.lock().unwrap();
-        if let Some((s0, r0, i0)) = ps.last {
-            let d_sent = sent.saturating_sub(s0);
-            let d_rx = rx.saturating_sub(r0);
-            if d_sent >= 20 {
-                ps.loss_pct = Some(((1.0 - d_rx as f64 / d_sent as f64) * 100.0).clamp(0.0, 100.0));
+        if let Some(sent_then) = sent_then {
+            ps.pairs.push_back((now, sent_then, rx));
+            while ps
+                .pairs
+                .front()
+                .is_some_and(|(t, _, _)| now.duration_since(*t) > Duration::from_secs(5))
+            {
+                ps.pairs.pop_front();
             }
-            ps.incomplete_delta += incomplete.saturating_sub(i0);
+            if let (Some(first), Some(last)) = (ps.pairs.front(), ps.pairs.back()) {
+                let span = last.0.duration_since(first.0);
+                let d_sent = last.1.saturating_sub(first.1);
+                let d_rx = last.2.saturating_sub(first.2);
+                if span >= Duration::from_secs(3) && d_sent >= 50 {
+                    ps.loss_pct =
+                        Some(((1.0 - d_rx as f64 / d_sent as f64) * 100.0).clamp(0.0, 100.0));
+                }
+            }
         }
-        ps.last = Some((sent, rx, incomplete));
+        if rx + missing > 0 {
+            ps.loss_pilot_pct = Some(missing as f64 / (rx + missing) as f64 * 100.0);
+        }
+        if let Some((i0, t0)) = ps.last_incomplete {
+            let genuine = incomplete
+                .saturating_sub(i0)
+                .saturating_sub(timed_out.saturating_sub(t0));
+            ps.incomplete_delta += genuine;
+        }
+        ps.last_incomplete = Some((incomplete, timed_out));
     }
 
     /// 1 Hz: feed the controller the worst session's view and apply.
@@ -762,6 +832,7 @@ impl Engine {
                 .load(Ordering::Relaxed);
             let mut sample = AbrSample::default();
             let mut worst_inflation = f64::MIN;
+            let mut loss_pilot = 0.0f64;
             for st in &sessions {
                 let p = st.transport.stats();
                 let mut ps = st.pilot.lock().unwrap();
@@ -777,12 +848,18 @@ impl Engine {
                 sample.send_kbps = sample.send_kbps.max(p.delivery_kbps);
                 sample.lost_packets_delta += lost_delta;
                 sample.pilot_frames_incomplete_delta += std::mem::take(&mut ps.incomplete_delta);
-                if let Some(l) = ps.loss_pct.take() {
+                if let Some(l) = ps.loss_pct {
                     sample.pilot_chunk_loss_pct =
                         Some(sample.pilot_chunk_loss_pct.map_or(l, |x: f64| x.max(l)));
                 }
+                loss_pilot = loss_pilot.max(ps.loss_pilot_pct.unwrap_or(0.0));
             }
             let mut abr = self.inner.abr.lock().unwrap();
+            sample.keyframe_just_sent = abr
+                .last_keyframe_sent
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(1200));
+            abr.loss_pct = sample.pilot_chunk_loss_pct;
+            abr.loss_pilot_pct = Some(loss_pilot);
             sample.frames_dropped_backlog_delta = backlog_total.saturating_sub(abr.prev_backlog);
             abr.prev_backlog = backlog_total;
             let video_channels: Vec<u8> = self
@@ -817,6 +894,9 @@ impl Engine {
                     fec_key = d.fec_key_pct,
                     reason = d.reason,
                     loss = ?sample.pilot_chunk_loss_pct,
+                    loss_pilot_est = loss_pilot,
+                    residual = sample.pilot_frames_incomplete_delta,
+                    kf_recent = sample.keyframe_just_sent,
                     rtt = sample.rtt_ms,
                     min_rtt = sample.min_rtt_ms,
                     "abr"

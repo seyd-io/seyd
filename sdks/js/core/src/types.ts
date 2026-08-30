@@ -74,7 +74,7 @@ export interface AgentStats {
   keyframes_requested?: number; chunks_sent?: number; parity_sent?: number; bytes_sent?: number;
   rtt_ms?: number; min_rtt_ms?: number; cwnd?: number; delivery_kbps?: number;
   [k: string]: unknown;
-  abr_bitrate_kbps?: number; abr_ceiling_kbps?: number; abr_fec_delta?: number; abr_fec_key?: number; abr_reason?: string;
+  abr_bitrate_kbps?: number; abr_ceiling_kbps?: number; abr_fec_delta?: number; abr_fec_key?: number; abr_reason?: string; abr_loss_pct?: number; abr_loss_pilot_pct?: number;
 }
 
 export interface PilotStats {
@@ -87,6 +87,8 @@ export interface PilotStats {
   chunksLate: number;
   /** Frames closed by the (adaptive) silence timer rather than superseded. */
   framesTimedOut: number;
+  keyframesTimedOut: number;
+  framesTimedOutLate: number;
   /** Current adaptive delta-frame close-out deadline (ms). */
   deadlineDeltaMs: number;
   keyframesClean: number; keyframesLost: number; framesDecoded: number; decodeErrors: number; keyframesRequested: number;
