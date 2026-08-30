@@ -57,9 +57,22 @@ object per datagram, fire-and-forget:
 {"type": "video-config", "channel": 1, "profile": "balanced",
  "maxBitrateKbps": 3000, "latencyBudgetMs": 100, "maxGopMs": 1000,
  "suggestedFps": 0, "reason": "profile"}
+{"type": "video-config", "channel": 1, "profile": "balanced",
+ "maxBitrateKbps": 2250, "latencyBudgetMs": 100, "maxGopMs": 1000,
+ "suggestedFps": 0, "reason": "abr-down"}
 {"type": "recovery-request", "channel": 1, "kind": "idr", "reason": "pilot-loss"}
 {"type": "session", "state": "started"|"ended", "session_id": "…", "role": "driver"|"observer", "sessions": 1}
 ```
+
+`video-config` is sent once at start (`reason: "profile"`), whenever the QoS
+profile changes (`"pilot-request"`), and whenever the closed-loop controller
+(PLAN.md §1.3, `seyd-qos::abr`) moves the request inside the ceiling
+(`"abr-down"`, `"abr-up"`). `maxBitrateKbps` is the *current* request — never
+above the profile ceiling, never below 25 % of it; `suggestedFps` is non-zero
+only when the request is at the floor and the link is still congested. Seyd's
+own FEC rates move with it and are visible in `agent-stats` as
+`abr_bitrate_kbps`, `abr_ceiling_kbps`, `abr_fec_delta`, `abr_fec_key`,
+`abr_reason` (`steady|loss|latency|backlog|residual|recover|fec-down`).
 
 `recovery-request` is sent when a pilot reports an unrecoverable keyframe or
 asks for a keyframe (`request-keyframe`), rate-limited to one per 250 ms per

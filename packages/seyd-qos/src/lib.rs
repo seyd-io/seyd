@@ -8,7 +8,9 @@
 //! actual GOP. **There is no resolution here, and there must never be.**
 //!
 //! The closed-loop ABR controller that moves the bitrate *inside* the ceiling
-//! lands in this crate later (PLAN.md §1.3); the profile is its bound.
+//! is `abr::AbrController`; the profile is its bound.
+
+pub mod abr;
 
 use serde::{Deserialize, Serialize};
 

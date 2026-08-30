@@ -158,6 +158,38 @@ class CameraControl:
         return await asyncio.get_event_loop().run_in_executor(
             self._pool, self._blocking_url, url, '')
 
+    async def set_bitrate_cap(self, kbps: int, stream_channel: int = 101) -> bool:
+        """
+        Set the stream's VBR upper cap (`video-config.maxBitrateKbps` from
+        seydd's ABR). GET the channel XML, patch <vbrUpperCap> only, PUT it
+        back — resolution, GOP and codec are left exactly as they were.
+        """
+        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
+        loop = asyncio.get_event_loop()
+        # The channel document is slow on this firmware; give it 4 s.
+        xml = await loop.run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
+        if not xml:
+            return False
+        text = xml.decode('utf-8', 'replace')
+        import re
+        if '<vbrUpperCap>' not in text:
+            log.warning('bitrate cap: no <vbrUpperCap> in channel %s XML', stream_channel)
+            return False
+        patched = re.sub(r'<vbrUpperCap>\d+</vbrUpperCap>', f'<vbrUpperCap>{int(kbps)}</vbrUpperCap>', text, count=1)
+        ok = await loop.run_in_executor(self._pool, self._blocking_url, url, patched, 4.0)
+        if ok:
+            log.info('bitrate cap → %d kbps (channel %d)', kbps, stream_channel)
+        return bool(ok)
+
+    async def get_bitrate_cap(self, stream_channel: int = 101) -> int | None:
+        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
+        xml = await asyncio.get_event_loop().run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
+        if not xml:
+            return None
+        import re
+        m = re.search(r'<vbrUpperCap>(\d+)</vbrUpperCap>', xml.decode('utf-8', 'replace'))
+        return int(m.group(1)) if m else None
+
     async def status(self) -> dict | None:
         """Current position, or None if the camera did not answer."""
         body = await self._request('/status', None)
@@ -235,7 +267,7 @@ class CameraControl:
     def _blocking(self, path: str, body: str | None):
         return self._blocking_url(self._base + path, body)
 
-    def _blocking_url(self, url: str, body: str | None):
+    def _blocking_url(self, url: str, body: str | None, timeout: float = _TIMEOUT_S):
         path = url.rsplit('/ISAPI', 1)[-1]
         try:
             if body is None:
@@ -244,7 +276,7 @@ class CameraControl:
                 req = urllib.request.Request(
                     url, data=body.encode(), method='PUT',
                     headers={'Content-Type': 'application/xml'})
-            with self._opener.open(req, timeout=_TIMEOUT_S) as resp:
+            with self._opener.open(req, timeout=timeout) as resp:
                 data = resp.read()
             return data if body is None else True
         except urllib.error.HTTPError as e:

@@ -74,6 +74,7 @@ export interface AgentStats {
   keyframes_requested?: number; chunks_sent?: number; parity_sent?: number; bytes_sent?: number;
   rtt_ms?: number; min_rtt_ms?: number; cwnd?: number; delivery_kbps?: number;
   [k: string]: unknown;
+  abr_bitrate_kbps?: number; abr_ceiling_kbps?: number; abr_fec_delta?: number; abr_fec_key?: number; abr_reason?: string;
 }
 
 export interface PilotStats {

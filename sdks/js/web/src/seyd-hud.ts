@@ -52,7 +52,8 @@ export class SeydHudElement extends HTMLElement {
       `frames ${s.framesClean} ok  ${s.framesRecovered} rec  ${s.framesIncomplete} lost   late parity ${s.chunksLate}   timed out ${s.framesTimedOut ?? 0}  deadline ${s.deadlineDeltaMs ?? '-'}ms\n` +
       `key    <span class="${col(s.keyframesLost, 1, 3)}">${s.keyframesClean} ok  ${s.keyframesLost} lost</span>   decodeQ ${s.decodeQueue}  err ${s.decodeErrors}  keyreq ${s.keyframesRequested}\n` +
       (a ? `agent  ${a.frames_sent ?? 0} sent  ${a.frames_dropped_backlog ?? 0} dropped  ${a.frames_skipped_stale ?? 0} stale\n` +
-           `link   cwnd ${a.cwnd ?? '—'}  rtt ${a.rtt_ms ?? '—'}ms  min ${a.min_rtt_ms ?? '—'}ms  rate ${a.delivery_kbps ?? '—'} kbps\n` : '') +
+           `link   cwnd ${a.cwnd ?? '—'}  rtt ${a.rtt_ms ?? '—'}ms  min ${a.min_rtt_ms ?? '—'}ms  rate ${a.delivery_kbps ?? '—'} kbps\n` +
+           (a.abr_bitrate_kbps !== undefined ? `abr    ${a.abr_bitrate_kbps} kbps (ceiling ${a.abr_ceiling_kbps})  fec ${a.abr_fec_delta}/${a.abr_fec_key}  reason ${a.abr_reason}\n` : '') : '') +
       (s.injecting ? `\nINJECTING ${(s.injecting.rate * 100).toFixed(1)}% LOSS (burst ${s.injecting.burst}) — ${s.chunksDropped} dropped\n` : '');
   }
 }

@@ -7,6 +7,7 @@ use crate::channels::{ChannelKind, ChannelSpec};
 use crate::control::{encode_line, FromPilot, ToPilot};
 use crate::packer::{self, FrameParams};
 use bytes::Bytes;
+use seyd_qos::abr::{AbrController, Sample as AbrSample};
 use seyd_qos::Profile;
 use seyd_transport::{Endpoint, SendError, Session};
 use seyd_wire::v2::{ChunkHeader, FrameMeta};
@@ -93,6 +94,36 @@ struct SessionState {
     /// Set after a delta frame was dropped for this session; every following
     /// delta is useless to its decoder until a keyframe arrives.
     skip_until_key: std::sync::atomic::AtomicBool,
+    /// What this pilot last reported, paired with our own counters, for ABR.
+    pilot: Mutex<PilotSample>,
+}
+
+#[derive(Default)]
+struct PilotSample {
+    /// (agent chunks_sent, pilot chunks_rx, pilot frames_incomplete) at the
+    /// last two `pilot-stats` arrivals — the deltas are the true chunk loss
+    /// and residual frame loss over that window.
+    last: Option<(u64, u64, u64)>,
+    loss_pct: Option<f64>,
+    incomplete_delta: u64,
+    /// Lifetime QUIC lost packets at the last ABR tick (for the delta).
+    prev_lost_packets: u64,
+}
+
+struct AbrView {
+    bitrate_kbps: u32,
+    fec: (u32, u32),
+    reason: &'static str,
+}
+
+/// ABR state shared between the 1 Hz loop, the sender and the stats task.
+struct AbrState {
+    controllers: HashMap<u8, AbrController>,
+    /// FEC rates in force (delta %, key %) — the profile's until ABR moves them.
+    fec: (u32, u32),
+    bitrate_kbps: u32,
+    reason: &'static str,
+    prev_backlog: u64,
 }
 
 struct Pending {
@@ -130,6 +161,7 @@ struct Inner {
     queue: Mutex<FrameQueue>,
     slot_notify: Notify,
     epoch: Instant,
+    abr: Mutex<AbrState>,
 }
 
 #[derive(Clone)]
@@ -150,6 +182,7 @@ impl Engine {
             .iter()
             .map(|c| (c.id, AtomicU16::new(0)))
             .collect();
+        let profile = cfg.profile;
         let inner = Arc::new(Inner {
             profile: RwLock::new(cfg.profile),
             cfg,
@@ -166,9 +199,17 @@ impl Engine {
             }),
             slot_notify: Notify::new(),
             epoch: Instant::now(),
+            abr: Mutex::new(AbrState {
+                controllers: HashMap::new(),
+                fec: (profile.fec_delta_pct, profile.fec_key_pct),
+                bitrate_kbps: profile.max_bitrate_kbps,
+                reason: "steady",
+                prev_backlog: 0,
+            }),
         });
         let engine = Engine { inner };
         tokio::spawn(engine.clone().frame_sender());
+        tokio::spawn(engine.clone().abr_loop());
         (engine, rx)
     }
 
@@ -232,6 +273,15 @@ impl Engine {
     /// Change the QoS ceiling live (also reachable by pilots via `set-qos`).
     pub fn set_profile(&self, profile: &'static Profile, reason: &str) {
         *self.inner.profile.write().unwrap() = profile;
+        {
+            // A new ceiling resets the controller; the profile's own rates
+            // apply until the loop measures otherwise.
+            let mut abr = self.inner.abr.lock().unwrap();
+            abr.controllers.clear();
+            abr.fec = (profile.fec_delta_pct, profile.fec_key_pct);
+            abr.bitrate_kbps = profile.max_bitrate_kbps;
+            abr.reason = "steady";
+        }
         for c in self
             .inner
             .cfg
@@ -290,6 +340,11 @@ impl Engine {
             None => return,
         };
         let dg = packer::pack_message(channel, seq, self.now_us() as u32, payload);
+        // Counted once (not per session): the pilot pairs its own datagram
+        // count with `chunks_sent` to measure true loss, and it receives
+        // sensor datagrams on the same socket as video chunks.
+        self.inner.counters.chunks_sent.fetch_add(1, Ordering::Relaxed);
+        self.inner.counters.bytes_sent.fetch_add(dg.len() as u64, Ordering::Relaxed);
         for s in self.inner.sessions.lock().unwrap().values() {
             let _ = s.transport.send_datagram(dg.clone());
         }
@@ -329,11 +384,9 @@ impl Engine {
             return;
         }
         let profile = self.profile();
-        let fec_pct = if frame.keyframe {
-            profile.fec_key_pct
-        } else {
-            profile.fec_delta_pct
-        };
+        // FEC rates in force: the profile's, or what ABR moved them to.
+        let (fec_delta, fec_key) = self.inner.abr.lock().unwrap().fec;
+        let fec_pct = if frame.keyframe { fec_key } else { fec_delta };
         let fps = self
             .inner
             .cfg
@@ -500,6 +553,7 @@ impl Engine {
             role,
             lines: lines_tx,
             skip_until_key: std::sync::atomic::AtomicBool::new(false),
+            pilot: Mutex::new(PilotSample::default()),
         });
         self.inner
             .sessions
@@ -585,6 +639,15 @@ impl Engine {
                 tick.tick().await;
                 let c = &engine.inner.counters;
                 let p = st.transport.stats();
+                let abr = {
+                    let a = engine.inner.abr.lock().unwrap();
+                    (a.bitrate_kbps, a.fec, a.reason)
+                };
+                let abr = AbrView {
+                    bitrate_kbps: abr.0,
+                    fec: abr.1,
+                    reason: abr.2,
+                };
                 let v = serde_json::json!({
                     "frames_in": c.frames_in.load(Ordering::Relaxed),
                     "frames_sent": c.frames_sent.load(Ordering::Relaxed),
@@ -596,6 +659,8 @@ impl Engine {
                     "bytes_sent": c.bytes_sent.load(Ordering::Relaxed),
                     "rtt_ms": p.rtt_ms, "min_rtt_ms": p.min_rtt_ms, "cwnd": p.cwnd,
                     "delivery_kbps": p.delivery_kbps, "lost_packets": p.lost_packets, "mtu": p.current_mtu,
+                    "abr_bitrate_kbps": abr.bitrate_kbps, "abr_ceiling_kbps": engine.profile().max_bitrate_kbps,
+                    "abr_fec_delta": abr.fec.0, "abr_fec_key": abr.fec.1, "abr_reason": abr.reason,
                 });
                 if st.lines.send(encode_line(&ToPilot::AgentStats(v))).is_err() {
                     break;
@@ -624,7 +689,10 @@ impl Engine {
                                 None => tracing::debug!(%profile, "unknown qos profile"),
                             }
                         }
-                        Ok(FromPilot::PilotStats(v)) => tracing::trace!(stats = %v, "pilot-stats"),
+                        Ok(FromPilot::PilotStats(v)) => {
+                            tracing::trace!(stats = %v, "pilot-stats");
+                            self.note_pilot_stats(&state, &v);
+                        }
                         Ok(FromPilot::Bye) => { reason = "bye".into(); break; }
                         Ok(FromPilot::Hello { .. }) => {}
                         Ok(FromPilot::Unknown) => {}
@@ -645,6 +713,116 @@ impl Engine {
             .events
             .send(Event::SessionEnded { signal_id, reason })
             .await;
+    }
+
+    /// Pair the pilot's counters with ours: `chunks_sent` vs `chunks_rx`
+    /// between two reports is the true chunk loss over that window (a frame
+    /// whose chunks were *all* lost is invisible to the pilot alone).
+    fn note_pilot_stats(&self, st: &SessionState, v: &serde_json::Value) {
+        let rx = v.get("chunks_rx").and_then(|x| x.as_u64()).unwrap_or(0);
+        let incomplete = v
+            .get("frames_incomplete")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        let sent = self.inner.counters.chunks_sent.load(Ordering::Relaxed);
+        let mut ps = st.pilot.lock().unwrap();
+        if let Some((s0, r0, i0)) = ps.last {
+            let d_sent = sent.saturating_sub(s0);
+            let d_rx = rx.saturating_sub(r0);
+            if d_sent >= 20 {
+                ps.loss_pct = Some(((1.0 - d_rx as f64 / d_sent as f64) * 100.0).clamp(0.0, 100.0));
+            }
+            ps.incomplete_delta += incomplete.saturating_sub(i0);
+        }
+        ps.last = Some((sent, rx, incomplete));
+    }
+
+    /// 1 Hz: feed the controller the worst session's view and apply.
+    async fn abr_loop(self) {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let sessions: Vec<Arc<SessionState>> = self
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .values()
+                .cloned()
+                .collect();
+            if sessions.is_empty() {
+                continue;
+            }
+            let profile = self.profile();
+            let backlog_total = self
+                .inner
+                .counters
+                .frames_dropped_backlog
+                .load(Ordering::Relaxed);
+            let mut sample = AbrSample::default();
+            let mut worst_inflation = f64::MIN;
+            for st in &sessions {
+                let p = st.transport.stats();
+                let mut ps = st.pilot.lock().unwrap();
+                let lost_delta = p.lost_packets.saturating_sub(ps.prev_lost_packets);
+                ps.prev_lost_packets = p.lost_packets;
+                let inflation = p.rtt_ms - p.min_rtt_ms;
+                if inflation > worst_inflation {
+                    worst_inflation = inflation;
+                    sample.rtt_ms = p.rtt_ms;
+                    sample.min_rtt_ms = p.min_rtt_ms;
+                }
+                sample.delivery_kbps = sample.delivery_kbps.max(p.delivery_kbps);
+                sample.send_kbps = sample.send_kbps.max(p.delivery_kbps);
+                sample.lost_packets_delta += lost_delta;
+                sample.pilot_frames_incomplete_delta += std::mem::take(&mut ps.incomplete_delta);
+                if let Some(l) = ps.loss_pct.take() {
+                    sample.pilot_chunk_loss_pct =
+                        Some(sample.pilot_chunk_loss_pct.map_or(l, |x: f64| x.max(l)));
+                }
+            }
+            let mut abr = self.inner.abr.lock().unwrap();
+            sample.frames_dropped_backlog_delta = backlog_total.saturating_sub(abr.prev_backlog);
+            abr.prev_backlog = backlog_total;
+            let video_channels: Vec<u8> = self
+                .inner
+                .cfg
+                .channels
+                .iter()
+                .filter(|c| c.kind == ChannelKind::Video)
+                .map(|c| c.id)
+                .collect();
+            for ch in video_channels {
+                let ctl = abr
+                    .controllers
+                    .entry(ch)
+                    .or_insert_with(|| AbrController::new(profile));
+                let Some(d) = ctl.step(&sample) else { continue };
+                abr.fec = (d.fec_delta_pct, d.fec_key_pct);
+                abr.reason = d.reason;
+                if d.bitrate_changed {
+                    let up = d.max_bitrate_kbps > abr.bitrate_kbps;
+                    abr.bitrate_kbps = d.max_bitrate_kbps;
+                    let mut cfg =
+                        profile.publisher_config(ch, if up { "abr-up" } else { "abr-down" });
+                    cfg["maxBitrateKbps"] = serde_json::json!(d.max_bitrate_kbps);
+                    cfg["suggestedFps"] = serde_json::json!(d.suggested_fps);
+                    let _ = self.inner.events.try_send(Event::RequestedConfig(cfg));
+                }
+                tracing::info!(
+                    channel = ch,
+                    bitrate = d.max_bitrate_kbps,
+                    fec_delta = d.fec_delta_pct,
+                    fec_key = d.fec_key_pct,
+                    reason = d.reason,
+                    loss = ?sample.pilot_chunk_loss_pct,
+                    rtt = sample.rtt_ms,
+                    min_rtt = sample.min_rtt_ms,
+                    "abr"
+                );
+            }
+        }
     }
 
     fn request_recovery(&self, channel: u8, reason: &'static str) {

@@ -10,7 +10,9 @@ Seyd robot. It consumes seydd's two generic UDP interfaces
   * publisher control (seydd → udp://127.0.0.1:5003): JSON
     {"type": "recovery-request", ...} → ask the encoder for an IDR;
     {"type": "session", "state": "ended", "sessions": 0} → stop and park;
-    {"type": "video-config", ...} → logged (the camera is configured out of band).
+    {"type": "video-config", "maxBitrateKbps": N, ...} → the camera's VBR upper
+    cap for stream 101 is set to N (seydd's ABR lowers it under loss or
+    latency and raises it back); at most one change per 2 s.
 
 Nothing here is Seyd; it is what a customer writes for their own actuators.
 Credentials come from CAMERA_USER / CAMERA_PASSWORD in the environment.
@@ -60,7 +62,22 @@ async def main():
     cam = CameraControl(args.camera_ip, user, password, channel=args.camera_channel, home=home)
     await cam.start()
     loop = asyncio.get_running_loop()
-    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0}
+    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0, 'bitrate_changes': 0}
+    cap = {'last': None, 'pending': None, 'at': 0.0}
+
+    async def apply_bitrate():
+        # Coalesce: at most one ISAPI write per 2 s, latest value wins.
+        while cap['pending'] is not None:
+            wait = 2.0 - (time.time() - cap['at'])
+            if wait > 0:
+                await asyncio.sleep(wait)
+            kbps, cap['pending'] = cap['pending'], None
+            if kbps == cap['last']:
+                continue
+            if await cam.set_bitrate_cap(kbps, args.stream_channel):
+                cap['last'] = kbps
+                stats['bitrate_changes'] += 1
+            cap['at'] = time.time()
 
     def on_command(m):
         if m.get('home'):
@@ -85,7 +102,13 @@ async def main():
             if m.get('state') == 'ended' and m.get('sessions', 0) == 0:
                 asyncio.ensure_future(park(cam))
         elif t == 'video-config':
-            log.info('video-config requested: %s (camera encoder is configured out of band)', m)
+            kbps = m.get('maxBitrateKbps')
+            log.info('video-config: %s kbps (%s)', kbps, m.get('reason'))
+            if isinstance(kbps, (int, float)) and kbps > 0:
+                idle = cap['pending'] is None
+                cap['pending'] = int(kbps)
+                if idle:
+                    asyncio.ensure_future(apply_bitrate())
 
     await loop.create_datagram_endpoint(lambda: _Udp(on_command), local_addr=('127.0.0.1', args.command_port))
     await loop.create_datagram_endpoint(lambda: _Udp(on_control), local_addr=('127.0.0.1', args.control_port))
