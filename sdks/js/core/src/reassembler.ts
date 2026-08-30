@@ -24,6 +24,10 @@ export interface ReassemblerCounters {
   chunksDup: number; chunksTooOld: number; chunksTooLate: number; chunksMissing: number;
   framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number; framesTooLate: number;
   keyframesClean: number; keyframesLost: number;
+  /** Frames closed by the silence timer (as opposed to superseded by a newer decodable frame). */
+  framesTimedOut: number;
+  /** Current adaptive silence deadline for delta frames (ms). */
+  deadlineDeltaEffectiveMs: number;
 }
 
 interface Block {
@@ -40,6 +44,8 @@ interface FrameState {
   firstSeen: number; lastSeen: number; sendTsFirst: number; sendTsLast: number;
   timer: ReturnType<typeof setTimeout> | null;
   closed: boolean; recovered: boolean;
+  /** Largest gap between consecutive chunks of this frame (ms) — the jitter signal. */
+  maxGapMs: number;
 }
 
 export interface ReassemblerOptions {
@@ -54,11 +60,13 @@ export class Reassembler {
   readonly counters: ReassemblerCounters = {
     chunksDup: 0, chunksTooOld: 0, chunksTooLate: 0, chunksMissing: 0,
     framesSeen: 0, framesClean: 0, framesRecovered: 0, framesIncomplete: 0, framesTooLate: 0,
-    keyframesClean: 0, keyframesLost: 0,
+    keyframesClean: 0, keyframesLost: 0, framesTimedOut: 0, deadlineDeltaEffectiveMs: 0,
   };
   private frames = new Map<number, FrameState>();
   private newestId: number | null = null;
   private lastDecodedId: number | null = null;
+  /** Ring of per-frame max chunk gaps (ms) over recent frames; p95 drives the adaptive deadline. */
+  private gaps: number[] = [];
   deadlineDeltaMs: number;
   deadlineKeyMs: number;
   private now: () => number;
@@ -87,20 +95,28 @@ export class Reassembler {
     if (!f) {
       f = { id: h.frameId, keyframe: h.keyframe, blocks: new Map(), lastBlockIdx: null,
             firstSeen: t, lastSeen: t, sendTsFirst: h.sendTs, sendTsLast: h.sendTs,
-            timer: null, closed: false, recovered: false };
+            timer: null, closed: false, recovered: false, maxGapMs: 0 };
       this.frames.set(h.frameId, f);
       this.counters.framesSeen++;
     }
     if (f.closed) return;
+    f.maxGapMs = Math.max(f.maxGapMs, t - f.lastSeen);
     f.lastSeen = t;
     f.sendTsLast = h.sendTs;
     if (h.keyframe) f.keyframe = true;
     if (h.flags2 & FLAG2_END_OF_FRAME) f.lastBlockIdx = h.blockIdx;
 
     // Close-out measures silence, not elapsed time: re-arm on every chunk.
+    // The profile's deadline is a LAN number; on a jittery path a frame's
+    // chunks legitimately arrive spread out, and closing it out early turns
+    // jitter into fake loss and keyframe requests (measured on cellular: 33
+    // "lost" frames at 0.0 % true loss). The deadline therefore adapts to the
+    // observed intra-frame gap (p95 of recent frames), bounded at 250 ms. This
+    // adds no latency in the normal case: a frame is also closed the moment a
+    // newer frame decodes, which is the real bound.
     if (f.timer) clearTimeout(f.timer);
     const ref = f;
-    f.timer = setTimeout(() => this.closeFrame(ref, false), f.keyframe ? this.deadlineKeyMs : this.deadlineDeltaMs);
+    f.timer = setTimeout(() => this.closeFrame(ref, false), this.effectiveDeadline(f.keyframe));
 
     let b = f.blocks.get(h.blockIdx);
     if (!b) {
@@ -164,6 +180,7 @@ export class Reassembler {
     f.closed = true;
     if (f.timer) clearTimeout(f.timer);
     this.frames.delete(f.id);
+    this.noteGap(f);
     if (f.recovered) this.counters.framesRecovered++; else this.counters.framesClean++;
     if (f.keyframe) this.counters.keyframesClean++;
     this.lastDecodedId = f.id;
@@ -184,6 +201,21 @@ export class Reassembler {
     });
   }
 
+  private effectiveDeadline(keyframe: boolean): number {
+    const base = keyframe ? this.deadlineKeyMs : this.deadlineDeltaMs;
+    if (this.gaps.length < 10) return base;
+    const sorted = [...this.gaps].sort((a, b) => a - b);
+    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+    const adaptive = Math.min(250, Math.max(base, Math.ceil(p95 * 4 + 10)));
+    if (!keyframe) this.counters.deadlineDeltaEffectiveMs = adaptive;
+    return keyframe ? Math.max(adaptive, base) : adaptive;
+  }
+
+  private noteGap(f: FrameState): void {
+    this.gaps.push(f.maxGapMs);
+    if (this.gaps.length > 200) this.gaps.shift();
+  }
+
   private closeFrame(f: FrameState, superseded: boolean): void {
     if (f.closed) return;
     f.closed = true;
@@ -193,6 +225,7 @@ export class Reassembler {
     for (const b of f.blocks.values()) if (!b.done) missing += b.n - b.dataRx;
     this.counters.chunksMissing += missing;
     this.counters.framesIncomplete++;
+    if (!superseded) this.counters.framesTimedOut++;
     if (f.keyframe) this.counters.keyframesLost++;
     this.o.onLoss({ frameId: f.id, keyframe: f.keyframe, superseded, chunksMissing: missing });
   }

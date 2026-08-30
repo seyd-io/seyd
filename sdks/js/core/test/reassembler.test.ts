@@ -76,3 +76,25 @@ describe('Reassembler', () => {
     expect(r.counters.chunksTooOld).toBe(1);
   });
 });
+
+import { describe as d2, it as it2, expect as e2 } from 'vitest';
+import { Reassembler as R2 } from '../src/reassembler.js';
+import { encodeFrame as enc2 } from '../src/encode.js';
+
+d2('adaptive close-out', () => {
+  it2('widens the silence deadline after observing intra-frame jitter', () => {
+    let now = 0;
+    const frames: number[] = [];
+    const losses: number[] = [];
+    const r = new R2({ deadlineDeltaMs: 30, deadlineKeyMs: 60, onFrame: (f) => frames.push(f.frameId), onLoss: (l) => losses.push(l.frameId), now: () => now });
+    // 20 frames whose two chunks arrive 25 ms apart: legitimate jitter under the 30 ms base.
+    for (let id = 0; id < 20; id++) {
+      const chunks = enc2(new Uint8Array(1500), { channelId: 1, frameId: id, keyframe: id === 0, fecPct: 0, chunkLen: 1000, sendTs: 0 });
+      const a = parseChunk(chunks[0])!, b = parseChunk(chunks[1])!;
+      r.push(a.header, a.payload); now += 25; r.push(b.header, b.payload); now += 15;
+    }
+    e2(frames.length).toBe(20);
+    e2(r.counters.deadlineDeltaEffectiveMs).toBeGreaterThanOrEqual(110); // 4 × 25 + 10
+    e2(r.counters.deadlineDeltaEffectiveMs).toBeLessThanOrEqual(250);
+  });
+});

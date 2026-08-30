@@ -53,7 +53,7 @@ export class StatsTracker {
   }
 
   snapshot(extra: {
-    reassembler: { chunksDup: number; chunksTooOld: number; chunksTooLate: number; chunksMissing: number; framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number; keyframesClean: number; keyframesLost: number };
+    reassembler: { chunksDup: number; chunksTooOld: number; chunksTooLate: number; chunksMissing: number; framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number; keyframesClean: number; keyframesLost: number; framesTimedOut: number; deadlineDeltaEffectiveMs: number };
     decodeErrors: number; keyframesRequested: number; decodeQueue: number; degraded: boolean;
     rttMs: number | null; offsetUs: number | null; pathLabel: string | null; qos: QosInfo | null; qosPublisher: string | null;
     injecting: { rate: number; burst: number } | null;
@@ -71,7 +71,7 @@ export class StatsTracker {
       chunksTooOld: extra.reassembler.chunksTooOld,
       framesSeen: extra.reassembler.framesSeen, framesClean: extra.reassembler.framesClean,
       framesRecovered: extra.reassembler.framesRecovered, framesIncomplete: extra.reassembler.framesIncomplete,
-      chunksLate: extra.reassembler.chunksTooLate,
+      chunksLate: extra.reassembler.chunksTooLate, framesTimedOut: extra.reassembler.framesTimedOut, deadlineDeltaMs: extra.reassembler.deadlineDeltaEffectiveMs,
       keyframesClean: extra.reassembler.keyframesClean, keyframesLost: extra.reassembler.keyframesLost,
       framesDecoded: this.framesDecoded, decodeErrors: extra.decodeErrors, keyframesRequested: extra.keyframesRequested,
       degraded: extra.degraded,

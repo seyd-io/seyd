@@ -84,6 +84,10 @@ export interface PilotStats {
   framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number;
   /** Chunks that arrived for a frame already decoded/closed (typically parity after data completed). */
   chunksLate: number;
+  /** Frames closed by the (adaptive) silence timer rather than superseded. */
+  framesTimedOut: number;
+  /** Current adaptive delta-frame close-out deadline (ms). */
+  deadlineDeltaMs: number;
   keyframesClean: number; keyframesLost: number; framesDecoded: number; decodeErrors: number; keyframesRequested: number;
   degraded: boolean;
   kbps: number; kbpsPayload: number; fps: number;

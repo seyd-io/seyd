@@ -175,6 +175,17 @@ Agent `NatReport` in `announce` (refreshed on network change): ipv4 `{local, pub
 
 ## Part 3 — Ordered work
 
+**Field test, run A (2026-08-30, pilot on an iPhone hotspot, robot on the office
+LAN):** hole punch worked (`srflx`, Telia mobile → cone NAT), RTT 22 ms, 25 fps
+at ~1.7 Mbps, g2g p50 17 ms, 0.0 % true chunk loss, no keyframes lost, PTZ
+responsive; the owner judged the experience good. Two findings: (1) the
+reassembler's LAN-tuned silence deadline (30 ms) closed out 33 jittered frames
+as "lost" and triggered 18 keyframe requests — fixed with an adaptive
+deadline (p95 intra-frame gap × 4 + 10, ≤ 250 ms) and a recovery cadence of one
+per half GOP; (2) g2g p95 (101 ms) is dominated by 30–60 KB IDRs serialising
+over a ~2 Mbps uplink — the case for intra-refresh/LTR (§1.2) and for ABR
+(§1.3) on cellular. Run B (robot on the hotspot) is still to do.
+
 **Status (2026-08-28, later):** Milestone A steps 0–9 have a first working
 implementation: `seyd-fec`, `seyd-wire`, `seyd-qos`, `seyd-nat`,
 `seyd-transport` (quinn + h3-webtransport, verified with real Chrome),
