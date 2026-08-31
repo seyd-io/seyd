@@ -12,7 +12,10 @@
 # Reads .env.local for CAMERA_USER / CAMERA_PASSWORD (and optional CAMERA_IP).
 set -euo pipefail
 cd "$(dirname "$0")"
+# Variables passed on the command line beat .env.local.
+CLI_CAMERA_IP="${CAMERA_IP:-}"
 if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi
+if [ -n "$CLI_CAMERA_IP" ]; then CAMERA_IP="$CLI_CAMERA_IP"; fi
 : "${CAMERA_PASSWORD:?set CAMERA_PASSWORD in .env.local}"
 CAMERA_IP="${CAMERA_IP:-192.168.86.237}"
 SIGNAL_URL="${SIGNAL_URL:-wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws}"
