@@ -105,6 +105,17 @@ mostly about what the robot's startup lines say (`candidate …`, `NAT type`,
   family** — it needs an inbound pinhole/port-forward for UDP 4433 (IPv4 or
   IPv6), a public-IP SIM, or the future relay tier. This is the single most
   important field finding for positioning.
+* **Run B, resolved (2026-08-31): UPnP on the router fixes it, automatically.**
+  Enabling UPnP/NAT-PMP made the Tele2 4G router accept Seyd's own port-mapping
+  request (`Upnp mapped 37.2.207.116:4433 → us`), which added a `portmap`
+  candidate with an installed inbound pinhole. The pilot on the hotspot then
+  connected directly, `outcome: p2p`, `path_label: portmap` — no hole punch, no
+  relay. Double-cellular numbers: rtt 51 ms, 24 fps, g2g 31/59 ms p50/p95,
+  0.0 % true loss (3 lost of 1689, 7 FEC-recovered), ABR stable at fec 25/35
+  near the 3000 ceiling with no oscillation. So the deployment guidance for a
+  robot behind a consumer 4G/5G router is: **enable UPnP/NAT-PMP** (Seyd installs
+  the pinhole itself), or forward UDP 4433 once, or use the relay tier.
+
 * Bug found and fixed: a `report outcome=failed` did not release the driver
   slot, so the same pilot's retries were offered `observer`.
 * It also moves the cloud prober up the list: it would have measured "IPv4
