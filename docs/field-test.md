@@ -81,6 +81,22 @@ mostly about what the robot's startup lines say (`candidate …`, `NAT type`,
    check its diagnosis against the robot's lines.
 4. If it connects, record as `run-c.jsonl`.
 
+## Findings so far
+
+* **Run B, first attempt (2026-08-31, pilot on office broadband by mistake):**
+  the Tele2 4G router network gives the robot **global IPv6** (three `host6`
+  candidates) and a public, non-CGNAT IPv4 (`37.2.207.116`, STUN says cone) —
+  but no inbound IPv4 ever arrived, so the carrier NAT is in practice
+  **port-restricted** (unreachable by hole punch from a browser, exactly as the
+  NAT table predicts; STUN cannot distinguish this from address-restricted, so
+  the hint stays "likely"). The office pilot has no IPv6, so `host6` could not
+  be tried. Conclusion: on this carrier, **the pilot side must have IPv6** for
+  a direct path. Retry with the pilot on the iPhone hotspot.
+* Bug found and fixed: a `report outcome=failed` did not release the driver
+  slot, so the same pilot's retries were offered `observer`.
+* It also moves the cloud prober up the list: it would have measured "IPv4
+  inbound: blocked, IPv6: works" at announce time instead of at the demo.
+
 ## What to bring back
 
 * `run-a.jsonl`, `run-b.jsonl`, the two `demo-seyd.sh` logs, and the robot's
