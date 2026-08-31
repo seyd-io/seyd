@@ -44,6 +44,14 @@ candidate). Seyd already advertises the robot as a `host6` candidate; this is
 exactly the path that lit up behind the 4G router in run B once the firewall let
 it in.
 
+**Bypass Mode is an official, supported Starlink feature** — a toggle in the
+Starlink app that turns the Starlink router into a pass-through (Wi-Fi and
+routing off) so your own router does the work. It is reversible and not a hack.
+Hardware caveat by dish generation: the round **Gen 2** dish has no LAN port of
+its own, so bypass mode needs the official **Starlink Ethernet Adapter** (~$25)
+to connect your router; the **Gen 3** dish (and the Business/Flat High
+Performance units) has Ethernet built in, so no adapter is required.
+
 **Path B — public IPv4, works for any pilot.** Take a **Priority / Business**
 plan with the **public-IP add-on** (~$140+/mo). That gives a normal public IPv4;
 forward UDP 4433 to the robot (still via bypass mode + your own router, or via
