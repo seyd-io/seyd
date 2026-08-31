@@ -1,7 +1,16 @@
 > **Historical document (frozen 2026-08-28).** This describes the Python/JS
-> proof of concept that has since been deleted from the tree. Its measurements
-> and design rationale remain the reference; the code paths it names no longer
-> exist. The product is described by PLAN.md, docs/protocol/ and the ADRs.
+> proof of concept that has since been deleted from the tree (git history
+> before 2026-08-28 has it). Its measurements and design rationale remain the
+> reference; the code paths it names no longer exist. Where the pieces went:
+> `packages/agent/fec.py` and `packages/pilot/fec.js` survive as
+> `tools/fec-reference/` (the interop-vector generators); `camera.py` became
+> `examples/demo-robot/hikvision.py`; `pilot-smoke.py`'s DevTools helper became
+> `tools/cdp.py` (used by `tools/seyd-smoke.py`); `robot.sh`/`demo.sh`/`dev.sh`
+> were replaced by `sim-robot.sh`, `demo-seyd.sh` and CLAUDE.md's "Verifying
+> work"; the signal server was rewritten as `cloud/api`, and the relay path was
+> dropped entirely (P2P only — relays are a future tier). The product is
+> described by SPEC.md, PLAN.md, docs/protocol/ and the ADRs; field results
+> since the freeze live in docs/field-test.md and docs/starlink.md.
 
 # DARC Prototype — Mac-to-Mac Teleoperation
 

@@ -355,7 +355,10 @@ tab is the common way an operator stops steering without telling anyone.
 
 ## Open questions
 
-1. **Multiple simultaneous pilots**: when two clients connect, the current signal server gives the robot to the last connected pilot. For the demo, this might be fine (last-writer-wins), or we may want queuing or read-only observer mode. **Now more pressing than it was:** with PTZ, two prospects don't merely share a view, they fight over the actuator, and the loser sees the camera moving on its own.
+1. ~~**Multiple simultaneous pilots**~~ — **solved on the Seyd stack.** The
+   cloud assigns one **driver** and any number of observers up to the robot's
+   `max_sessions`; the agent drops commands from observers, and the pilot page
+   shows a role badge. A failed session releases the driver slot immediately.
 2. ~~**PTZ presets**~~ — **settled.** The camera returns to `--ptz-home`
    (default `0,1800,10`) on pilot disconnect and on `H`. Implemented with
    `PUT .../absolute` rather than stored presets, so the position lives in the
@@ -368,13 +371,11 @@ tab is the common way an operator stops steering without telling anyone.
    keys secondary, gamepad not built. See "Pilot changes" for why.
 5. **Demo branding**: should the pilot page show different copy ("You are controlling a real camera") vs the generic UI?
 
-6. **Join latency is the demo's weakest moment.** A joining pilot decodes nothing
-   until the next IDR — measured 16 consecutive `A key frame is required after
-   configure()` rejections at GOP 25, so up to a second of black canvas as the
-   first thing a prospect sees. The camera answers
-   `PUT /ISAPI/Streaming/channels/101/requestKeyFrame` with HTTP 200, so calling
-   it on `hello` would cut this to roughly one round trip. Not built; it is
-   PROTOTYPE.md's next step 3 and the highest-value one left for this demo.
+6. ~~**Join latency**~~ — **solved on the Seyd stack.** The pilot sends
+   `request-keyframe` on `hello` (and on any unrecoverable loss); `seydd` turns
+   it into a `recovery-request` on the publisher-control port and
+   `examples/demo-robot/bridge.py` calls the camera's `requestKeyFrame` ISAPI
+   endpoint. Measured join-to-first-frame is now well under 300 ms.
 
 ---
 
