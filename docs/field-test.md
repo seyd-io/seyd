@@ -92,6 +92,19 @@ mostly about what the robot's startup lines say (`candidate …`, `NAT type`,
   the hint stays "likely"). The office pilot has no IPv6, so `host6` could not
   be tried. Conclusion: on this carrier, **the pilot side must have IPv6** for
   a direct path. Retry with the pilot on the iPhone hotspot.
+* **Run B, retry with the pilot on the iPhone hotspot (2026-08-31):** still no
+  direct path, `handshake-timeout` on every candidate — and this time the pilot
+  had global IPv6 too (`2a02:1406:…`, Telia). Isolated with a dual-stack GCP
+  probe VM: an unsolicited IPv6 UDP packet from the cloud to the robot's
+  advertised `host6` address never arrives, while a stateful flow the robot
+  opens first gets its reply. The robot Mac's own firewall is off, so it is the
+  **Tele2 4G router's stateful IPv6 firewall** dropping inbound it has not seen
+  outbound first. IPv6 removes the NAT but not the firewall; WebTransport's
+  Initial is unsolicited inbound, so it is dropped. **Conclusion: a robot behind
+  a consumer 4G/5G router is not directly reachable out of the box on either
+  family** — it needs an inbound pinhole/port-forward for UDP 4433 (IPv4 or
+  IPv6), a public-IP SIM, or the future relay tier. This is the single most
+  important field finding for positioning.
 * Bug found and fixed: a `report outcome=failed` did not release the driver
   slot, so the same pilot's retries were offered `observer`.
 * It also moves the cloud prober up the list: it would have measured "IPv4
