@@ -66,6 +66,56 @@ The mental model for Archetype B: **Seyd is a VPN for robot LAN data.** The pilo
 
 Both archetypes ride the same Seyd transport layer. The difference is how much of the stack above the transport Seyd owns.
 
+### Where these archetypes live (target verticals)
+
+The highest-pain version of this problem is **occasional remote operation of a
+vehicle that is normally autonomous or locally operated**, on networks nobody
+controls end to end:
+
+- **AV prototypes and test rigs** — early-stage autonomous vehicles where a
+  human must be able to take over convincingly, and proof-of-concept programs
+  for driving vehicles and drones at a distance (including military test
+  ranges). The takeover path is bought before the autonomy is trusted.
+- **ROVs and remotely operated machinery** in oil & gas, subsea and defense.
+  Note the topology: a subsea ROV is tethered to a surface vessel, so Seyd's
+  "robot side" is the vessel — and the vessel's uplink is typically satellite
+  (see docs/starlink.md, which is directly about this link).
+- **Delivery/logistics robot fleets** needing rescue-and-supervise (the
+  classic Archetype A).
+
+These customers are predominantly Archetype B: they already own a command &
+control (C2) stack and want the internet leg solved. Defense and industrial
+buyers also make the portable-cloud decision load-bearing — the whole cloud
+runs from `docker compose` on their infrastructure, with no hyperscaler
+dependency in application code.
+
+### C2 systems, pub/sub middleware and DDS
+
+Archetype-B C2 stacks are typically built on LAN pub/sub middleware — most
+often **DDS** (which is also what ROS 2 speaks underneath). Two facts shape
+Seyd's role there:
+
+1. **DDS does not cross the public internet by itself** — discovery is
+   multicast, transports assume a LAN, and NAT traversal is somebody else's
+   problem. Existing WAN bridges (routing services, DDS routers) forward
+   topics over generic TCP/UDP with no media awareness and a weak
+   reachability story.
+2. **Video must not be treated as just another topic.** A reliable-QoS video
+   topic over a lossy link stalls like TCP; a best-effort one smears for
+   seconds on every loss. Neither repairs without a round trip, bounds
+   latency, or asks the encoder to adapt.
+
+Seyd's position: **act as the domain relay for the real-time plane.** Selected
+command and sensor topics map onto Seyd's unreliable channels (sequence
+numbers, age-out, FEC where wanted) via a thin DDS adapter — an SDK wrapper
+over the C ABI or a `seydd` channel, per the no-protocol-logic-in-wrappers
+rule, exactly like the ROS 2 node. Video bypasses the middleware entirely and
+rides Seyd's media path from the camera stream, because that path exists
+precisely to do what pub/sub cannot: minimum-latency video over a lossy
+internet, always. Bulk topics (mission plans, map updates, file transfer) are
+explicitly out of scope — they belong on a boring reliable channel (HTTPS,
+rsync, the C2's own tools), not on a real-time plane.
+
 ---
 
 ## What Seyd Is (and Is Not)
@@ -80,6 +130,7 @@ Both archetypes ride the same Seyd transport layer. The difference is how much o
 | Connection-quality hooks and closed-loop rate control | The fleet management business logic |
 | Reachability diagnosis when P2P is impossible | Managed human operators |
 | Relay fallback (future paid tier — not in v1) | Transcoding or format conversion |
+| The real-time plane: video, commands, sensor streams | Bulk transfer: mission plans, logs, software updates |
 
 Seyd exposes SDKs and APIs. Integrators build the robot agent and the operator application on top.
 
@@ -90,7 +141,7 @@ Seyd exposes SDKs and APIs. Integrators build the robot agent and the operator a
 ### 1. Teleoperation (Direct Control)
 An operator takes full manual control of a vehicle in real time. Latency is critical — commands and video must be synchronized to avoid disorientation and accidents.
 
-- **Example:** A delivery robot is stuck; a remote operator steers it around the obstacle.
+- **Example:** A delivery robot is stuck; a remote operator steers it around the obstacle. An AV prototype leaves its envelope on a test range; the safety operator takes over from the control room.
 - **Latency target:** <100ms end-to-end (achievable on continental connections; ~150–200ms intercontinental is realistic physics-limited floor). Measured in the field: 17–31 ms median glass-to-glass over one and two cellular hops (see Latency Reality).
 
 ### 2. Supervisory Control
