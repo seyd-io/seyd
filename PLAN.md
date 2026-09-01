@@ -233,12 +233,13 @@ explain it (add to §2.6 classes) — pending.
 14. Command/sensor channel kinds on datagrams with input timestamps; PTZ moves to `COMMAND_UNRELIABLE`.
 15. SIMD FEC, GSO, perf pass on RK3588/Jetson (CPU per 1080p30 stream < 3%); fuzzing of wire/control parsers; 24 h soak.
 16. Landing page live with demo-request flow; docs site with networking guides for every failure class; `.deb` + apt repo (`apt.seyd.io`), Python wheels (manylinux x86_64/aarch64), npm packages, Docker images.
+17. **EU-migration rehearsal** (before the first security-review customer): stand the cloud up on one EU provider (Scaleway for like-for-like managed Postgres/Redis, or Elastx/Cleura for the Swedish story) and run the smoke tests against it. Timebox one day — if it takes longer, that is a portability bug to fix. Decision context and move triggers: docs/eu-hosting.md.
 
 ### Milestone C — breadth (when customers pull it)
-17. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.
-18. `seyd-pilot-core` + `seyd-pilot-agent` (native `seyd/2`, direction-agnostic, localhost RTP/UDP front end for Archetype B).
-19. iOS (`SeydKit`, UniFFI + VideoToolbox), Android (UniFFI + MediaCodec), Flutter — on customer demand.
-20. Relay tier (QUIC-forwarding relay with a public address, separately priced), MPQUIC bonding evaluation, session recording.
+18. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.
+19. `seyd-pilot-core` + `seyd-pilot-agent` (native `seyd/2`, direction-agnostic, localhost RTP/UDP front end for Archetype B).
+20. iOS (`SeydKit`, UniFFI + VideoToolbox), Android (UniFFI + MediaCodec), Flutter — on customer demand.
+21. Relay tier (QUIC-forwarding relay with a public address, separately priced), MPQUIC bonding evaluation, session recording.
 
 ---
 
