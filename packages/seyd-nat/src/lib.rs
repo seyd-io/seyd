@@ -27,14 +27,101 @@ pub use socket::bind_sockets;
 pub use stun::{discover, NatDiscovery, NatType};
 
 /// Network-change notifications.
-///
-/// **Stub.** Returns a receiver that never fires. The real implementation
-/// (netlink on Linux, `SCDynamicStore`/route socket on macOS) lands with the
-/// reliability work in PLAN.md §1.8; callers should treat a message as
-/// "re-run [`gather`]".
-pub fn watch_network_changes() -> tokio::sync::mpsc::Receiver<()> {
-    let (_tx, rx) = tokio::sync::mpsc::channel(1);
-    // `_tx` is dropped here on purpose: the receiver yields `None` forever
-    // rather than pretending changes never happen.
-    rx
+pub struct NetworkWatch {
+    /// One message per detected change; the payload is a human-readable reason.
+    pub events: tokio::sync::mpsc::Receiver<String>,
+    /// Inject a synthetic change (e.g. after repeated port-mapping renewal
+    /// failures) without waiting for the poller.
+    pub force: tokio::sync::mpsc::Sender<String>,
+}
+
+/// Watch for interface-address changes by polling [`ifaces::interfaces`]
+/// every 10 s. Polling rather than netlink/`SCDynamicStore` keeps it portable;
+/// a 10 s detection delay is negligible against QUIC's idle timeout. Callers
+/// treat a message as "re-run [`gather`] on the same sockets".
+pub fn watch_network_changes() -> NetworkWatch {
+    watch_network_changes_with(ifaces::interfaces, std::time::Duration::from_secs(10))
+}
+
+/// Test seam: same watcher with an injected address provider and period.
+pub fn watch_network_changes_with<F>(mut provider: F, period: std::time::Duration) -> NetworkWatch
+where
+    F: FnMut() -> Vec<std::net::IpAddr> + Send + 'static,
+{
+    let (ev_tx, events) = tokio::sync::mpsc::channel(4);
+    let (force, mut force_rx) = tokio::sync::mpsc::channel::<String>(4);
+    // A clone lives inside the task so `force_rx.recv()` can never yield
+    // `None` and busy-loop the select.
+    let keep = force.clone();
+    tokio::spawn(async move {
+        let _keep = keep;
+        let mut prev: std::collections::BTreeSet<std::net::IpAddr> =
+            provider().into_iter().collect();
+        let mut tick = tokio::time::interval(period);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        tick.tick().await; // the immediate first tick is the baseline, not a change
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {
+                    let now: std::collections::BTreeSet<std::net::IpAddr> =
+                        provider().into_iter().collect();
+                    if now != prev {
+                        let added = now.difference(&prev).count();
+                        let removed = prev.difference(&now).count();
+                        prev = now;
+                        // try_send: a slow consumer coalesces changes instead
+                        // of queueing a burst of stale ones.
+                        let _ = ev_tx.try_send(format!(
+                            "interface addresses changed (+{added} -{removed})"
+                        ));
+                    }
+                }
+                reason = force_rx.recv() => {
+                    if let Some(reason) = reason {
+                        let _ = ev_tx.try_send(reason);
+                    }
+                }
+            }
+        }
+    });
+    NetworkWatch { events, force }
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use std::net::IpAddr;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn fires_on_address_change_and_force_only() {
+        let addrs: Arc<Mutex<Vec<IpAddr>>> =
+            Arc::new(Mutex::new(vec!["192.168.1.2".parse().unwrap()]));
+        let p = addrs.clone();
+        let mut w = super::watch_network_changes_with(
+            move || p.lock().unwrap().clone(),
+            Duration::from_millis(20),
+        );
+        // Stable set: no event.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(120), w.events.recv())
+                .await
+                .is_err(),
+            "no event expected while addresses are stable"
+        );
+        // Change the set: exactly one event.
+        addrs.lock().unwrap().push("10.0.0.7".parse().unwrap());
+        let reason = tokio::time::timeout(Duration::from_millis(500), w.events.recv())
+            .await
+            .expect("event expected after change")
+            .unwrap();
+        assert!(reason.contains("+1"), "{reason}");
+        // Forced event passes through.
+        w.force.send("renewal failed".into()).await.unwrap();
+        let reason = tokio::time::timeout(Duration::from_millis(500), w.events.recv())
+            .await
+            .expect("forced event expected")
+            .unwrap();
+        assert_eq!(reason, "renewal failed");
+    }
 }

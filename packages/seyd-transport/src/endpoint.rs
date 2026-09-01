@@ -48,11 +48,59 @@ pub struct Endpoint {
     probers: Vec<Prober>,
     sessions: tokio::sync::Mutex<mpsc::Receiver<Session>>,
     local_addrs: Vec<std::net::SocketAddr>,
+    cfg: TransportConfig,
 }
 
 fn install_crypto_provider() {
     // Idempotent; a second install returns Err, which is fine.
     let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+/// Build a full quinn `ServerConfig` (TLS + transport policy) for `cert`.
+/// Used at bind time and again on rotation.
+fn make_server_config(cert: &Cert, cfg: &TransportConfig) -> anyhow::Result<quinn::ServerConfig> {
+    let cert_chain = vec![rustls::pki_types::CertificateDer::from(
+        cert.cert_der.clone(),
+    )];
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+        cert.key_der.clone(),
+    ));
+    let mut tls = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])?
+    .with_no_client_auth()
+    .with_single_cert(cert_chain, key)?;
+    tls.alpn_protocols = vec![b"h3".to_vec()];
+    tls.max_early_data_size = 0;
+
+    let mut transport = quinn::TransportConfig::default();
+    transport
+        .max_idle_timeout(Some(cfg.max_idle.try_into()?))
+        .keep_alive_interval(Some(cfg.keep_alive))
+        .datagram_send_buffer_size(cfg.datagram_send_buffer)
+        .datagram_receive_buffer_size(Some(cfg.datagram_receive_buffer))
+        .initial_mtu(cfg.initial_mtu)
+        .mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()))
+        // Streams are only the control channel and, later, reliable
+        // channels; datagrams carry media.
+        .max_concurrent_bidi_streams(16u32.into())
+        .max_concurrent_uni_streams(16u32.into());
+    match cfg.congestion {
+        Congestion::Bbr => {
+            transport
+                .congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
+        }
+        Congestion::Cubic => {
+            transport
+                .congestion_controller_factory(Arc::new(quinn::congestion::CubicConfig::default()));
+        }
+    }
+
+    let quic_server = quinn::crypto::rustls::QuicServerConfig::try_from(tls)?;
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server));
+    server_config.transport_config(Arc::new(transport));
+    Ok(server_config)
 }
 
 impl Endpoint {
@@ -65,51 +113,7 @@ impl Endpoint {
     ) -> anyhow::Result<Endpoint> {
         install_crypto_provider();
         anyhow::ensure!(!socks.is_empty(), "at least one socket is required");
-
-        let cert_chain = vec![rustls::pki_types::CertificateDer::from(
-            cert.cert_der.clone(),
-        )];
-        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
-            rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_der.clone()),
-        );
-        let mut tls = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_protocol_versions(&[&rustls::version::TLS13])?
-        .with_no_client_auth()
-        .with_single_cert(cert_chain, key)?;
-        tls.alpn_protocols = vec![b"h3".to_vec()];
-        tls.max_early_data_size = 0;
-
-        let mut transport = quinn::TransportConfig::default();
-        transport
-            .max_idle_timeout(Some(cfg.max_idle.try_into()?))
-            .keep_alive_interval(Some(cfg.keep_alive))
-            .datagram_send_buffer_size(cfg.datagram_send_buffer)
-            .datagram_receive_buffer_size(Some(cfg.datagram_receive_buffer))
-            .initial_mtu(cfg.initial_mtu)
-            .mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()))
-            // Streams are only the control channel and, later, reliable
-            // channels; datagrams carry media.
-            .max_concurrent_bidi_streams(16u32.into())
-            .max_concurrent_uni_streams(16u32.into());
-        match cfg.congestion {
-            Congestion::Bbr => {
-                transport.congestion_controller_factory(Arc::new(
-                    quinn::congestion::BbrConfig::default(),
-                ));
-            }
-            Congestion::Cubic => {
-                transport.congestion_controller_factory(Arc::new(
-                    quinn::congestion::CubicConfig::default(),
-                ));
-            }
-        }
-
-        let quic_server = quinn::crypto::rustls::QuicServerConfig::try_from(tls)?;
-        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server));
-        server_config.transport_config(Arc::new(transport));
-
+        let server_config = make_server_config(cert, &cfg)?;
         let (tx, rx) = mpsc::channel(16);
         let next_id = Arc::new(AtomicU64::new(1));
         let mut endpoints = Vec::new();
@@ -155,12 +159,24 @@ impl Endpoint {
             probers,
             sessions: tokio::sync::Mutex::new(rx),
             local_addrs,
+            cfg,
         })
     }
 
     /// Next accepted WebTransport session, or `None` once the endpoint is closed.
     pub async fn accept(&self) -> Option<Session> {
         self.sessions.lock().await.recv().await
+    }
+
+    /// Install a new certificate for **future** connections. Existing QUIC
+    /// sessions carry their own completed TLS state and are untouched
+    /// (`quinn::Endpoint::set_server_config` applies to new handshakes only).
+    pub fn rotate(&self, cert: &Cert) -> anyhow::Result<()> {
+        let sc = make_server_config(cert, &self.cfg)?;
+        for ep in &self.endpoints {
+            ep.set_server_config(Some(sc.clone()));
+        }
+        Ok(())
     }
 
     pub fn local_addrs(&self) -> &[std::net::SocketAddr] {

@@ -58,6 +58,16 @@ A `session_id` is a random 16-hex-char string; the pilot presents it in the
 control-stream `hello`.
 
 Clarifications (from the first implementation):
+* **Reachability annotation:** when a prober is configured
+  (`SEYD_PROBER_URL`), the cloud dials each publicly-probeable announced
+  candidate with a real QUIC handshake after every `announce` (rate-limited
+  per robot). The stored `nat_report` is then annotated — `prober = {from:
+  "cloud", reachable: [labels], unreachable: [labels], ts}`, per-candidate
+  `candidates[].ok`, `ipv6.inbound_ok` when a `host6` candidate was probed —
+  and `p2p_hint` is recomputed honestly (any candidate reachable → `likely`;
+  all probeable candidates dark → `none`). Offers and presence carry the
+  annotated report. Private/link-local/CGNAT addresses are never probed
+  (`ok: null`).
 * Roles are fixed at `offer` time. When the driver leaves, existing observers
   are **not** promoted; the next new `connect` becomes driver.
 * `connect` before the robot has sent `announce` → `robot-offline`.
