@@ -558,43 +558,14 @@ Full robotics platform — gRPC for structured RPCs, WebRTC for P2P streaming, c
 
 ---
 
-## Business Model & Licensing (position, 2026-08-31)
+## Business Model & Licensing
 
-**Open-source SDKs, monetized coordination plane.** Everything that runs on
-customer hardware — the agent core and crates, `seydd`, every language wrapper,
-`@seyd/core` and the web components, the headless pilot agent — is open source
-(Apache-2.0). This is not only an adoption play: defense and industrial buyers
-audit what runs inside their vehicles, and the pilot SDK ships as JavaScript
-into browsers and is de facto public anyway. There is deliberately **no
-held-back "smart part"**: the FEC decoder must ship in the open pilot, the
-encoder in the auditable agent, and Reed–Solomon is textbook mathematics — the
-value is the field-tuned system around it, not the arithmetic. The protocol
-contracts (docs/protocol/, ADRs) are public.
-
-**What is sold:**
-
-| Tier | What you get | Why it's priced |
-|---|---|---|
-| Free | Hosted signaling for 1–2 robots, community support | Costs us pennies; converts evaluations |
-| Pro | Hosted signaling per robot/month, console, fleet features | The Voysys-precedent unit; predictable for customers |
-| Enterprise | **Self-hosted signaling server license** (the portable-cloud build), SSO, audit, RBAC, support, integration work | Defense/industrial buyers require on-prem; the compose-portable cloud is the product here |
-| Relay add-on (future) | Metered relayed sessions for unreachable networks | The one thing with real marginal cost (bandwidth through our servers) |
-
-**Unit economics — why this works:** Seyd's P2P-only architecture means the
-cloud never carries media. Per robot the cloud sees a ~100-byte heartbeat every
-5 s and a few KB per session setup; the current deployment (signaling,
-presence, auth, landing page) is one small always-on instance plus small
-Postgres/Redis — tens of dollars per month in total, serving thousands of
-robots. **Marginal cloud cost per P2P customer is effectively zero**; costs are
-fixed (operations, observability, support, later multi-region). The exception
-is relayed video (~1.3 GB/hour per 3 Mbps stream through our servers), which is
-why the relay is a separately priced, metered tier and never a silent fallback
-— the P2P-only decision is a unit-economics decision as much as a latency one.
-
-**Accepted consequence:** with open SDKs and a public protocol, a determined
-team can run their own signaling server. The bet — the standard open-core bet,
-LiveKit being the reference in this market — is that hosted convenience,
-enterprise features, relay infrastructure and the pace of the roadmap beat DIY.
+Internal position, tiers and unit economics live in **docs/business.md**.
+The one product-shaping consequence belongs here: **the SDKs — everything that
+runs on customer hardware, robot and pilot side — are open source
+(Apache-2.0)**, with no held-back components; the protocol contracts are
+public. What is sold is the coordination plane (hosted and self-hosted
+signaling, enterprise features) and, later, the metered relay tier.
 
 ## Open Questions
 
