@@ -12,7 +12,7 @@ pub mod messages;
 use futures_util::{SinkExt, StreamExt};
 use messages::*;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -133,6 +133,13 @@ pub fn start(cfg: Config, identity: Identity) -> (Handle, mpsc::Receiver<Event>)
     (handle, ev_rx)
 }
 
+const BASE_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// A connection that stayed up this long was healthy, not flapping, so the
+/// failure that ends it starts the backoff over. Without this a robot up for
+/// hours pays the full `MAX_BACKOFF` for a one-second blip.
+const STABLE_SESSION: Duration = Duration::from_secs(30);
+
 async fn run(
     cfg: Config,
     identity: Identity,
@@ -141,14 +148,20 @@ async fn run(
     ev_tx: mpsc::Sender<Event>,
     conn_tx: watch::Sender<bool>,
 ) {
-    let mut backoff = Duration::from_secs(1);
+    let mut backoff = BASE_BACKOFF;
     loop {
-        match session(&cfg, &identity, &handle, &mut rx, &ev_tx, &conn_tx).await {
-            Ok(()) => backoff = Duration::from_secs(1),
+        let started = Instant::now();
+        let outcome = session(&cfg, &identity, &handle, &mut rx, &ev_tx, &conn_tx).await;
+        // Reset before logging, so the delay reported is the one actually slept.
+        if started.elapsed() >= STABLE_SESSION {
+            backoff = BASE_BACKOFF;
+        }
+        match outcome {
+            Ok(()) => backoff = BASE_BACKOFF,
             Err(Error::Denied(reason)) => {
                 tracing::error!(%reason, "signal server denied this robot");
                 let _ = ev_tx.send(Event::Denied { reason }).await;
-                backoff = Duration::from_secs(30);
+                backoff = MAX_BACKOFF;
             }
             Err(e) => {
                 tracing::warn!(error = %e, "signal connection failed; retrying in {backoff:?}")
@@ -159,7 +172,7 @@ async fn run(
             return; // consumer gone
         }
         tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(30));
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
 

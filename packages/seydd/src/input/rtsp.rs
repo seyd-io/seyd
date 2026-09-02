@@ -10,13 +10,26 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use retina::client::{PlayOptions, SessionOptions, SetupOptions, Transport};
 use retina::codec::{CodecItem, FrameFormat};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+const BASE_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// A stream that ran this long was healthy, not flapping, so the failure that
+/// ends it starts the backoff over. Without this a camera that drops after
+/// hours costs the operator `MAX_BACKOFF` of black screen instead of a second.
+const STABLE_SESSION: Duration = Duration::from_secs(30);
+
 pub async fn run(url: String, tx: mpsc::Sender<VideoAu>) {
-    let mut backoff = Duration::from_secs(1);
+    let mut backoff = BASE_BACKOFF;
     loop {
-        match session(&url, &tx).await {
+        let started = Instant::now();
+        let outcome = session(&url, &tx).await;
+        // Reset before logging, so the delay reported is the one actually slept.
+        if started.elapsed() >= STABLE_SESSION {
+            backoff = BASE_BACKOFF;
+        }
+        match outcome {
             Ok(()) => tracing::info!(url = %redact(&url), "rtsp stream ended; reconnecting"),
             Err(e) => {
                 tracing::warn!(url = %redact(&url), error = %redact(&e.to_string()), "rtsp input failed; retrying in {backoff:?}")
@@ -26,7 +39,7 @@ pub async fn run(url: String, tx: mpsc::Sender<VideoAu>) {
             return;
         }
         tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(30));
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
 
