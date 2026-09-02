@@ -168,12 +168,10 @@ docs/eu-hosting.md carry the context):
   force it).
 - **seyd-prober** (reachability probe, called by seyd-signal on every announce):
   build with Cloud Build from the REPO ROOT context —
-  `gcloud builds submit --project seydio --config <cloudbuild.yaml> .` where the
-  config runs `docker build -f packages/seyd-prober/Dockerfile -t
-  europe-west1-docker.pkg.dev/seydio/seyd/seyd-prober:latest .` — then
-  `gcloud run deploy seyd-prober --image ... --allow-unauthenticated --port 8080
-  --set-env-vars SEYD_PROBER_TOKEN=<from .env.local>`. The token must match on
-  both services; it lives in `.env.local` (gitignored).
+  `gcloud builds submit --project seydio --config deploy/cloudbuild-prober.yaml .`
+  then the `gcloud run deploy` command in that file's header. The
+  `SEYD_PROBER_TOKEN` must match on both services; it lives in `.env.local`
+  (gitignored).
 - Logs: `gcloud logging read 'resource.type="cloud_run_revision" AND
   resource.labels.service_name="seyd-signal"' --project seydio ...` (pino JSON
   in textPayload; session events have `msg` like "session offered/accepted").
