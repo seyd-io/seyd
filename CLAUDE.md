@@ -138,6 +138,46 @@ Keyframes are never dropped.
 container on Postgres/Redis-shaped seams with the GCP dependency isolated to
 the deploy script; `cloud/docker-compose.yml` is the portability proof.
 
+## Running things — the scripts
+
+| Script | What it does |
+|---|---|
+| `./demo-seyd.sh` | The camera demo robot: preflights the Hikvision over ISAPI, starts `seydd` + `examples/demo-robot/bridge.py` against the deployed cloud. Overrides: `CAMERA_IP` (CLI beats `.env.local`), `SIGNAL_URL`, `DARC_QOS_PROFILE`, `ROBOT_ID`. Needs `.env.local` (`CAMERA_USER`/`CAMERA_PASSWORD`). |
+| `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
+| `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs). |
+| `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, tools/.venv, first build). |
+
+Both robot scripts `pkill` any running `seydd` and rebuild `target/release/seydd`
+from the working tree first. Pilot pages: deployed landing at `/`, pilot at
+`/pilot/?robot=<id>`; press `S` for the HUD. Field procedures: docs/field-test.md.
+
+## Deploying the backend
+
+Two Cloud Run services, project `seydio`, region `europe-west1` (memory +
+docs/eu-hosting.md carry the context):
+
+- **seyd-signal** (signal server + static demo pages):
+  `pnpm -r build && GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`.
+  The script bundles `web/demo/dist` into the image (`.gcloudignore` keeps it in
+  the upload) and re-applies the prober env from `.env.local` after deploy
+  (plain `--set-env-vars` would wipe it). URL:
+  `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Dev-mode auth (TOFU enrolment,
+  anonymous pilots) — no real accounts yet.
+  Deploy blips: presence is in-memory, so robots show offline until their
+  WebSocket reconnects off the draining revision (≤ ~30 s; restart the robot to
+  force it).
+- **seyd-prober** (reachability probe, called by seyd-signal on every announce):
+  build with Cloud Build from the REPO ROOT context —
+  `gcloud builds submit --project seydio --config <cloudbuild.yaml> .` where the
+  config runs `docker build -f packages/seyd-prober/Dockerfile -t
+  europe-west1-docker.pkg.dev/seydio/seyd/seyd-prober:latest .` — then
+  `gcloud run deploy seyd-prober --image ... --allow-unauthenticated --port 8080
+  --set-env-vars SEYD_PROBER_TOKEN=<from .env.local>`. The token must match on
+  both services; it lives in `.env.local` (gitignored).
+- Logs: `gcloud logging read 'resource.type="cloud_run_revision" AND
+  resource.labels.service_name="seyd-signal"' --project seydio ...` (pino JSON
+  in textPayload; session events have `msg` like "session offered/accepted").
+
 ## Verifying work
 
 ```bash
