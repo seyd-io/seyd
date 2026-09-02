@@ -155,10 +155,13 @@ CAMERA_IP=192.168.86.237 DARC_QOS_PROFILE=latency ./demo-seyd.sh
 ```
 
 The deployed pilot page is
-`https://seyd-signal-flj7s44j4a-ew.a.run.app/?robot=seyd-demo`. On the robot's
-own LAN, Chrome will ask for "local network access" before it can use the
-direct `host` candidate; denying it still works via the router hairpin
-(`srflx`), just with ~12 ms more latency.
+`https://seyd-signal-flj7s44j4a-ew.a.run.app/?robot=seyd-demo`. **Open it in
+Chrome or Edge** — the web pilot is Chromium-only, and iPhones and iPads cannot
+run it at all because every iOS browser is WebKit (see SPEC.md, "Browser
+support"). Demoing from a phone means an Android handset until the native SDKs
+land. On the robot's own LAN, Chrome will ask for "local network access" before
+it can use the direct `host` candidate; denying it still works via the router
+hairpin (`srflx`), just with ~12 ms more latency.
 
 `demo-seyd.sh` preflights the camera over ISAPI (one clear line instead of a
 daemon retrying forever), derives a `seydd.toml` from

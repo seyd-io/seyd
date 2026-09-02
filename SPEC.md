@@ -347,10 +347,43 @@ preserves it and its measurements as history. Its FEC coders survive as the
 byte-for-byte conformance oracle (`tools/fec-reference/`, 55 interop vectors
 that the Rust and TypeScript implementations must pass).
 
-**Browser support note:** WebTransport reached Baseline in March 2026
-(Safari 26.4). Safari's `serverCertificateHashes` and H.264 WebCodecs
-behaviour still need explicit verification; the fallback design if it lacks
-them is CA-signed per-robot certs under a wildcard domain (open question).
+**Browser support: Chromium only.** The web pilot SDK supports Chrome, Edge
+and other Chromium browsers on desktop and Android; **Chrome on an Android
+handset is verified working (2026-09-02)**, so a phone operator is a supported
+case, not a theoretical one. **Safari and every browser on iOS are
+unsupported**, and iPhones and iPads cannot run the web pilot at all — App
+Store rules make every iOS browser WebKit, so Chrome for iOS fails identically
+to Safari.
+
+One caveat on the supported phone case: only pan and tilt are reachable by
+touch. Zoom is bound to the wheel and `+`/`-`, recentre to `H`, the fine/fast
+modifier to `Shift`, and the HUD to `S` — all keyboard or mouse. A touch
+operator can steer but cannot zoom. Tracked as Milestone B item 16.
+
+The cause is `serverCertificateHashes`, which is Chromium-only (shipped in
+Chrome 100; Firefox in progress with no ETA, Safari TBD). The robot self-signs
+a short-lived ECDSA P-256 certificate whose SANs are its candidate *IP
+addresses* (`seyd-transport/src/cert.rs`), and the pilot pins it by SHA-256
+fingerprint rather than by name — that is exactly what lets one certificate
+serve every candidate URL, all of which are IP literals. A browser without
+fingerprint pinning has no way to trust it. WebTransport itself reached
+Baseline in March 2026 (Safari 26.4), so the page loads and the API exists;
+only the pinning option is missing.
+
+Verified on 2026-09-02 against the live demo robot: an iPhone on 5G could not
+connect, while a laptop tethered to that same iPhone connected normally over
+the identical carrier path. The robot logged no `session started` and no QUIC
+connection from the handset, so the failure is at or before the WebTransport
+handshake, not in the decoder.
+
+The fallback design remains CA-signed per-robot certificates under a domain we
+control (DNS-01), but it is **not being built** — it forces every candidate URL
+to become a hostname, which likely loses the LAN `host` candidate to
+DNS-rebinding protection, puts DNS caching in the path of network-change
+re-gather, and (if read as a single shared `*` certificate) would put one
+private key on every robot. **iOS and Android are served by the native SDKs in
+Milestone C instead**; those speak native QUIC and keep fingerprint pinning
+unchanged. See open question below.
 
 ### Reachability: make the agent reachable as a server
 
@@ -528,8 +561,19 @@ Previously a standalone teleoperation platform (Swedish origin, acquired by Phan
 ### Ottopia
 Israeli company targeting AV OEMs and defense (Hyundai, Magna, IDF). Full-stack — they own the operator UI. Uses DTLS + SRTP, proprietary AI-enhanced super-resolution, multi-path bonding, cross-channel FEC. Not middleware; not available as an SDK. Defense pivot reduces overlap with commercial robotics. Still active, Series A funded.
 
-### Adamo (emerged from stealth 2025)
-Most directly comparable in positioning — hardware-agnostic, native ROS/ROS2 support, claims sub-40ms latency. Key difference: they also sell managed human operators alongside the software. Their framing explicitly calls out WebRTC as too slow. Uses custom multi-path bonding stack. Small and early-stage; pricing not public.
+### Adamo (founded 2025; San Francisco + London)
+Most directly comparable in positioning — hardware-agnostic, native ROS/ROS2 support, claims sub-40ms latency. Their framing explicitly calls out WebRTC as too slow ("WebRTC was built for video calls, not controlling robots"). Uses a custom transport with multi-path bonding over LTE/5G/Wi-Fi.
+
+Re-checked from adamohq.com on 2026-09-02; two earlier statements here were wrong:
+
+- **Pricing is public.** Streaming platform **$50/robot/month** (50 teleop hours included, **$0.90/hour** overage, "dedicated bandwidth", 99% uptime SLA); managed operators **from $12/operator-hour**; enterprise custom. The platform is sold **standalone** — this is not operators-only bundling, so they compete directly for the middleware sale.
+- **Product surface is ahead of ours.** SDKs for Python, Rust, C and TypeScript; hosted console at `operate.adamohq.com` with gamepad and VR teleop, recording and replay; purpose-built interfaces for humanoids, arms, AVs and AMRs; AES-256, "built to be SOC 2 compliant".
+
+Latency budget from their engineering blog: encode 3–5 ms, network transit 15–25 ms, decode+render 5–8 ms, **total 25–38 ms glass-to-glass**, conditions given only as "robot in a warehouse, operator in another city". No percentile and no tail published. That is the same range as our measured 17–31 ms p50 (§ field results) — **latency is not a differentiator against Adamo**, and neither figure is independently verified.
+
+Their media path is **not disclosed anywhere** on the site, pricing page, FAQ or docs. Two things imply an aggregation point rather than P2P: carrier bonding requires something terminating and reordering the paths, and teleoperation cannot be metered per hour if the bytes never cross the vendor's network. Treat as inference until confirmed. What follows if true is the real axis of competition — our P2P architecture forecloses bonding and recording, and their architecture forecloses zero-marginal-cost pricing, structural privacy and self-hosting.
+
+**No self-hosted or on-premise option** appears anywhere in their material, and no named customer, logo or case study. Our differentiation is architecture, auditability and cost, not speed.
 
 ### LiveKit / Portal
 LiveKit is open-source WebRTC infrastructure (SFU + signaling, Rust/Go). In 2025 they launched **Portal**, a robotics-specific wrapper: per-tick observation bundling (camera + joint state + timestamp arrive together), Robot/Operator roles in Python with a unified Rust core. Polymath Robotics uses it for remote heavy machinery. **Closest existing building block to what Seyd is** — but WebRTC-only (latency floor ~100–200ms), and Portal is a thin layer, not a purpose-tuned teleoperation stack. Open-source model is a competitive advantage for adoption; also a moat-reduction risk.
@@ -550,7 +594,7 @@ Full robotics platform — gRPC for structured RPCs, WebRTC for P2P streaming, c
 |---|---|---|---|---|
 | Voysys/Oden | Connectivity | Custom QUIC-like | Yes | No (internalized) |
 | Ottopia | Full stack | Proprietary | No | Enterprise only |
-| Adamo | Full stack + operators | Custom | No | Early stage |
+| Adamo | Connectivity + operators | Custom (bonded, path undisclosed) | Yes (platform sold standalone) | Yes — $50/robot/mo |
 | LiveKit Portal | Connectivity | WebRTC | Yes | Yes (open-source) |
 | Transitive | Full ops platform | WebRTC | Partial | Yes |
 | Viam | Full robot platform | WebRTC + gRPC | No | Yes |

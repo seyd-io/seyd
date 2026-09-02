@@ -199,7 +199,14 @@ the demo page in headless Chrome against the real stack and passes on the
 `sim/` source, including with 5 % injected loss. Legacy Python/JS code deleted after the camera run. Since done (2026-09-01): cert
 rotation with fingerprint overlap, port-mapping lease renewal, network-change
 re-gather, and the cloud prober (`seyd-prober` on Cloud Run; `inbound_ok` and
-an honest, punch-aware `p2p_hint` on every announce). Not yet done from
+an honest, punch-aware `p2p_hint` on every announce). Since done (2026-09-02):
+reconnect backoff resets after a healthy session in both `seyd-signal-client`
+and `seydd`'s RTSP input — a session that stayed up ≥ 30 s starts its next
+backoff at 1 s instead of inheriting the escalation, so a robot up for hours
+recovers from a blip in a second rather than up to 30. Found on a 1 h 50 m
+demo-camera run where both the RTSP and signal connections reset every 10–17
+minutes (a local network path issue, not Seyd) and the backoff never returned
+to its floor. Not yet done from
 Milestone A: PMTUD-driven `chunk_len`, the console UI (login/sign-up),
 `seyd-ffi` + `sdks/python`, Jetson/RPi builds, netem CI. The repository directory/remote rename and DNS are owner
 actions still pending.
@@ -234,14 +241,15 @@ explain it (add to §2.6 classes) — pending.
 13. `tools/cellchar` on a real 5G link → FEC defaults, burst-aware interleaving decision, ABR trace fixtures.
 14. Command/sensor channel kinds on datagrams with input timestamps; PTZ moves to `COMMAND_UNRELIABLE`.
 15. SIMD FEC, GSO, perf pass on RK3588/Jetson (CPU per 1080p30 stream < 3%); fuzzing of wire/control parsers; 24 h soak.
-16. Landing page live with demo-request flow; docs site with networking guides for every failure class; `.deb` + apt repo (`apt.seyd.io`), Python wheels (manylinux x86_64/aarch64), npm packages, Docker images.
-17. **EU-migration rehearsal** (before the first security-review customer): stand the cloud up on one EU provider (Scaleway for like-for-like managed Postgres/Redis, or Elastx/Cleura for the Swedish story) and run the smoke tests against it. Timebox one day — if it takes longer, that is a portability bug to fix. Decision context and move triggers: docs/eu-hosting.md.
+16. **Touch controls for the pilot** (before the landing page invites phone visitors). Android Chrome on a handset is a confirmed supported platform (verified 2026-09-02), but only pan and tilt work by touch: `web/demo/src/ptz.ts` drives the virtual joystick from pointer events, while everything else is mouse- or keyboard-only. Missing on touch: **zoom** (wheel or `+`/`-` only — a phone operator cannot zoom at all), **recentre** (`H` only), **the fine/fast speed modifier** (`Shift` only, so touch gets one speed curve), and **the HUD toggle** (`S`). Pinch-to-zoom needs real multi-pointer tracking, not just a gesture listener — today a second `pointerdown` overwrites `pointerVec` and `setPointerCapture` is taken for a single pointer. Decide what belongs in `@seyd/web` as default on-screen affordances versus what stays demo-specific in `web/demo`; the SDK ships the video element, so a customer building a mobile operator page should not have to reimplement zoom. Verify on a real handset, not a desktop emulator.
+17. Landing page live with demo-request flow; docs site with networking guides for every failure class; `.deb` + apt repo (`apt.seyd.io`), Python wheels (manylinux x86_64/aarch64), npm packages, Docker images.
+18. **EU-migration rehearsal** (before the first security-review customer): stand the cloud up on one EU provider (Scaleway for like-for-like managed Postgres/Redis, or Elastx/Cleura for the Swedish story) and run the smoke tests against it. Timebox one day — if it takes longer, that is a portability bug to fix. Decision context and move triggers: docs/eu-hosting.md.
 
 ### Milestone C — breadth (when customers pull it)
-18. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.
-19. `seyd-pilot-core` + `seyd-pilot-agent` (native `seyd/2`, direction-agnostic, localhost RTP/UDP front end for Archetype B).
-20. iOS (`SeydKit`, UniFFI + VideoToolbox), Android (UniFFI + MediaCodec), Flutter — on customer demand.
-21. Relay tier (QUIC-forwarding relay with a public address, separately priced), MPQUIC bonding evaluation, session recording.
+19. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.
+20. `seyd-pilot-core` + `seyd-pilot-agent` (native `seyd/2`, direction-agnostic, localhost RTP/UDP front end for Archetype B).
+21. iOS (`SeydKit`, UniFFI + VideoToolbox), Android (UniFFI + MediaCodec), Flutter — on customer demand, **and the only route to iPhone/iPad**: the web pilot is Chromium-only (open decision 5), so no iOS device can run it. A native app is not bound by WebKit and keeps fingerprint pinning and the candidate race exactly as they are, which is why this is the mobile answer rather than the CA-signed-cert fallback. Android needs no native SDK to be reachable — the web pilot runs in Chrome on a handset today (verified 2026-09-02) — so iOS is the one that closes a real gap; the Android SDK is for customers who want a native app, not for access.
+22. Relay tier (QUIC-forwarding relay with a public address, separately priced), MPQUIC bonding evaluation, session recording.
 
 ---
 
@@ -258,6 +266,6 @@ explain it (add to §2.6 classes) — pending.
 2. Repo visibility / licence (open SDKs + `seyd-fec`/`seyd-wire`, closed core?).
 3. Regions and residency: `europe-west1` only for now; whether session metrics/NAT reports may leave the EU if a US signaling region is added later; whether to move off GCP entirely to an EU provider (the compose stack keeps that a deployment task, not a rewrite).
 4. Pricing model (SPEC open question 3) — needed for the console's `plan` field and the relay tier.
-5. Safari: verify `serverCertificateHashes` + WebCodecs H.264 early; if unsupported, decide on the CA-signed-cert fallback (`<robot>.p2p.seyd.io` wildcard + DNS-01 issued by the cloud).
+5. ~~Safari: verify `serverCertificateHashes`~~ — **verified 2026-09-02: Safari does not support it, so the web pilot is Chromium-only and no iOS device can run it** (every iOS browser is WebKit). Decided for now: do **not** build the CA-signed-cert fallback (`<robot>.p2p.seyd.io` + DNS-01) — it would force candidate URLs to become hostnames, likely losing the LAN `host` candidate to DNS-rebinding protection and putting DNS TTLs in front of network-change re-gather, for a control-plane dependency we currently don't have. Mobile is served by the Milestone C native SDKs (item 21) instead; Android already works today in Chrome on a handset (verified 2026-09-02). Still open: whether a customer need reopens the CA-cert path, and if so per-robot certs with robot-generated keys (never one shared wildcard key).
 6. GStreamer pipeline input in `seydd` beside RTP/RTSP.
 7. First design partner and archetype.
