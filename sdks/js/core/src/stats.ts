@@ -33,6 +33,18 @@ export class StatsTracker {
     }
   }
 
+  /**
+   * The newest (agent chunks_sent, our chunks_rx) pair, both as of the instant
+   * that agent-stats arrived. The agent differences these across a window to
+   * measure true loss; taking both counters at one instant is what makes the
+   * ratio meaningful, since chunks in flight then bias both endpoints equally
+   * and cancel. Null until the first agent-stats.
+   */
+  lastLossPair(): { sent: number; rx: number } | null {
+    const s = this.lossSamples[this.lossSamples.length - 1];
+    return s ? { sent: s.sent, rx: s.rx } : null;
+  }
+
   /** Windowed true loss %, or null until two agent-stats samples exist. */
   lossTruePct(): number | null {
     if (this.lossSamples.length < 2) return null;

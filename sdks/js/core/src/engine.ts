@@ -386,8 +386,14 @@ export class Engine {
 
   private sendPilotStats(): void {
     const s = this.snapshot();
+    // Both counters as of one instant (see StatsTracker.lastLossPair): the
+    // agent differences them to measure loss, and a pairing taken at two
+    // different moments turns ordinary rate variation into phantom loss.
+    const pair = this.stats.lastLossPair();
     this.control?.send({
-      type: 'pilot-stats', chunks_rx: s.chunksRx, chunks_missing: s.chunksMissing, frames_clean: s.framesClean,
+      type: 'pilot-stats',
+      chunks_sent_seen: pair?.sent, chunks_rx_seen: pair?.rx,
+      chunks_rx: s.chunksRx, chunks_missing: s.chunksMissing, frames_clean: s.framesClean,
       frames_recovered: s.framesRecovered, frames_incomplete: s.framesIncomplete, keyframes_lost: s.keyframesLost,
       frames_timed_out: s.framesTimedOut, frames_timed_out_late: s.framesTimedOutLate, keyframes_timed_out: s.keyframesTimedOut, chunks_late: s.chunksLate,
       kbps: s.kbps, fps: s.fps, g2g_ms: s.g2gP50Ms, decode_q: s.decodeQueue,

@@ -17,7 +17,7 @@ first inbound line, and nothing it writes before then is delivered.
 | P→A | `set-qos` | `profile` |
 | A→P | `qos-ack` | `profile`, `qos: {…}` as in `welcome`, `publisher: "requested"\|"unavailable"` |
 | A→P | `agent-stats` | 1 Hz; `frames_in, frames_sent, frames_dropped_backlog, frames_skipped_stale, keyframes_requested, chunks_sent, parity_sent, bytes_sent, rtt_ms, min_rtt_ms, cwnd, delivery_kbps` |
-| P→A | `pilot-stats` | 1 Hz; `chunks_rx, chunks_missing, chunks_late, frames_clean, frames_recovered, frames_incomplete, frames_timed_out, frames_timed_out_late, keyframes_lost, keyframes_timed_out, kbps, fps, g2g_ms, decode_q` — the agent pairs `chunks_rx` against what it had sent ≥ RTT earlier to measure true loss |
+| P→A | `pilot-stats` | 1 Hz; `chunks_sent_seen, chunks_rx_seen, chunks_rx, chunks_missing, chunks_late, frames_clean, frames_recovered, frames_incomplete, frames_timed_out, frames_timed_out_late, keyframes_lost, keyframes_timed_out, kbps, fps, g2g_ms, decode_q`. True loss comes from `chunks_sent_seen`/`chunks_rx_seen`: the agent's `chunks_sent` and the pilot's `chunks_rx` **as the pilot read them together**, at the instant an `agent-stats` arrived. The agent differences that pair across a ≥ 3 s window. Both ends must come from one clock — an earlier version compared the agent's send count as of (now − RTT − 100 ms) against a `chunks_rx` taken at a different moment, which turned ordinary send-rate variation into percent-level phantom loss (see ADR 0006). A pilot that omits the pair leaves the agent's loss signal unset rather than wrong. |
 | P→A | `bye` | — |
 
 Anything unknown is ignored and counted. Commands and sensors do **not** travel

@@ -19,7 +19,8 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   upgrades that define "world-class", the target architecture, ordered work,
   and verification. Start here.
 - **docs/adr/** — architecture decision records. ADR 0001 (wire protocol v2),
-  0002 (quinn), 0003 (MoQ), 0004 (C ABI), 0005 (presentation pacing). Add one for every decision of that
+  0002 (quinn), 0003 (MoQ), 0004 (C ABI), 0005 (presentation pacing),
+  0006 (loss measured on one clock). Add one for every decision of that
   weight; never change a wire format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product

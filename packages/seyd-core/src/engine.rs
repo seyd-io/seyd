@@ -100,10 +100,9 @@ struct SessionState {
 
 #[derive(Default)]
 struct PilotSample {
-    /// (time, cumulative chunks the pilot had a chance to receive, pilot
-    /// chunks_rx) at recent `pilot-stats` arrivals; loss is measured across a
-    /// sliding window of them (≥ 3 s), so a keyframe burst in flight at one
-    /// boundary cannot read as 10 % loss.
+    /// (arrival time, agent `chunks_sent`, pilot `chunks_rx`) as the pilot read
+    /// them together; loss is measured across a sliding window of them (≥ 3 s),
+    /// so a keyframe burst in flight at one boundary cannot read as 10 % loss.
     pairs: VecDeque<(Instant, u64, u64)>,
     loss_pct: Option<f64>,
     /// The pilot's own `chunks_missing`-based estimate, for cross-checking.
@@ -133,15 +132,27 @@ struct AbrState {
     prev_backlog: u64,
     loss_pct: Option<f64>,
     loss_pilot_pct: Option<f64>,
-    /// (time, cumulative chunks_sent) per frame — the reference for "chunks
-    /// that have had time to arrive" in the loss pairing.
-    sent_log: VecDeque<(Instant, u64)>,
     last_keyframe_sent: Option<Instant>,
 }
 
 struct Pending {
     role: Role,
     since: Instant,
+}
+
+/// Chunk loss across one window of pilot-paired counters, or `None` when the
+/// window is too short or too small to divide meaningfully. Both deltas must
+/// come from counters the pilot read at the same instant (see
+/// `note_pilot_stats`); differencing counters sampled at different moments
+/// measures rate variation, not loss.
+///
+/// `d_rx` can exceed `d_sent` by the chunks in flight when the pilot sampled,
+/// which is why the result is clamped rather than allowed to go negative.
+fn windowed_loss_pct(span: Duration, d_sent: u64, d_rx: u64) -> Option<f64> {
+    if span < Duration::from_secs(3) || d_sent < 50 {
+        return None;
+    }
+    Some(((1.0 - d_rx as f64 / d_sent as f64) * 100.0).clamp(0.0, 100.0))
 }
 
 /// Bounded, in-order frame queue between the input and the sender.
@@ -220,7 +231,6 @@ impl Engine {
                 prev_backlog: 0,
                 loss_pct: None,
                 loss_pilot_pct: None,
-                sent_log: VecDeque::new(),
                 last_keyframe_sent: None,
             }),
         });
@@ -508,15 +518,8 @@ impl Engine {
             c.parity_sent
                 .fetch_add(pack.parity_chunks as u64, Ordering::Relaxed);
             c.bytes_sent.fetch_add(wire_bytes as u64, Ordering::Relaxed);
-            let mut abr = self.inner.abr.lock().unwrap();
-            let now = Instant::now();
-            abr.sent_log
-                .push_back((now, c.chunks_sent.load(Ordering::Relaxed)));
-            while abr.sent_log.len() > 400 {
-                abr.sent_log.pop_front();
-            }
             if frame.keyframe {
-                abr.last_keyframe_sent = Some(now);
+                self.inner.abr.lock().unwrap().last_keyframe_sent = Some(Instant::now());
             }
         }
     }
@@ -754,30 +757,37 @@ impl Engine {
     /// Pair the pilot's counters with ours: `chunks_sent` vs `chunks_rx`
     /// between two reports is the true chunk loss over that window (a frame
     /// whose chunks were *all* lost is invisible to the pilot alone).
+    ///
+    /// Both halves of the pair are read by the *pilot*, at the instant our
+    /// `agent-stats` reached it (`chunks_sent_seen` / `chunks_rx_seen`).
+    /// Aligning them on one clock is the whole point. This used to difference
+    /// our own send log as of (now − rtt − 100 ms) against a `chunks_rx` taken
+    /// at a different moment, so the two ends of the ratio covered windows
+    /// offset by ~100 ms. Whenever the chunk rate varied across that offset —
+    /// a keyframe, a pan changing frame sizes — the mismatch surfaced as loss,
+    /// and because the result was clamped at zero the negative excursions were
+    /// discarded while the positive ones survived. That rectified ordinary
+    /// rate variation into a steady 0.25–2.7 % phantom loss, comfortably above
+    /// the controller's 0.2 % FEC threshold, and the bitrate flapped
+    /// 3000↔2760↔2500 kbps against a link that was losing nothing at all.
+    /// Chunks in flight at the sampling instant still bias both endpoints, but
+    /// equally, so they cancel in the difference.
     fn note_pilot_stats(&self, st: &SessionState, v: &serde_json::Value) {
         let get = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let opt = |k: &str| v.get(k).and_then(|x| x.as_u64());
         let rx = get("chunks_rx");
         let missing = get("chunks_missing");
         let incomplete = get("frames_incomplete");
         // Timed-out frames whose chunks then arrived late are jitter, not loss.
         let timed_out = get("frames_timed_out_late");
         let now = Instant::now();
-        let rtt = st.transport.stats().rtt_ms;
-        // Only chunks that have had time to arrive: the cumulative sent count
-        // as of (now − rtt − 100 ms).
-        let cutoff = now - Duration::from_millis((rtt as u64).saturating_add(100));
-        let sent_then = {
-            let abr = self.inner.abr.lock().unwrap();
-            abr.sent_log
-                .iter()
-                .rev()
-                .find(|(t, _)| *t <= cutoff)
-                .map(|(_, n)| *n)
-                .or_else(|| abr.sent_log.front().map(|(_, n)| *n))
-        };
+        // A pilot too old to send the pair leaves `loss_pct` at None: the ABR
+        // then runs on residual loss and latency alone, which is strictly
+        // better than steering on a number we cannot compute correctly.
+        let pair = opt("chunks_sent_seen").zip(opt("chunks_rx_seen"));
         let mut ps = st.pilot.lock().unwrap();
-        if let Some(sent_then) = sent_then {
-            ps.pairs.push_back((now, sent_then, rx));
+        if let Some((sent_seen, rx_seen)) = pair {
+            ps.pairs.push_back((now, sent_seen, rx_seen));
             while ps
                 .pairs
                 .front()
@@ -786,12 +796,12 @@ impl Engine {
                 ps.pairs.pop_front();
             }
             if let (Some(first), Some(last)) = (ps.pairs.front(), ps.pairs.back()) {
-                let span = last.0.duration_since(first.0);
-                let d_sent = last.1.saturating_sub(first.1);
-                let d_rx = last.2.saturating_sub(first.2);
-                if span >= Duration::from_secs(3) && d_sent >= 50 {
-                    ps.loss_pct =
-                        Some(((1.0 - d_rx as f64 / d_sent as f64) * 100.0).clamp(0.0, 100.0));
+                if let Some(pct) = windowed_loss_pct(
+                    last.0.duration_since(first.0),
+                    last.1.saturating_sub(first.1),
+                    last.2.saturating_sub(first.2),
+                ) {
+                    ps.loss_pct = Some(pct);
                 }
             }
         }
@@ -927,5 +937,65 @@ impl Engine {
             kind: "idr",
             reason,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const W: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn clean_link_reads_zero() {
+        assert_eq!(windowed_loss_pct(W, 1000, 1000), Some(0.0));
+    }
+
+    fn near(got: Option<f64>, want: f64) {
+        let g = got.expect("expected a measurement");
+        assert!((g - want).abs() < 1e-9, "got {g}, want {want}");
+    }
+
+    #[test]
+    fn loss_is_the_shortfall_against_what_was_sent() {
+        near(windowed_loss_pct(W, 1000, 950), 5.0);
+        near(windowed_loss_pct(W, 200, 100), 50.0);
+    }
+
+    #[test]
+    fn in_flight_skew_reads_zero_not_negative() {
+        // The pilot can have received a few chunks the agent had not yet
+        // counted when it composed agent-stats; that is skew, not gain.
+        assert_eq!(windowed_loss_pct(W, 1000, 1008), Some(0.0));
+    }
+
+    #[test]
+    fn a_window_too_short_or_too_small_yields_nothing() {
+        assert_eq!(windowed_loss_pct(Duration::from_secs(2), 1000, 900), None);
+        assert_eq!(windowed_loss_pct(W, 49, 0), None);
+    }
+
+    /// The regression this pairing exists to prevent. The link is clean — the
+    /// pilot received every chunk — but the send rate ramps hard across the
+    /// window (a pan enlarging frames, a keyframe at one boundary). Paired on
+    /// one clock the deltas match exactly and loss reads 0. The old code
+    /// differenced a send count shifted ~100 ms against an unshifted rx count,
+    /// so a rate ramp of this shape leaked in as a percent or two of loss —
+    /// over the controller's 0.2 % FEC threshold, flapping the bitrate.
+    #[test]
+    fn a_changing_send_rate_is_not_loss() {
+        let mut sent = 0u64;
+        let mut rx = 0u64;
+        // 5 s of 1 Hz samples, chunk rate climbing 60 → 140 per second.
+        let mut pairs = Vec::new();
+        for i in 0..6u64 {
+            pairs.push((sent, rx));
+            let rate = 60 + i * 16;
+            sent += rate;
+            rx += rate; // nothing is actually lost
+        }
+        let (s0, r0) = pairs[0];
+        let (s1, r1) = *pairs.last().unwrap();
+        assert_eq!(windowed_loss_pct(W, s1 - s0, r1 - r0), Some(0.0));
     }
 }
