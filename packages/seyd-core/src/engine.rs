@@ -164,13 +164,38 @@ fn windowed_loss_pct(span: Duration, d_sent: u64, d_rx: u64) -> Option<f64> {
 /// visible warp/"replay" every few hundred milliseconds. Frames are therefore
 /// sent in order; when the queue is full the *new* delta is dropped and every
 /// following delta too, until a keyframe (which clears the queue — an IDR
-/// makes queued deltas irrelevant) and a recovery request goes out.
+/// makes the queued deltas that lead nowhere irrelevant — see
+/// `keyframe_flushes_queue`) and a recovery request goes out.
 struct FrameQueue {
     frames: VecDeque<(u8, VideoFrame)>,
     skip_until_key: bool,
 }
 
 const MAX_QUEUED_FRAMES: usize = 6;
+
+/// Queue depth from which an arriving keyframe discards what is queued. Half
+/// capacity: shallow enough that the common case keeps its frames, deep enough
+/// that a keyframe still leaves the sender room to recover.
+const KEYFRAME_FLUSH_FRAMES: usize = MAX_QUEUED_FRAMES / 2;
+
+/// Whether an arriving keyframe should discard the frames already queued.
+///
+/// An IDR makes queued deltas unnecessary for *decoding*, which is not the same
+/// as worthless. When the queue is contiguous with the keyframe — the ordinary
+/// case, the sender simply being a few frames behind — those deltas are the
+/// motion between the last frame sent and this recovery point. Dropping them
+/// hands the pilot a jump of exactly the kind ADR 0005 exists to remove, and
+/// buys almost nothing: the queue drains at link speed, not capture rate, and
+/// they are small deltas (~2.3 KB on the wire against a keyframe's 14.6 KB).
+///
+/// They are genuinely stale in two cases. With `skip_until_key` set the chain
+/// is already broken, so a gap sits between them and the keyframe either way
+/// and sending them only delays the recovery point the pilot is waiting for.
+/// And from `KEYFRAME_FLUSH_FRAMES` up the sender is far enough behind that
+/// draining the queue matters more than the motion in it.
+fn keyframe_flushes_queue(queued: usize, skip_until_key: bool) -> bool {
+    skip_until_key || queued >= KEYFRAME_FLUSH_FRAMES
+}
 
 struct Inner {
     cfg: EngineConfig,
@@ -322,10 +347,11 @@ impl Engine {
         }
     }
 
-    /// Offer a new frame. In-order bounded queue (see `FrameQueue`): a
-    /// keyframe flushes stale deltas; an overflowing delta is dropped together
-    /// with every delta after it until the next keyframe, and a recovery
-    /// request is raised so that keyframe arrives in ~1 RTT.
+    /// Offer a new frame. In-order bounded queue (see `FrameQueue`): a keyframe
+    /// flushes deltas that lead nowhere (`keyframe_flushes_queue`); an
+    /// overflowing delta is dropped together with every delta after it until
+    /// the next keyframe, and a recovery request is raised so that keyframe
+    /// arrives in ~1 RTT.
     pub fn push_video(&self, channel: u8, frame: VideoFrame) {
         self.inner
             .counters
@@ -333,15 +359,17 @@ impl Engine {
             .fetch_add(1, Ordering::Relaxed);
         let mut q = self.inner.queue.lock().unwrap();
         if frame.keyframe {
-            let flushed = q.frames.len();
-            q.frames.clear();
-            q.skip_until_key = false;
-            if flushed > 0 {
-                self.inner
-                    .counters
-                    .frames_skipped_stale
-                    .fetch_add(flushed as u64, Ordering::Relaxed);
+            if keyframe_flushes_queue(q.frames.len(), q.skip_until_key) {
+                let flushed = q.frames.len();
+                q.frames.clear();
+                if flushed > 0 {
+                    self.inner
+                        .counters
+                        .frames_skipped_stale
+                        .fetch_add(flushed as u64, Ordering::Relaxed);
+                }
             }
+            q.skip_until_key = false;
         } else if q.skip_until_key || q.frames.len() >= MAX_QUEUED_FRAMES {
             let first = !q.skip_until_key;
             q.skip_until_key = true;
@@ -973,6 +1001,35 @@ mod tests {
     fn a_window_too_short_or_too_small_yields_nothing() {
         assert_eq!(windowed_loss_pct(Duration::from_secs(2), 1000, 900), None);
         assert_eq!(windowed_loss_pct(W, 49, 0), None);
+    }
+
+    #[test]
+    fn a_keyframe_keeps_a_shallow_contiguous_queue() {
+        // The ordinary case: the sender is a frame or two behind and the queued
+        // deltas run straight into this keyframe. Discarding them would skip
+        // that motion and show the operator a jump instead.
+        assert!(!keyframe_flushes_queue(0, false));
+        assert!(!keyframe_flushes_queue(1, false));
+        assert!(!keyframe_flushes_queue(KEYFRAME_FLUSH_FRAMES - 1, false));
+    }
+
+    #[test]
+    fn a_keyframe_flushes_deltas_that_lead_nowhere() {
+        // Chain already broken: a gap sits between these and the keyframe
+        // whatever we do, so sending them only delays the recovery point.
+        assert!(keyframe_flushes_queue(1, true));
+        assert!(keyframe_flushes_queue(0, true));
+        // Sender far enough behind that draining beats the motion.
+        assert!(keyframe_flushes_queue(KEYFRAME_FLUSH_FRAMES, false));
+        assert!(keyframe_flushes_queue(MAX_QUEUED_FRAMES, false));
+    }
+
+    #[test]
+    fn keeping_a_queue_still_leaves_the_sender_room() {
+        // A kept queue plus the keyframe itself must stay within capacity, or
+        // the very next delta would overflow and set skip_until_key.
+        let kept = KEYFRAME_FLUSH_FRAMES - 1;
+        assert!(kept + 1 < MAX_QUEUED_FRAMES);
     }
 
     /// The regression this pairing exists to prevent. The link is clean — the
