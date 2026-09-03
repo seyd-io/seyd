@@ -12,6 +12,8 @@ export interface QosInfo {
   profile: string;
   deadline_delta_ms: number;
   deadline_key_ms: number;
+  /** Presentation pacing budget (ADR 0005); absent from pre-0005 agents. */
+  presentation_delay_ms?: number;
   on_loss: 'continue' | 'freeze-until-idr';
 }
 
@@ -98,6 +100,18 @@ export interface PilotStats {
   g2gP50Ms: number | null; g2gP95Ms: number | null;
   rttMs: number | null; offsetUs: number | null;
   decodeQueue: number;
+  /** Frames actually painted (see presenter.ts). */
+  framesShown: number;
+  /** Decoded frames superseded before they were painted, after a stall. */
+  framesSkippedLate: number;
+  /** Frames decoded and waiting for their presentation slot. */
+  renderQueue: number;
+  /** Times the capture→local mapping was re-established (robot restart, drift). */
+  renderReanchors: number;
+  /** Smoothed |actual − scheduled| paint error (ms): the judder left after pacing. */
+  renderJitterMs: number;
+  /** Presentation delay in force (ms); 0 means decode-on-arrival. */
+  presentationDelayMs: number;
   /** Loss the pilot can see itself (missing chunks of frames it knew about) — biased low. */
   lossEstPct: number;
   /** Loss vs the agent's own send count, over the last ~5 s of agent-stats samples. */

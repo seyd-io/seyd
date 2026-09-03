@@ -7,7 +7,7 @@ import { SeydSession, SeydSessionOptions, SessionState } from '@seyd/core';
  * Properties: `.session` (SeydSession), `.canvas`.
  */
 export class SeydVideoElement extends HTMLElement {
-  static observedAttributes = ['robot-id', 'signal-url', 'qos', 'token', 'loss', 'burst', 'host', 'trace', 'paths'];
+  static observedAttributes = ['robot-id', 'signal-url', 'qos', 'token', 'loss', 'burst', 'host', 'trace', 'paths', 'presentation-delay'];
   session: SeydSession | null = null;
   readonly canvas: HTMLCanvasElement;
   private statusEl: HTMLDivElement;
@@ -56,7 +56,7 @@ export class SeydVideoElement extends HTMLElement {
     queueMicrotask(() => {
       this.startScheduled = false;
       if (!this.connected) return;
-      const key = ['signal-url', 'robot-id', 'token', 'loss', 'burst', 'host', 'trace', 'paths'].map((a) => this.getAttribute(a)).join('|');
+      const key = ['signal-url', 'robot-id', 'token', 'loss', 'burst', 'host', 'trace', 'paths', 'presentation-delay'].map((a) => this.getAttribute(a)).join('|');
       if (this.session && key === this.liveKey) return;
       this.stop();
       this.liveKey = key;
@@ -83,6 +83,8 @@ export class SeydVideoElement extends HTMLElement {
       loss: lossRate > 0 ? { rate: Math.min(1, lossRate), burst: Math.max(1, parseInt(this.getAttribute('burst') ?? '1', 10) || 1) } : null,
       clientName: '@seyd/web', trace: this.hasAttribute('trace'), paths: this.getAttribute('paths')?.split(',').filter(Boolean) ?? null,
     };
+    const pd = this.getAttribute('presentation-delay');
+    if (pd !== null && pd !== '' && Number.isFinite(Number(pd))) opts.presentationDelayMs = Math.max(0, Number(pd));
     const s = new SeydSession(opts);
     this.session = s;
     s.on('state', ({ state, detail }) => this.setStatus(this.statusText(state, detail), state === 'connected' ? 'connected' : state === 'p2p-failed' ? 'error' : ''));

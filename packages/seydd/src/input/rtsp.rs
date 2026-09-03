@@ -5,7 +5,7 @@
 //! protecting. The camera hop is a short LAN link where a retransmit costs
 //! microseconds; the lossy path worth protecting is the one after the agent.
 
-use super::{now_us, redact, VideoAu};
+use super::{redact, VideoAu};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use retina::client::{PlayOptions, SessionOptions, SetupOptions, Transport};
@@ -114,10 +114,17 @@ async fn session(url: &str, tx: &mpsc::Sender<VideoAu>) -> anyhow::Result<()> {
                 if f.stream_id() != video_idx {
                     continue;
                 }
+                // The camera's own sampling clock (RTP timestamp), not our
+                // arrival time: the pilot paces presentation on this timeline,
+                // and arrival already carries the jitter we are trying to
+                // remove — a keyframe reaches us several ms after its slot.
+                let ts = f.timestamp();
+                let capture_ts_us = (ts.elapsed().max(0) as u128 * 1_000_000
+                    / ts.clock_rate().get() as u128) as u64;
                 let au = VideoAu {
                     keyframe: f.is_random_access_point(),
                     input_loss: f.loss(),
-                    capture_ts_us: now_us(),
+                    capture_ts_us,
                     data: Bytes::from(f.into_data()),
                 };
                 frames += 1;

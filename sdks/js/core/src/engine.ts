@@ -5,6 +5,7 @@
 import { Clock, nowUs } from './clock.js';
 import { ControlMessage, ControlStream } from './control.js';
 import { Decoder } from './decoder.js';
+import { Presenter } from './presenter.js';
 import { AssembledFrame, Reassembler } from './reassembler.js';
 import { RaceError, p2pDeadlineMs, raceCandidates } from './race.js';
 import { StatsTracker } from './stats.js';
@@ -33,9 +34,21 @@ export interface EngineOptions {
   paths?: string[] | null;
   clientName?: string;
   token?: string;
+  /**
+   * Hold each frame until its capture timestamp is due, up to this many ms
+   * behind the capture timeline (see presenter.ts). Overrides the QoS
+   * profile's `presentation_delay_ms`; 0 restores decode-on-arrival.
+   */
+  presentationDelayMs?: number;
 }
 
 const MAX_TRANSFER_HISTORY = 0;
+
+/**
+ * Used until the agent's QoS profile says otherwise (and by agents older than
+ * ADR 0005). Matches the `balanced` profile.
+ */
+export const DEFAULT_PRESENTATION_DELAY_MS = 100;
 
 export class Engine {
   private wt: WebTransport | null = null;
@@ -64,6 +77,7 @@ export class Engine {
   private lastFrameIdIn: number | null = null;
   private lastOutTs = -1;
   private outIndex = 0;
+  private presenter: Presenter;
   private t0 = performance.now();
   private tr(line: string): void {
     if (!this.o.trace) return;
@@ -72,6 +86,10 @@ export class Engine {
 
   constructor(private sink: (ev: EngineEvent, transfer?: Transferable[]) => void, private o: EngineOptions) {
     if (o.canvas) this.ctx = (o.canvas as OffscreenCanvas).getContext('2d') as OffscreenCanvasRenderingContext2D;
+    this.presenter = new Presenter({
+      delayMs: o.presentationDelayMs ?? DEFAULT_PRESENTATION_DELAY_MS,
+      draw: (f) => this.paint(f),
+    });
   }
 
   // ── connection ──────────────────────────────────────────────────────────
@@ -138,6 +156,7 @@ export class Engine {
     this.wt = null;
     if (wt) { try { wt.close(); } catch { /* ignore */ } }
     for (const r of this.reassemblers.values()) r.reset();
+    this.presenter.reset();
     this.decoder?.close();
     this.decoder = null;
     this.videoChannel = null;
@@ -203,6 +222,12 @@ export class Engine {
   private applyQos(): void {
     if (!this.qos) return;
     for (const r of this.reassemblers.values()) { r.deadlineDeltaMs = this.qos.deadline_delta_ms; r.deadlineKeyMs = this.qos.deadline_key_ms; }
+    // The profile owns the judder/latency trade-off (ADR 0005); an explicit
+    // option is the operator overriding it, so it wins and is not re-applied.
+    const fromProfile = this.qos.presentation_delay_ms;
+    if (this.o.presentationDelayMs === undefined && typeof fromProfile === 'number') {
+      this.presenter.setDelay(fromProfile);
+    }
   }
 
   private reassemblerFor(channelId: number): Reassembler {
@@ -286,11 +311,15 @@ export class Engine {
     if (this.o.trace) {
       const order = this.lastFrameIdIn === null ? 'first' : ((f.frameId - this.lastFrameIdIn) & 0xffff) === 1 ? 'ok' : `GAP(${(f.frameId - this.lastFrameIdIn) & 0xffff})`;
       this.lastFrameIdIn = f.frameId;
-      this.tr(`IN id=${f.frameId} key=${f.keyframe ? 1 : 0} bytes=${f.data.length} rec=${f.recovered ? 1 : 0} spread=${(f.lastSeenMs - f.firstSeenMs).toFixed(1)} g2g=${g2g === null ? '-' : g2g.toFixed(1)} q=${this.decoder?.queueSize ?? '-'} ${order}`);
+      this.tr(`IN id=${f.frameId} key=${f.keyframe ? 1 : 0} bytes=${f.data.length} rec=${f.recovered ? 1 : 0} cap=${f.captureTsUs ?? -1} spread=${(f.lastSeenMs - f.firstSeenMs).toFixed(1)} g2g=${g2g === null ? '-' : g2g.toFixed(1)} q=${this.decoder?.queueSize ?? '-'} ${order}`);
     }
     if (!this.decoder) return;
     if (this.qos?.on_loss === 'freeze-until-idr' && this.degraded && !f.keyframe) return;
-    this.decoder.decode(f.data, f.keyframe, nowUs());
+    // The agent's capture clock, not arrival time: it is the only timeline on
+    // which frames are evenly spaced, and the presenter pays frames out on it.
+    // Falls back to arrival for an agent that sends no frame meta.
+    const tsUs = f.captureTsUs === null ? nowUs() : Number(f.captureTsUs);
+    this.decoder.decode(f.data, f.keyframe, tsUs);
   }
 
   private onDecoded(frame: VideoFrame): void {
@@ -300,6 +329,12 @@ export class Engine {
       this.tr(`OUT #${this.outIndex++} ts=${ts} ${ts < this.lastOutTs ? 'BACKWARDS' : 'ok'} q=${this.decoder?.queueSize ?? '-'}`);
       this.lastOutTs = ts;
     }
+    this.presenter.push(frame);
+  }
+
+  /** Paint one frame at its scheduled moment. Owns the frame from here. */
+  private paint(frame: VideoFrame): void {
+    this.tr(`SHOW ts=${frame.timestamp} q=${this.presenter.counters.queued}`);
     const canvas = this.o.canvas;
     if (canvas && this.ctx) {
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
@@ -334,6 +369,7 @@ export class Engine {
       reassembler: r,
       decodeErrors: this.decoder?.errors ?? 0, keyframesRequested: this.decoder?.keyframesRequested ?? 0,
       decodeQueue: this.decoder?.queueSize ?? 0, degraded: this.degraded,
+      presenter: this.presenter.counters, presentationDelayMs: this.presenter.delayMs,
       rttMs: this.clock.rttUs === null ? null : this.clock.rttUs / 1000, offsetUs: this.clock.offsetUs,
       pathLabel: this.pathLabel, qos: this.qos, qosPublisher: this.qosPublisher, injecting: this.o.loss && this.o.loss.rate > 0 ? this.o.loss : null,
     });

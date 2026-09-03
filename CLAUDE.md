@@ -19,7 +19,7 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   upgrades that define "world-class", the target architecture, ordered work,
   and verification. Start here.
 - **docs/adr/** — architecture decision records. ADR 0001 (wire protocol v2),
-  0002 (quinn), 0003 (MoQ), 0004 (C ABI). Add one for every decision of that
+  0002 (quinn), 0003 (MoQ), 0004 (C ABI), 0005 (presentation pacing). Add one for every decision of that
   weight; never change a wire format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product
@@ -94,9 +94,10 @@ a crate.
 Encoder settings (resolution, preset, VBV, GOP) belong to the robot's video
 publisher — `sim/video-source.sh` in the simulation, the camera in the demo.
 Seyd states only transport-observable *targets* (bitrate ceiling, latency
-budget, max GOP) via `on_requested_config`, plus its own transport policy (FEC
-rate, drop threshold). If you find yourself putting a resolution in
-`seyd-qos`, or an FEC percentage in `sim/`, the boundary has leaked.
+budget, max GOP) via `on_requested_config`, plus its own transport and pilot
+policy (FEC rate, drop threshold, close-out deadlines, presentation delay). If
+you find yourself putting a resolution in `seyd-qos`, or an FEC percentage in
+`sim/`, the boundary has leaked.
 
 ## Component philosophy
 
@@ -126,7 +127,7 @@ Keyframes are never dropped.
 |---|---|---|
 | Core (`packages/seyd-*`) | Rust, quinn + h3/h3-webtransport, rustls, rcgen | ADR 0002: only Rust stack with WebTransport; pure Rust → trivial ARM cross-builds and self-contained wheels |
 | Agent form factors | C ABI via cbindgen; C++/Python(cffi)/ROS 2 wrappers; `seydd` daemon | ADR 0004 |
-| Web pilot SDK | TypeScript, WebTransport, WebCodecs `VideoDecoder`, Web Worker + OffscreenCanvas | No jitter buffer; off-main-thread so host apps cannot jank video |
+| Web pilot SDK | TypeScript, WebTransport, WebCodecs `VideoDecoder`, Web Worker + OffscreenCanvas | Presentation paced on the source's capture clock, bounded by a latency budget (ADR 0005); off-main-thread so host apps cannot jank video |
 | Loss resilience | Reed-Solomon GF(256), Cauchy, per FEC block; NACK-driven LTR/intra-refresh/IDR recovery | FEC pays bandwidth, not round trips; recovery in one RTT for what FEC misses |
 | Cloud | TypeScript (Fastify + ws), Postgres, Redis, OIDC (provider TBD), Docker | Portable by construction; `docker compose` runs the whole cloud |
 

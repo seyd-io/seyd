@@ -51,6 +51,13 @@ bytes 20+    payload
 * Frame meta, when `flags2 bit0` is set, is a fixed 10-byte prefix of the
   payload of block 0 / chunk 0: `capture_ts_us u64 BE`, `seq_in_gop u16 BE`.
   It is kept out of the header because most channels never need it.
+  `capture_ts_us` is on the **source's** sampling clock (the RTP timestamp),
+  relative to the stream's first picture — not an agent-clock arrival time. It
+  is the only evenly-spaced timeline in the system, and the pilot paces
+  presentation on it (ADR 0005), so an agent that stamps arrival instead
+  silently reintroduces the jitter the pilot is trying to remove. It shares no
+  epoch with `send_ts` or the `ping/pong` clock and must not be differenced
+  against them.
 * Unreliable sensor/command channels use the same header with `n=1, k=0`
   (or FEC if configured); their `frame_id` is a per-channel sequence.
 * The version nibble makes v1 → v2 a hard cutover. A receiver counts and

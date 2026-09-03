@@ -57,6 +57,8 @@ export class StatsTracker {
     decodeErrors: number; keyframesRequested: number; decodeQueue: number; degraded: boolean;
     rttMs: number | null; offsetUs: number | null; pathLabel: string | null; qos: QosInfo | null; qosPublisher: string | null;
     injecting: { rate: number; burst: number } | null;
+    presenter: { shown: number; skippedLate: number; reanchors: number; queued: number; jitterMs: number };
+    presentationDelayMs: number;
   }): PilotStats {
     const r = this.rates();
     const seen = extra.reassembler.chunksMissing + this.chunksRx;
@@ -79,6 +81,10 @@ export class StatsTracker {
       spreadP50Ms: percentile(this.spread, 0.5), spreadP95Ms: percentile(this.spread, 0.95),
       g2gP50Ms: g2gP50, g2gP95Ms: g2gP95,
       rttMs: extra.rttMs, offsetUs: extra.offsetUs, decodeQueue: extra.decodeQueue,
+      framesShown: extra.presenter.shown, framesSkippedLate: extra.presenter.skippedLate,
+      renderQueue: extra.presenter.queued, renderReanchors: extra.presenter.reanchors,
+      renderJitterMs: Math.round(extra.presenter.jitterMs * 10) / 10,
+      presentationDelayMs: extra.presentationDelayMs,
       lossEstPct: lossEst, lossTruePct: lossTrue, pathLabel: extra.pathLabel, qos: extra.qos, qosPublisher: extra.qosPublisher,
       agent: a, injecting: extra.injecting,
       path: extra.pathLabel, lossTrue, g2gP50, g2gP95, rtt: extra.rttMs,

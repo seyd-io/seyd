@@ -8,7 +8,7 @@ first inbound line, and nothing it writes before then is delivered.
 | direction | type | fields |
 |---|---|---|
 | P→A | `hello` | `proto: 2`, `session_id` (from the signal `offer`), `client: {kind: "browser"\|"native", name, version}`, `token?` |
-| A→P | `welcome` | `session_id`, `role: "driver"\|"observer"`, `channels: [{id, kind, name, codec, fps}]`, `qos: {profile, deadline_delta_ms, deadline_key_ms, on_loss}`, `t_agent_us` |
+| A→P | `welcome` | `session_id`, `role: "driver"\|"observer"`, `channels: [{id, kind, name, codec, fps}]`, `qos: {profile, deadline_delta_ms, deadline_key_ms, presentation_delay_ms, on_loss}`, `t_agent_us` |
 | A→P | `denied` | `reason` — then the agent closes the session |
 | P→A | `ping` | `t1` (pilot µs) |
 | A→P | `pong` | `t1`, `t2` (agent µs at receipt) |

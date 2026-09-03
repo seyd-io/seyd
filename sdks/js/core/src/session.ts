@@ -24,6 +24,15 @@ export interface SeydSessionOptions {
   /** Debug: only race candidates with these labels (e.g. ['srflx']). */
   paths?: string[] | null;
   clientName?: string;
+  /**
+   * Hold each decoded frame until its capture timestamp is due, up to this many
+   * ms behind the capture timeline — trading latency for immunity to pipeline
+   * jitter, chiefly the once-per-GOP keyframe burst (ADR 0005). 0 restores
+   * decode-on-arrival. Leave unset to take the value from the robot's QoS
+   * profile (latency 50, balanced 100, quality 150); setting it overrides the
+   * profile for this session.
+   */
+  presentationDelayMs?: number;
   retryMs?: number;
   /** Allow more than one live session to the same robot from this document (multi-view). Default: a new session closes the previous one. */
   allowMultiple?: boolean;
@@ -75,7 +84,7 @@ export class SeydSession {
       this.host = new InlineHost();
     }
     this.host.onEvent((ev) => this.onEngine(ev));
-    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, trace: !!o.trace, paths: o.paths ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token } }, transfer);
+    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, trace: !!o.trace, paths: o.paths ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token, presentationDelayMs: o.presentationDelayMs } }, transfer);
 
     this.signal.on('auth-ok', () => {
       // A signaling reconnect while the P2P session is racing or live must not

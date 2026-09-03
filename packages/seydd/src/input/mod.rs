@@ -13,19 +13,13 @@ use bytes::Bytes;
 pub struct VideoAu {
     pub data: Bytes,
     pub keyframe: bool,
-    /// Agent monotonic microseconds at which the last byte arrived.
+    /// Microseconds on the *source's* sampling clock (the RTP timestamp),
+    /// relative to the first picture of the stream — not an agent-clock
+    /// arrival time. The pilot paces presentation on this timeline, so it must
+    /// carry the encoder's cadence and none of the transport's jitter.
     pub capture_ts_us: u64,
     /// RTP packets lost before this picture (input-side loss, not Seyd's).
     pub input_loss: u16,
-}
-
-/// Monotonic microseconds since process start — the agent clock used for
-/// `send_ts`, `capture_ts_us` and `pong.t2`.
-pub fn now_us() -> u64 {
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    static EPOCH: OnceLock<Instant> = OnceLock::new();
-    EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64
 }
 
 /// Strip userinfo from a URL for logging. libavformat taught us that the

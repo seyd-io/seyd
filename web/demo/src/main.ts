@@ -75,6 +75,8 @@ function snapshot(): void {
 const loss = parseFloat(params.get('loss') ?? '0') || 0;
 if (params.get('paths')) video.setAttribute('paths', params.get('paths')!);
 if (params.get('trace')) { video.setAttribute('trace', '1'); (window as unknown as { __seydTrace: string[] }).__seydTrace = []; }
+// ?pd=0 restores decode-on-arrival, for A/B against the paced default.
+if (params.get('pd') !== null) video.setAttribute('presentation-delay', params.get('pd')!);
 if (loss > 0) { video.setAttribute('loss', String(loss)); video.setAttribute('burst', params.get('burst') ?? '1'); }
 video.setAttribute('qos', qos);
 video.setAttribute('signal-url', SIGNAL_URL);

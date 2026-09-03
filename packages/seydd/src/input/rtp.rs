@@ -3,7 +3,7 @@
 //! STAP-A, FU-A; access units delimited by the RTP marker bit or a timestamp
 //! change. Emits Annex B. No decoding.
 
-use super::{now_us, VideoAu};
+use super::VideoAu;
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -37,10 +37,19 @@ pub async fn run(addr: String, tx: mpsc::Sender<VideoAu>) {
     }
 }
 
+/// H.264 RTP sampling clock (RFC 6184 §8.2.1).
+const RTP_CLOCK_HZ: u64 = 90_000;
+
 #[derive(Default)]
 pub struct Depacketizer {
     au: BytesMut,
     au_ts: Option<u32>,
+    /// `au_ts` unwrapped past the 32-bit rollover (~13 h at 90 kHz), relative
+    /// to the first packet — the source's sampling timeline, which the pilot
+    /// paces presentation on.
+    au_ts_ext: u64,
+    ts_base: Option<u32>,
+    ts_wraps: u64,
     keyframe: bool,
     fu: Option<BytesMut>,
     last_seq: Option<u16>,
@@ -84,7 +93,13 @@ impl Depacketizer {
             if prev != ts && !self.au.is_empty() {
                 finished = self.finish();
             }
+            // Backwards by more than half the space is a rollover, not reorder.
+            if ts < prev && prev - ts > 0x8000_0000 {
+                self.ts_wraps += 1;
+            }
         }
+        let base = *self.ts_base.get_or_insert(ts);
+        self.au_ts_ext = (self.ts_wraps << 32).wrapping_add(ts as u64).wrapping_sub(base as u64);
         self.au_ts = Some(ts);
 
         let payload = &pkt[off..];
@@ -156,7 +171,7 @@ impl Depacketizer {
         let au = VideoAu {
             data,
             keyframe: std::mem::take(&mut self.keyframe),
-            capture_ts_us: now_us(),
+            capture_ts_us: self.au_ts_ext * 1_000_000 / RTP_CLOCK_HZ,
             input_loss: std::mem::take(&mut self.lost),
         };
         Some(au)
