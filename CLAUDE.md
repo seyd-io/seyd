@@ -70,11 +70,12 @@ seyd/
 │   ├── seyd-nat/              # STUN, NAT classification, PCP/NAT-PMP/UPnP, candidates, NatReport
 │   ├── seyd-transport/        # quinn: WebTransport (h3) + native QUIC (seyd/2); block sender
 │   ├── seyd-signal-client/    # WS client to the cloud, signal v2, Ed25519 robot auth
-│   ├── seyd-core/             # engine: channels, sessions, callbacks — pure Rust API
-│   ├── seyd-ffi/              # C ABI → sdks/c/include/seyd.h
+│   ├── seyd-core/             # Agent (lifecycle) + engine: channels, sessions, events
+│   ├── seyd-ffi/              # C ABI (cdylib/staticlib) → sdks/c/include/seyd.h
 │   └── seydd/                 # daemon: TOML config, RTP/RTSP/UDP inputs
 ├── sdks/                      # thin wrappers — NO protocol logic here, ever
-│   ├── c/  cpp/  python/  ros2/
+│   ├── c/       # generated seyd.h, Makefile, abi-smoke + sensor-robot examples
+│   ├── python/  # cffi ABI mode over libseyd; cpp/ and ros2/ not built yet
 │   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
 ├── cloud/api  cloud/prober  cloud/monitor  cloud/db
 ├── web/site  web/console  web/demo
@@ -107,6 +108,14 @@ you find yourself putting a resolution in `seyd-qos`, or an FEC percentage in
 
 **Loose coupling.** Components communicate only through defined interfaces:
 the wire protocol, the signal protocol, the C ABI, UDP sockets.
+
+**One agent lifecycle, many hosts.** `seyd_core::Agent` owns everything between
+a configuration and a running robot: sockets, discovery, certificate, endpoint,
+engine, signaling, lease renewal, cert rotation, network-change re-gather. A
+*host* supplies media and consumes `AgentEvent`, and owns only what differs by
+form factor — `seydd` owns TOML, RTP/RTSP inputs and UDP sinks; `seyd-ffi` owns
+C marshalling. If you find yourself adding lifecycle code to a host, it belongs
+in `Agent`, or `seydd` and the SDKs will drift.
 
 **High cohesion.** Each crate does one thing. `seyd-wire` is layout only;
 `seyd-fec` never parses a header; `seyd-qos` does no I/O.
@@ -187,6 +196,8 @@ docs/eu-hosting.md carry the context):
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check   # Rust ↔ Python FEC interop
+make -C sdks/c check                                                    # C ABI conformance (abi-smoke)
+tools/.venv/bin/python3 -m pytest sdks/python/tests                     # Python SDK over libseyd
 pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo
 (cd cloud/api && npm test)
 

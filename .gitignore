@@ -44,3 +44,6 @@ dist/
 # local robot identities
 .seyd-sim.key
 examples/demo-robot/.robot.key
+
+# C SDK example binaries
+sdks/c/build/

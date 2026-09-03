@@ -82,7 +82,7 @@ seyd/
 │   ├── seyd-nat/              # interfaces, STUN + classification, PCP/NAT-PMP/UPnP, lease renewal, NatReport
 │   ├── seyd-transport/        # quinn endpoint; WebTransport (h3) + native QUIC (ALPN seyd/2); block sender w/ admission control; probing; cert rotation
 │   ├── seyd-signal-client/    # WS client, signal v2, Ed25519 robot auth
-│   ├── seyd-core/             # engine: channels, sessions (multi), callbacks — pure Rust API
+│   ├── seyd-core/             # Agent lifecycle + engine: channels, sessions (multi), events
 │   ├── seyd-ffi/              # C ABI (cdylib/staticlib), cbindgen → seyd.h
 │   ├── seydd/                 # daemon: TOML config; RTP/RTSP (RFC 6184 depacketizer, retina) + UDP inputs; UDP command outputs
 │   └── seyd-pilot-agent/      # (later) headless pilot over seyd-pilot-core → localhost RTP/UDP
@@ -109,7 +109,11 @@ Moves: `camera.py` → `examples/demo-robot/hikvision.py` (closes CLAUDE.md's bo
 
 **Prototype → crate mapping:** `fec.py` → `seyd-fec`/`seyd-wire`; `qos.py` → `seyd-qos`; `stun.py`, `portmap.py`, `agent.py::gather_candidates/bind_sockets` → `seyd-nat`; `cert.py`, `transport.py` → `seyd-transport`; `signaling.py` → `seyd-signal-client`; `peer.py::Relay` → `seyd-core`; `agent.py::PublisherControl` + CLI → `seydd`; `peer.py::_open_video` → `seydd::input`; `camera.py` → `examples/`; `pilot.js` race/reassembly/stats → `sdks/js/core`.
 
-**C ABI (`sdks/c/include/seyd.h`) — sketch:**
+**C ABI (`sdks/c/include/seyd.h`) — sketch.** Shipped 2026-09-03 at
+`SEYD_ABI_VERSION = 1`; `sdks/c/include/seyd.h` is the authority and ADR 0004's
+"As built" section records where the shipped surface differs from this sketch
+(the lifecycle moved into `seyd_core::agent::Agent`; `seyd_push_nal` waits for
+per-block packing; `on_state`/`on_link_quality` are not implemented).
 ```c
 seyd_status seyd_agent_create(const seyd_config*, const seyd_callbacks*, seyd_agent**);
 seyd_status seyd_agent_start/stop(seyd_agent*);   void seyd_agent_destroy(seyd_agent*);
@@ -206,9 +210,25 @@ backoff at 1 s instead of inheriting the escalation, so a robot up for hours
 recovers from a blip in a second rather than up to 30. Found on a 1 h 50 m
 demo-camera run where both the RTSP and signal connections reset every 10–17
 minutes (a local network path issue, not Seyd) and the backoff never returned
-to its floor. Not yet done from
-Milestone A: PMTUD-driven `chunk_len`, the console UI (login/sign-up),
-`seyd-ffi` + `sdks/python`, Jetson/RPi builds, netem CI. The repository directory/remote rename and DNS are owner
+to its floor.
+
+**Since done (2026-09-03): the C ABI and the Python SDK** (step 5's remainder).
+The agent lifecycle moved out of `seydd`'s `main()` into
+`seyd_core::agent::Agent`, so `seydd` and `seyd-ffi` are both thin hosts of one
+lifecycle rather than one of them owning it — see ADR 0004, "As built".
+`seyd-ffi` is a cdylib/staticlib at `SEYD_ABI_VERSION = 1`; `sdks/c/include/seyd.h`
+is cbindgen output, checked in, with CI failing if it drifts from the crate.
+`sdks/python` is cffi in ABI mode and reads its declarations *out of that
+header* rather than retyping them. Verified end to end: a Python program
+holding its own x264 output pushed access units through the C ABI and
+`tools/seyd-smoke.py` passed against it in headless Chrome — 30 fps, 1730 kbps,
+g2g p50 0.79 ms, zero true loss, PTZ commands round-tripping to the robot.
+`seyd_push_nal` is deliberately absent from ABI 1 (the engine still packs per
+frame; §1.1 is Milestone B), and adding it later is an append, not a break.
+
+Not yet done from Milestone A: PMTUD-driven `chunk_len`, the console UI
+(login/sign-up), `sdks/cpp` and `sdks/ros2`, Jetson/RPi builds and the wheel
+matrix, netem CI. The repository directory/remote rename and DNS are owner
 actions still pending.
 
 The signal server is deployed: `https://seyd-signal-flj7s44j4a-ew.a.run.app`
@@ -228,7 +248,7 @@ explain it (add to §2.6 classes) — pending.
 2. `seyd-fec` + `seyd-wire` passing `tools/fec-vectors.py` (Rust check added beside `fec-check.js`).
 3. WebTransport spike: quinn + h3 WT server, Chrome connects with `serverCertificateHashes`; decide vendored vs in-house `webtransport.rs`.
 4. `seyd-nat` (port of stun/portmap/candidates + lease renewal + netlink re-gather + NatReport), `seyd-transport` (block sender with admission control, BBR, PMTUD, probing, cert rotation), `seyd-signal-client`.
-5. `seyd-core` (channels, multi-session fan-out, control stream, token verification, watchdogs), `seyd-ffi` + `seyd.h`, `sdks/python`.
+5. `seyd-core` (the `Agent` lifecycle, channels, multi-session fan-out, control stream, token verification, watchdogs), `seyd-ffi` + `seyd.h`, `sdks/python`. **Done 2026-09-03** except the manylinux wheel matrix, which waits on the cross builds in step 10.
 6. `seydd` with RFC 6184 RTP + `retina` RTSP inputs (sub-frame pipelining), UDP sensor/command channels, publisher-control UDP sink.
 7. `@seyd/core` (worker + OffscreenCanvas, per-block reassembly, clock sync, g2g HUD, diagnostics), `@seyd/web`, `@seyd/react`; `web/demo` built on them.
 8. `cloud/api` v2 (OIDC JWKS verification with configurable issuer, Postgres, Redis, enrolment, session tokens, prober hook) + `docker-compose.yml` running api, Postgres, Redis and a self-hosted OIDC provider locally; `web/console` (PKCE login/sign-up, fleet, robot detail, tokens). Portability check: the full cloud runs from compose on a laptop with no GCP credentials.

@@ -99,7 +99,9 @@ impl Depacketizer {
             }
         }
         let base = *self.ts_base.get_or_insert(ts);
-        self.au_ts_ext = (self.ts_wraps << 32).wrapping_add(ts as u64).wrapping_sub(base as u64);
+        self.au_ts_ext = (self.ts_wraps << 32)
+            .wrapping_add(ts as u64)
+            .wrapping_sub(base as u64);
         self.au_ts = Some(ts);
 
         let payload = &pkt[off..];

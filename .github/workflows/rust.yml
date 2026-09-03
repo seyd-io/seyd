@@ -19,6 +19,25 @@ jobs:
         run: python3 tools/fec-vectors.py | cargo run -q -p seyd-fec --example check
       - name: FEC interop vectors (Python reference → JS)
         run: python3 tools/fec-vectors.py | node tools/fec-check.js
+      - name: seyd.h is up to date with seyd-ffi
+        # build.rs regenerates it; a diff means someone edited the header by
+        # hand or changed the ABI without committing the regenerated file.
+        run: git diff --exit-code sdks/c/include/seyd.h
+  sdks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: C ABI conformance
+        run: make -C sdks/c check
+      - name: Python SDK
+        run: |
+          python3 -m pip install --upgrade pip cffi pytest
+          python3 -m pytest sdks/python/tests -q
   cross-aarch64:
     runs-on: ubuntu-latest
     steps:

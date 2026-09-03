@@ -8,6 +8,7 @@ members = [
     "packages/seyd-transport",
     "packages/seyd-signal-client",
     "packages/seyd-core",
+    "packages/seyd-ffi",
     "packages/seydd",
     "packages/seyd-prober",
 ]
@@ -27,6 +28,7 @@ seyd-nat = { path = "packages/seyd-nat" }
 seyd-transport = { path = "packages/seyd-transport" }
 seyd-signal-client = { path = "packages/seyd-signal-client" }
 seyd-core = { path = "packages/seyd-core" }
+seyd-ffi = { path = "packages/seyd-ffi" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seyd"
+version = "0.1.0"
+description = "Seyd — hyper-low-latency point-to-point streaming for robots"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["cffi>=1.16"]
+
+[project.urls]
+Homepage = "https://seyd.io"
+
+[tool.setuptools]
+packages = ["seyd"]
+
+# The wheel carries the library and the header it was generated from; both are
+# put here by tools/build-python-wheel.sh, which builds libseyd first.
+[tool.setuptools.package-data]
+seyd = ["libseyd.*", "seyd.dll", "include/seyd.h"]
