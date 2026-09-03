@@ -30,6 +30,9 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   inputs; its component descriptions describe the legacy Python/JS code only.
 - **DEMO.md** — the always-on Hikvision PTZ demo. The first customer program
   the new stack must run.
+- **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
+  booked, attended setting; v2 adds a second camera and a two-pilot
+  driver/spotter model. Hardware not yet ordered.
 
 ## Fixed product decisions (2026-08-28) — do not re-open without the owner
 

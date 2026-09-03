@@ -361,7 +361,12 @@ modifier to `Shift`, and the HUD to `S` — all keyboard or mouse. A touch
 operator can steer but cannot zoom. Tracked as Milestone B item 16.
 
 The cause is `serverCertificateHashes`, which is Chromium-only (shipped in
-Chrome 100; Firefox in progress with no ETA, Safari TBD). The robot self-signs
+Chrome 100; Firefox in progress with no ETA). Safari is not "not yet" but
+"no": WebKit stated in `w3c/webtransport#623` that it "does not intend to
+implement this", on the grounds that the motivating use case is local
+development and that fingerprint pinning invites the middlebox pattern that
+weakened Web Push; the issue is closed as not planned. Waiting for Safari is
+therefore not a strategy. The robot self-signs
 a short-lived ECDSA P-256 certificate whose SANs are its candidate *IP
 addresses* (`seyd-transport/src/cert.rs`), and the pilot pins it by SHA-256
 fingerprint rather than by name — that is exactly what lets one certificate
@@ -384,6 +389,27 @@ re-gather, and (if read as a single shared `*` certificate) would put one
 private key on every robot. **iOS and Android are served by the native SDKs in
 Milestone C instead**; those speak native QUIC and keep fingerprint pinning
 unchanged. See open question below.
+
+Two follow-up ideas were examined on 2026-09-03 and neither displaces that:
+
+- **A WebAssembly module cannot help.** WASM has no I/O of its own; it reaches
+  the network only through the same JavaScript APIs the page already has, and
+  the web platform exposes no UDP socket (Direct Sockets is Chromium-only and
+  Isolated-Web-App-only). A QUIC client therefore cannot be built in the page,
+  and the certificate verifier we need to override lives in the browser's
+  network process, below the WebTransport API and out of the page's reach.
+  A WASM *decoder* solves a problem we do not have: Safari 26 has WebCodecs
+  with hardware H.264, and the measured iOS failure was at the WebTransport
+  handshake, with nothing reaching the decoder.
+- **WebRTC data channels are the only in-browser path that fits**, because
+  DTLS authenticates by fingerprint in the SDP — a design that never assumed a
+  CA. Unreliable, unordered channels would carry wire v2 unchanged, keeping
+  `seyd-fec`, `seyd-qos` and the presentation pacing; the cost is an
+  ICE/DTLS/SCTP stack in the robot (`str0m`/`webrtc-rs`), a second offer path
+  in signaling, and re-measured MTU and pacing. That is a second transport of
+  roughly `seyd-transport`'s weight and needs its own ADR before any of it is
+  written. It would also bring Firefox, and ICE would likely beat our own
+  candidate race at NAT traversal.
 
 ### Reachability: make the agent reachable as a server
 
@@ -636,7 +662,7 @@ Still open:
 2. **Multi-path / link bonding** — MPQUIC maturity in the Rust stacks; a later-phase differentiator (Voysys and Adamo both lead with bonding).
 3. **Session recording** — synchronized video + sensor + command capture for training data and post-incident review; design the data model early.
 4. **Auth provider** — the OIDC abstraction is decided; the provider (self-hosted Zitadel/Keycloak vs managed EU-hosted) is not. Must be settled before the first external customer signs up.
-5. **Safari** — verify `serverCertificateHashes` and H.264 WebCodecs behaviour; decide on the CA-signed-cert fallback (`<robot>.p2p.seyd.io` wildcard + DNS-01) if lacking.
+5. **iOS in a browser** — settled negatively for now: WebKit has declined `serverCertificateHashes`, so the answer is the Milestone C native SDK. Reopen only on customer demand, and then choose between WebRTC data channels (works for every robot, costs a second transport) and CA-signed certs. Note the CA variant we have *not* evaluated: Let's Encrypt now issues certificates for IP addresses (GA 2026-01, IPv4 + IPv6, 160-hour `shortlived` profile only), which would keep candidate URLs as IP literals and avoid the DNS objections above. Its limits are the robots we most need: validation requires the address to be publicly reachable, private LAN candidates are not issuable, and every network move needs a re-issue inside a six-day window.
 6. **Relay-tier design** — a QUIC-forwarding relay with a public address (a browser WebTransport client cannot use TURN proper); geographic placement; pricing (see 1).
 
 ---
