@@ -62,15 +62,20 @@ payloads — hand it what your encoder produced.
 ## Examples
 
 `examples/ffmpeg_robot.py` is a complete robot: x264 through a pipe, access
-units pushed straight into Seyd, a sensor channel and a command channel. Run it
-against a local cloud with
+units pushed straight into Seyd, a sensor channel and a command channel.
 
 ```bash
-python3 sdks/python/examples/ffmpeg_robot.py --robot-id seyd-py \
-    --signal ws://localhost:8080/ws --device lavfi
+./py-robot.sh                      # builds libseyd, checks ffmpeg and cffi, runs it
 ```
 
-then open `http://localhost:8080/?robot=seyd-py&signal=ws://localhost:8080/ws`.
+It defaults to the deployed signal server, so no second terminal is needed; the
+script prints the pilot URL to open in Chrome. `VIDEO_DEVICE=0` uses the webcam
+instead of the synthetic source, and `SIGNAL_URL=ws://localhost:8080/ws` points
+it at a local cloud. To run the example directly, skipping the checks:
+
+```bash
+python3 sdks/python/examples/ffmpeg_robot.py --robot-id seyd-py --device lavfi
+```
 
 ## When to use `seydd` instead
 

@@ -5,7 +5,10 @@ This is the shape of a real integration: the robot already has an H.264
 encoder, and Seyd is handed the encoded access units. Nothing is transcoded and
 nothing is decoded — Seyd relays the bytes the encoder produced.
 
-    python3 ffmpeg_robot.py --robot-id seyd-py --signal ws://localhost:8080/ws
+    python3 ffmpeg_robot.py --robot-id seyd-py
+    python3 ffmpeg_robot.py --signal ws://localhost:8080/ws   # against a local cloud
+
+Or ../../../py-robot.sh, which checks the prerequisites first.
 
 Contrast with `seydd`, which owns the RTP/RTSP plumbing for robots that publish
 video on a socket. Here the customer's process owns the pipeline and calls
@@ -141,7 +144,9 @@ def make_command_handler(udp_port: int | None):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--robot-id", default="seyd-py")
-    ap.add_argument("--signal", default="ws://localhost:8080/ws")
+    # The deployed cloud, so the example runs without a second terminal.
+    ap.add_argument("--signal",
+                    default="wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws")
     ap.add_argument("--profile", default="latency", choices=sorted(PROFILES))
     ap.add_argument("--device", default="lavfi",
                     help="avfoundation device index, or 'lavfi' for a synthetic source")
