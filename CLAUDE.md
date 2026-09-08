@@ -195,13 +195,26 @@ Keyframes are never dropped.
 Postgres/Redis-shaped seams with the GCP dependency isolated to the deploy
 script; `cloud/docker-compose.yml` is the portability proof.
 
-**The deployed revision still runs `SEYD_DEV_OPEN_ENROLMENT=1` and
-`SEYD_DEV_ALLOW_ANONYMOUS=1`** — anyone can claim an unused robot id on it and
-pilot without a token. `deploy.sh` no longer sets either, but it now requires
-`SEYD_DATABASE_URL`, and **no Postgres is provisioned yet**, so the fix cannot
-ship until one exists. Public access to the demo robot is expressed as a public
-`robot_grant` instead (`node dist/bootstrap.js public-grant seyd-demo observe
-drive`), which is verified working locally with both flags off.
+**The deployed revision runs with real accounts** (since 2026-09-04, revision
+`seyd-signal-00024`): Postgres on Neon (`eu-central-1`, URL in `.env.local` as
+`SEYD_DATABASE_URL`), `SEYD_PROVISIONING=invite-only`, and neither
+`SEYD_DEV_OPEN_ENROLMENT` nor `SEYD_DEV_ALLOW_ANONYMOUS`. Consequences:
+
+- **A robot must be enrolled before it can connect**, or the signal server
+  denies it with `unknown-robot`. Mint a token from the repo root with
+  `set -a; . ./.env.local; set +a` and then
+  `(cd cloud/api && node dist/bootstrap.js enrolment-token <org-id> "<label>")`;
+  the org id comes from `node dist/bootstrap.js list`. Redeem it once:
+  `ENROL_TOKEN=seyd_enr_… ./sim-robot.sh` (or `./py-robot.sh`), or
+  `seydd --config … enrol --token …`. The robot's key file (`.seyd-sim.key`,
+  `.seyd-py.key`, `examples/demo-robot/.robot.key`) is what stays enrolled;
+  keep it, or you need a new token. The C ABI cannot enrol yet, so the Python
+  robot's key is enrolled through `seydd enrol` (same file format).
+- **A pilot without an account reaches only robots with a public grant**:
+  `node dist/bootstrap.js public-grant <robot-id> observe drive` (needs the
+  robot enrolled first). `/api/v1/robots` lists only those robots.
+- Enrolled so far: `seyd-demo`, `seyd-sim` and `seyd-py`, all in org "Seyd", all public.
+  No human member exists yet, so the console has nobody who can sign in.
 
 ## Running things — the scripts
 
@@ -227,8 +240,8 @@ docs/eu-hosting.md carry the context):
   The script bundles `web/demo/dist` into the image (`.gcloudignore` keeps it in
   the upload) and re-applies the prober env from `.env.local` after deploy
   (plain `--set-env-vars` would wipe it). URL:
-  `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Dev-mode auth (TOFU enrolment,
-  anonymous pilots) — no real accounts yet.
+  `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Real accounts on Neon Postgres
+  (see Hosting above): robots need an enrolment token, pilots a public grant.
   Deploy blips: presence is in-memory, so robots show offline until their
   WebSocket reconnects off the draining revision (≤ ~30 s; restart the robot to
   force it).

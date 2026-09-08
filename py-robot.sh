@@ -9,6 +9,13 @@
 #   VIDEO_DEVICE=0 ./py-robot.sh                     # the Mac webcam instead
 #   DARC_QOS_PROFILE=latency ROBOT_ID=my-py ./py-robot.sh
 #   SIGNAL_URL=ws://localhost:8080/ws ./py-robot.sh  # against a local cloud
+#   ENROL_TOKEN=seyd_enr_… ./py-robot.sh             # first run on a cloud with real accounts
+#
+# ENROL_TOKEN redeems a one-time enrolment token from the console into the
+# same credential file the robot then runs with, exactly as sim-robot.sh does.
+# The C ABI has no enrolment call yet (PLAN.md §2.3 lists it under
+# `seyd_config`), so the redemption goes through `seydd enrol`; the key file
+# format is shared because both hosts use seyd_signal_client::Identity.
 #
 # Then open the printed pilot URL in Chrome (the pilot is Chromium-only — see
 # PLAN.md open question 5) and press S for the HUD. On the deployed cloud a
@@ -54,6 +61,18 @@ fi
   "$PY" -m pip install --quiet --upgrade pip cffi
 }
 
+# ── enrol, if asked ──────────────────────────────────────────────────────────
+CRED="$PWD/.seyd-py.key"
+if [[ -n "${ENROL_TOKEN:-}" ]]; then
+  echo "building seydd for the enrolment step…"
+  cargo build -p seydd --release --quiet
+  CFG=$(mktemp -t seydd-py-enrol.XXXXXX)
+  printf '[agent]\nrobot_id = "%s"\nsignal_url = "%s"\ncredential_path = "%s"\n' \
+    "$ROBOT_ID" "$SIGNAL_URL" "$CRED" > "$CFG"
+  ./target/release/seydd --config "$CFG" enrol --token "$ENROL_TOKEN"
+  rm -f "$CFG"
+fi
+
 # ── run ──────────────────────────────────────────────────────────────────────
 pkill -f "examples/ffmpeg_robot.py" 2>/dev/null || true
 
@@ -72,5 +91,5 @@ exec "$PY" sdks/python/examples/ffmpeg_robot.py \
   --signal "$SIGNAL_URL" \
   --profile "$PROFILE" \
   --device "$DEVICE" \
-  --credential "$PWD/.seyd-py.key" \
+  --credential "$CRED" \
   --command-udp 5004

@@ -229,6 +229,12 @@ holding its own x264 output pushed access units through the C ABI and
 g2g p50 0.79 ms, zero true loss, PTZ commands round-tripping to the robot.
 `seyd_push_nal` is deliberately absent from ABI 1 (the engine still packs per
 frame; §1.1 is Milestone B), and adding it later is an append, not a break.
+**Also absent from ABI 1: enrolment.** `seyd_config` has a credential path but
+no enrolment token, so an SDK robot cannot redeem a token itself; `seydd enrol`
+is the only robot-side path today, and `py-robot.sh` shells out to it against
+the SDK's credential file (verified 2026-09-08 against the deployed cloud with
+real accounts). Enrolment belongs in `seyd_core::Agent`, with `seydd` and
+`seyd-ffi` both hosting it — an append to the ABI, not a break.
 
 Not yet done from Milestone A: PMTUD-driven `chunk_len`, the console UI
 (login/sign-up), `sdks/cpp` and `sdks/ros2`, Jetson/RPi builds and the wheel
