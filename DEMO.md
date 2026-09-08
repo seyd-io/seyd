@@ -72,6 +72,45 @@ The Nest's WAN address was in CGNAT space (`100.87.0.0/18`), which is the tell
 that the upstream box was bridging rather than routing. Moving the camera's PoE
 injector to the Nest's own LAN port fixed it.
 
+#### Direct Ethernet to a bare switch (2026-09-07)
+
+Cabling the laptop into the camera's own switch, with internet still on Wi-Fi, is
+the cleanest bench setup: the camera's traffic never crosses the house NAT. There
+is no DHCP server on that switch, so **both ends fall back to link-local**
+(`169.254.0.0/16`, `dhcp: true` in SADP but no lease) and the camera's address
+changes between power cycles. Two consequences:
+
+- Re-run `tools/find-camera.py` after every camera reboot and update `CAMERA_IP`
+  in `.env.local`. SADP finds it regardless of subnet; a port scan of the Wi-Fi
+  subnet never will.
+- The agent must still advertise its **routable** address. `seyd-nat` gathers on
+  the default route (Wi-Fi), so the host candidate is the Wi-Fi address and the
+  link-local camera address stays off the wire. Verified: srflx path, 720p25,
+  g2g p50 9.7 ms.
+
+#### Do not fail a login against this camera
+
+Hikvision's illegal-login lock counts failed digest attempts per client IP and
+then **rejects the correct password for ~30 minutes**, on every ISAPI endpoint.
+An already-established RTSP session keeps streaming, so video looks healthy while
+PTZ, keyframe requests and bitrate caps all return 401 — the shape of the failure
+in `bridge.py`'s log is a burst of `PTZ ... → HTTP 401` with the video untouched.
+
+The way this happens in practice is running a tool without credentials in the
+environment: an empty `CAMERA_PASSWORD` is still a login attempt.
+`tools/seyd-smoke.py --camera-ip` now refuses to start unless `CAMERA_PASSWORD`
+is set, but the general rule stands — `set -a; . ./.env.local; set +a` before
+anything that touches the camera. There is no way to clear the lock from outside;
+it expires on its own, and probing it while locked may restart the timer, so wait
+it out rather than polling.
+
+The lock also exposed a second, worse failure: a 401 permanently wedges urllib's
+`HTTPDigestAuthHandler`, which keeps a retry counter and afterwards raises
+`digest auth failed` for every request *even once the camera is happy again*.
+`hikvision.py` therefore discards its opener and retries once on any 401, so the
+demo recovers by itself instead of needing a restart. Any long-lived urllib
+digest client against this camera needs the same treatment.
+
 ### Activating it — do this in the browser
 
 A factory Hikvision is **un-activated**: no password is set, and every ISAPI
@@ -129,6 +168,79 @@ PROTOTYPE.md says 30 fps because `sim/video-source.sh` drives a Mac webcam.
 resolution or frame rate. A PAL sensor answering the same request with 25 fps is
 the boundary working as intended. Switching the camera to NTSC for 30 fps would
 cost a reboot and buy nothing on a fixed demo scene.
+
+### The degradation ladder (2026-09-07)
+
+Under congestion the ABR lowers the bitrate ceiling, and `bridge.py` applies it
+as the camera's `<vbrUpperCap>`. Below that ceiling the publisher must decide
+*how* to spend fewer bits. The ordering principle is that **frame rate is a
+latency term for the pilot, not a quality term**: 25 → 15 fps stretches the
+interval between frames from 40 ms to 67 ms, so the operator waits up to 27 ms
+longer to see the result of their own input, against a measured glass-to-glass
+p50 of ~10 ms. Resolution therefore goes first and frame rate last.
+
+Measured on this camera, which constrains how far that can be taken:
+
+| | Channel 101 (main) | Channel 102 (sub) | Channel 103 (third) |
+|---|---|---|---|
+| Widths | **1280, 1920, 2560** | 352, 640, 704 | 352, 640, 704, 1280, 1920 |
+| Heights | 720, 960, 1080, 1440 | 288, 480, 576 | 288, 480, 576, 720, 960, 1080 |
+
+The demo streams channel 101 at 1280x720, which is **already that channel's
+lowest resolution** — there is no resolution rung available on it at all.
+
+A resolution change also behaves differently from the other settings. Writing
+`<videoResolutionWidth>`/`<videoResolutionHeight>` returns 200 and is stored, but
+the *running* RTSP session continues at the old resolution with no interruption;
+only a **new** session gets the new one (verified on channel 103, 704x576 →
+640x480: frame delivery continued unbroken at 9.5 fps across the change, and a
+fresh `ffmpeg` connection then reported 640x480). So a resolution rung costs an
+RTSP reconnect — about 83 ms on this camera, measured from `rtsp input playing`
+to `first rtsp frame` — plus a decoder reconfigure on the pilot.
+
+Frame rate, by contrast, applies to the running stream: `<maxFrameRate>` (in
+hundredths, so 25 fps is 2500) takes effect with no reconnect. Verified live —
+`suggestedFps: 15` moved the camera 2500 → 1500 and back with a single
+`rtsp input playing` for the whole session.
+
+**Implemented:** the frame-rate rung. `seyd-qos` sets `suggested_fps = 15` once
+the controller has been pinned at its bitrate floor (25 % of the profile ceiling,
+so 750 kbps on `balanced`) for 5 congested seconds; `bridge.py` applies it and
+restores the camera's configured baseline when the hint returns to 0.
+
+Note that injected pilot-side loss does **not** exercise this path: FEC recovers
+it, so `residual` stays false and, on a 0.3 ms LAN with no bandwidth limit,
+neither RTT inflation nor send backlog ever appears. Congestion has to be real.
+The controller side is covered by `abr::tests::floor_and_suggested_fps`; the
+camera side was verified by sending a synthetic `video-config` to
+`udp://127.0.0.1:5003`.
+
+**The resolution rung is simulcast, not reconfiguration** (ADR 0008). Since a
+resolution change only takes effect on reconnect, and channel 101 has no lower
+resolution anyway, the demo instead subscribes to *both* streams and relays one:
+
+| layer | ISAPI channel | picture | cap |
+|---|---|---|---|
+| `low` | 102 (sub) | 640x480 | 800 kbps |
+| `high` | 101 (main) | 1280x720 | 3000 kbps |
+
+Both must be **Baseline** H.264 at the **same frame rate** — the sub stream ships
+as Main from the factory, which would turn a switch into corruption rather than a
+smaller picture. `examples/demo-robot/setup-simulcast.py` provisions both and is
+idempotent; run it after a factory reset. It prefers 640x360 for a 16:9 rung and
+falls back to 640x480, which this firmware's sub stream is limited to — so the
+low rung is 4:3 and the picture letterboxes on switch.
+
+Seyd switches on the new layer's next keyframe. `bridge.py` turns the `layer`
+control message into an ISAPI `requestKeyFrame` on that stream, so "next
+keyframe" becomes immediate: the switch costs one frame, against the ~83 ms a
+reconnect would have cost.
+
+Measured end to end on this camera at 12 % injected loss: one drop to `low`, no
+flapping across 150 s, and a climb back to `high` once the target recovered past
+what it had learned. The pilot's canvas follows (1280x720 → 640x480 → back) with
+no decoder errors — WebCodecs takes the resolution change in its stride because
+inputs are Annex B with parameter sets inline on every keyframe.
 
 ### Watch items
 

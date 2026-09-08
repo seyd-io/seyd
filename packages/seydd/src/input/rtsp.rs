@@ -5,7 +5,7 @@
 //! protecting. The camera hop is a short LAN link where a retransmit costs
 //! microseconds; the lossy path worth protecting is the one after the agent.
 
-use super::{redact, VideoAu};
+use super::{redact, Codec, VideoAu};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use retina::client::{PlayOptions, SessionOptions, SetupOptions, Transport};
@@ -20,11 +20,11 @@ const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// hours costs the operator `MAX_BACKOFF` of black screen instead of a second.
 const STABLE_SESSION: Duration = Duration::from_secs(30);
 
-pub async fn run(url: String, tx: mpsc::Sender<VideoAu>) {
+pub async fn run(url: String, codec: Codec, tx: mpsc::Sender<VideoAu>) {
     let mut backoff = BASE_BACKOFF;
     loop {
         let started = Instant::now();
-        let outcome = session(&url, &tx).await;
+        let outcome = session(&url, codec, &tx).await;
         // Reset before logging, so the delay reported is the one actually slept.
         if started.elapsed() >= STABLE_SESSION {
             backoff = BASE_BACKOFF;
@@ -61,7 +61,7 @@ pub fn resolve_credentials(url: &str) -> String {
     u.to_string()
 }
 
-async fn session(url: &str, tx: &mpsc::Sender<VideoAu>) -> anyhow::Result<()> {
+async fn session(url: &str, codec: Codec, tx: &mpsc::Sender<VideoAu>) -> anyhow::Result<()> {
     let mut parsed = url::Url::parse(url)?;
     let creds = if !parsed.username().is_empty() {
         let c = retina::client::Credentials {
@@ -88,7 +88,9 @@ async fn session(url: &str, tx: &mpsc::Sender<VideoAu>) -> anyhow::Result<()> {
     let video_idx = sess
         .streams()
         .iter()
-        .position(|s| s.media() == "video" && s.encoding_name().eq_ignore_ascii_case("h264"))
+        .position(|s| {
+            s.media() == "video" && s.encoding_name().eq_ignore_ascii_case(codec.rtp_encoding_name())
+        })
         .ok_or_else(|| anyhow::anyhow!("no H.264 video stream in RTSP DESCRIBE"))?;
     sess.setup(
         video_idx,

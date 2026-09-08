@@ -25,6 +25,10 @@ use tokio::sync::{mpsc, Notify};
 /// from — `seydd.toml`, a C `seyd_config`, or a test.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
+    /// Ask for the cheapest useful recovery point (LTR → intra-refresh → IDR)
+    /// instead of always demanding a keyframe. Turn off for a publisher that
+    /// mishandles any `kind` but `idr`.
+    pub recovery_ladder: bool,
     pub robot_id: String,
     pub signal_url: String,
     pub credential_path: PathBuf,
@@ -45,6 +49,7 @@ impl Default for AgentConfig {
         AgentConfig {
             robot_id: String::new(),
             signal_url: String::new(),
+            recovery_ladder: true,
             credential_path: PathBuf::from("/var/lib/seyd/robot.key"),
             quic_port: 4433,
             ipv6: true,
@@ -93,6 +98,15 @@ pub enum AgentEvent {
     SignalDenied {
         reason: String,
     },
+    /// The relayed simulcast layer changed (ADR 0008). A host that can force a
+    /// keyframe on the incoming layer should do so — the engine switches on that
+    /// layer's next keyframe, and asking makes it the next one.
+    LayerChanged {
+        channel: u8,
+        layer: u8,
+        name: String,
+        reason: &'static str,
+    },
     /// Candidates were (re-)gathered and announced. Carries the `NatReport`
     /// as JSON; the host may surface it or ignore it.
     NatReport(serde_json::Value),
@@ -135,6 +149,7 @@ impl Agent {
 
         // ── engine ───────────────────────────────────────────────────────
         let (engine, events) = Engine::new(EngineConfig {
+            recovery_ladder: cfg.recovery_ladder,
             channels: specs.clone(),
             profile,
             max_sessions: cfg.max_sessions as usize,
@@ -197,6 +212,15 @@ impl Agent {
     /// the slot full is dropped by the engine's admission control.
     pub fn push_video(&self, channel: u8, frame: VideoFrame) {
         self.engine.push_video(channel, frame);
+    }
+
+    /// As `push_video`, for a channel publishing several simulcast layers
+    /// (ADR 0008). Offer every layer's frames; the agent relays one and drops
+    /// the rest, so switching costs a keyframe and never a reconnect. On a
+    /// channel that declared no ladder this is `push_video` and `layer` is
+    /// ignored.
+    pub fn push_video_layer(&self, channel: u8, layer: u8, frame: VideoFrame) {
+        self.engine.push_video_layer(channel, layer, frame);
     }
 
     /// Hand a message to a sensor channel.
@@ -363,6 +387,7 @@ async fn maintain(
                     Event::Command { channel, payload } => AgentEvent::Command { channel, payload },
                     Event::RequestedConfig(v) => AgentEvent::RequestedConfig(v),
                     Event::RecoveryRequest { channel, kind, reason } => AgentEvent::RecoveryRequest { channel, kind, reason },
+                    Event::LayerChanged { channel, layer, name, reason } => AgentEvent::LayerChanged { channel, layer, name, reason },
                 };
                 if host.send(out).await.is_err() { break }
             }

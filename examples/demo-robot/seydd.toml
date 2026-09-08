@@ -11,9 +11,24 @@ max_sessions    = 4
 [[channel]]
 kind  = "video"
 name  = "main"
-input = "rtsp://192.168.86.237:554/Streaming/Channels/101"   # credentials from SEYD_RTSP_USER / SEYD_RTSP_PASSWORD
+# Baseline level 3.1 admits 1280x720, the highest rung below. Credentials for
+# every layer come from SEYD_RTSP_USER / SEYD_RTSP_PASSWORD.
 codec = "avc1.42001f"
 fps   = 25
+
+# Simulcast (ADR 0008): the camera already encodes both streams, so the agent
+# picks which one to relay instead of reconfiguring one and reconnecting.
+# Provision the camera to match with examples/demo-robot/setup-simulcast.py.
+# Same frame rate on both rungs on purpose — resolution is what degrades.
+
+  [[channel.layer]]
+  name  = "low"                                              # 640x480, sub stream
+  input = "rtsp://192.168.86.237:554/Streaming/Channels/102"
+
+  [[channel.layer]]
+  name  = "high"                                             # 1280x720, main stream
+  input = "rtsp://192.168.86.237:554/Streaming/Channels/101"
+  activate_above_kbps = 1800
 
 [[channel]]
 kind   = "command"

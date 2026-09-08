@@ -159,7 +159,21 @@ async fn run(
         match outcome {
             Ok(()) => backoff = BASE_BACKOFF,
             Err(Error::Denied(reason)) => {
-                tracing::error!(%reason, "signal server denied this robot");
+                // A bare reason code leaves an operator with nowhere to go, and
+                // these three are the ones that actually happen in the field.
+                match reason.as_str() {
+                    "unknown-robot" => tracing::error!(
+                        "signal server denied this robot: it is not enrolled. Redeem an \
+                         enrolment token from the console — `seydd --config <file> enrol \
+                         --token seyd_enr_…`, or set SEYD_ENROLMENT_TOKEN and restart."
+                    ),
+                    "key-mismatch" => tracing::error!(
+                        "signal server denied this robot: it is enrolled with a different \
+                         key. Another agent is using this robot id, or the credential file \
+                         was replaced. Delete the robot in the console and enrol again."
+                    ),
+                    _ => tracing::error!(%reason, "signal server denied this robot"),
+                }
                 let _ = ev_tx.send(Event::Denied { reason }).await;
                 backoff = MAX_BACKOFF;
             }

@@ -32,6 +32,7 @@ Pure stdlib HTTP (urllib): no dependencies to install on the demo host.
 import asyncio
 import concurrent.futures
 import logging
+import re
 import urllib.error
 import urllib.request
 
@@ -84,12 +85,14 @@ class CameraControl:
 
         self._base = f'http://{host}/ISAPI/PTZCtrl/channels/{channel}'
 
-        # Digest, not basic. Hikvision rejects basic auth outright, which is the
-        # trap in DEMO.md's original example.
-        mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-        mgr.add_password(None, f'http://{host}/', user, password)
-        self._opener = urllib.request.build_opener(
-            urllib.request.HTTPDigestAuthHandler(mgr))
+        self._user     = user
+        self._password = password
+        self._opener   = self._build_opener()
+
+        # Bitrate and frame rate live in the same channel document, and ISAPI
+        # only offers read-modify-write of the whole thing. Without this lock an
+        # interleaved GET/GET/PUT/PUT silently discards one of the two changes.
+        self._doc_lock = asyncio.Lock()
 
         # Single worker thread: serialises requests onto the camera (it does not
         # benefit from concurrency) and bounds thread use to one regardless of
@@ -158,37 +161,69 @@ class CameraControl:
         return await asyncio.get_event_loop().run_in_executor(
             self._pool, self._blocking_url, url, '')
 
-    async def set_bitrate_cap(self, kbps: int, stream_channel: int = 101) -> bool:
+    async def _read_channel_field(self, tag: str, stream_channel: int) -> int | None:
+        """Read one integer field out of the streaming channel document."""
+        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
+        # The channel document is slow on this firmware; give it 4 s.
+        xml = await asyncio.get_event_loop().run_in_executor(
+            self._pool, self._blocking_url, url, None, 4.0)
+        if not xml:
+            return None
+        m = re.search(f'<{tag}>(\\d+)</{tag}>', xml.decode('utf-8', 'replace'))
+        return int(m.group(1)) if m else None
+
+    async def _patch_channel_field(self, tag: str, value: int, stream_channel: int) -> bool:
         """
-        Set the stream's VBR upper cap (`video-config.maxBitrateKbps` from
-        seydd's ABR). GET the channel XML, patch <vbrUpperCap> only, PUT it
-        back — resolution, GOP and codec are left exactly as they were.
+        GET the streaming channel document, patch one field, PUT it back.
+
+        Read-modify-write of the whole document is the only option ISAPI offers
+        here, so every other encoder setting — resolution, GOP, codec — is
+        carried across untouched by construction.
         """
         url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
         loop = asyncio.get_event_loop()
-        # The channel document is slow on this firmware; give it 4 s.
-        xml = await loop.run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
-        if not xml:
-            return False
-        text = xml.decode('utf-8', 'replace')
-        import re
-        if '<vbrUpperCap>' not in text:
-            log.warning('bitrate cap: no <vbrUpperCap> in channel %s XML', stream_channel)
-            return False
-        patched = re.sub(r'<vbrUpperCap>\d+</vbrUpperCap>', f'<vbrUpperCap>{int(kbps)}</vbrUpperCap>', text, count=1)
-        ok = await loop.run_in_executor(self._pool, self._blocking_url, url, patched, 4.0)
+        async with self._doc_lock:
+            xml = await loop.run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
+            if not xml:
+                return False
+            text = xml.decode('utf-8', 'replace')
+            if f'<{tag}>' not in text:
+                log.warning('%s: no <%s> in channel %s XML', tag, tag, stream_channel)
+                return False
+            patched = re.sub(f'<{tag}>\\d+</{tag}>', f'<{tag}>{int(value)}</{tag}>', text, count=1)
+            return bool(await loop.run_in_executor(self._pool, self._blocking_url, url, patched, 4.0))
+
+    async def set_bitrate_cap(self, kbps: int, stream_channel: int = 101) -> bool:
+        """
+        Set the stream's VBR upper cap (`video-config.maxBitrateKbps` from
+        seydd's ABR).
+        """
+        ok = await self._patch_channel_field('vbrUpperCap', kbps, stream_channel)
         if ok:
             log.info('bitrate cap → %d kbps (channel %d)', kbps, stream_channel)
-        return bool(ok)
+        return ok
 
     async def get_bitrate_cap(self, stream_channel: int = 101) -> int | None:
-        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
-        xml = await asyncio.get_event_loop().run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
-        if not xml:
-            return None
-        import re
-        m = re.search(r'<vbrUpperCap>(\d+)</vbrUpperCap>', xml.decode('utf-8', 'replace'))
-        return int(m.group(1)) if m else None
+        return await self._read_channel_field('vbrUpperCap', stream_channel)
+
+    async def set_max_frame_rate(self, fps: int, stream_channel: int = 101) -> bool:
+        """
+        Set the stream's frame-rate cap (`video-config.suggestedFps` from seydd's
+        ABR), the last rung of the degradation ladder.
+
+        ISAPI states the cap in hundredths of a frame per second, so 25 fps is
+        2500, and only accepts values the channel's `capabilities` document
+        lists. Unlike a resolution change, this takes effect on the *running*
+        stream: no reconnect, no gap.
+        """
+        ok = await self._patch_channel_field('maxFrameRate', int(fps) * 100, stream_channel)
+        if ok:
+            log.info('frame rate cap → %d fps (channel %d)', fps, stream_channel)
+        return ok
+
+    async def get_max_frame_rate(self, stream_channel: int = 101) -> int | None:
+        raw = await self._read_channel_field('maxFrameRate', stream_channel)
+        return None if raw is None else raw // 100
 
     async def status(self) -> dict | None:
         """Current position, or None if the camera did not answer."""
@@ -264,10 +299,19 @@ class CameraControl:
             log.debug('PTZ request dropped: %s', e)
             return False
 
+    def _build_opener(self):
+        # Digest, not basic. Hikvision rejects basic auth outright, which is the
+        # trap in DEMO.md's original example.
+        mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        mgr.add_password(None, f'http://{self.host}/', self._user, self._password)
+        return urllib.request.build_opener(
+            urllib.request.HTTPDigestAuthHandler(mgr))
+
     def _blocking(self, path: str, body: str | None):
         return self._blocking_url(self._base + path, body)
 
-    def _blocking_url(self, url: str, body: str | None, timeout: float = _TIMEOUT_S):
+    def _blocking_url(self, url: str, body: str | None, timeout: float = _TIMEOUT_S,
+                      _retry: bool = True):
         path = url.rsplit('/ISAPI', 1)[-1]
         try:
             if body is None:
@@ -280,6 +324,15 @@ class CameraControl:
                 data = resp.read()
             return data if body is None else True
         except urllib.error.HTTPError as e:
+            # A 401 wedges urllib's digest handler: it keeps a retry counter and,
+            # once tripped, raises "digest auth failed" for every later request
+            # even after the camera is happy again. Hikvision trips it routinely
+            # by locking a host out for ~30 min after a few failed logins (see
+            # DEMO.md), so an unattended demo would lose PTZ until restarted.
+            # Throw the handler away and try once more with a clean one.
+            if e.code == 401 and _retry:
+                self._opener = self._build_opener()
+                return self._blocking_url(url, body, timeout, _retry=False)
             log.warning('PTZ %s → HTTP %s', path, e.code)
             return False
         except Exception as e:

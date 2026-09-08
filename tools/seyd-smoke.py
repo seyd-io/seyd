@@ -125,7 +125,15 @@ def main():
     ap.add_argument('--record', type=float, default=0, metavar='SECONDS', help='after the checks, keep the session open and append lastStats once per second to --record-file (field tests)')
     ap.add_argument('--record-file', default='seyd-record.jsonl')
     ap.add_argument('--camera-ip', default=None, help='verify PTZ by reading this Hikvision camera\'s azimuth (CAMERA_USER/PASSWORD env)')
-    sys.exit(asyncio.run(run(ap.parse_args())))
+    args = ap.parse_args()
+    # A blank password is not a failed check, it is a trap: Hikvision counts the
+    # attempts and locks this host out for ~30 minutes, which takes the demo's
+    # PTZ down with it. Refuse before touching the camera.
+    if args.camera_ip and not os.getenv('CAMERA_PASSWORD'):
+        sys.exit('--camera-ip needs CAMERA_PASSWORD (and CAMERA_USER): '
+                 'run `set -a; . ./.env.local; set +a` first. Attempting the '
+                 'camera with a blank password trips its login lock.')
+    sys.exit(asyncio.run(run(args)))
 
 
 if __name__ == '__main__':

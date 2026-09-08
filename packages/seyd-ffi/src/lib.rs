@@ -179,6 +179,19 @@ pub struct seyd_callbacks {
             reason: *const c_char,
         ),
     >,
+    /// The relayed simulcast layer changed (ADR 0008). Seyd switches on that
+    /// layer's next keyframe; a publisher that can force one should, which turns
+    /// "next keyframe" from up to a GOP into immediately. `reason` is `up` or
+    /// `down`.
+    pub on_layer_changed: Option<
+        unsafe extern "C" fn(
+            user: *mut c_void,
+            channel: u8,
+            layer: u8,
+            name: *const c_char,
+            reason: *const c_char,
+        ),
+    >,
     /// The robot is unreachable while signaling is down. `detail` is NULL
     /// except for `SEYD_SIGNAL_DENIED`.
     pub on_signal_state: Option<
@@ -334,6 +347,10 @@ pub unsafe extern "C" fn seyd_agent_create(
 
         let defaults = AgentConfig::default();
         let agent_cfg = AgentConfig {
+            // Not in the C config struct: adding a field there would change
+            // the ABI. Hosts get the ladder, and a publisher that ignores
+            // `kind` behaves exactly as it did before.
+            recovery_ladder: true,
             robot_id,
             signal_url,
             credential_path: credential_path
@@ -375,6 +392,7 @@ pub unsafe extern "C" fn seyd_agent_create(
                     on_command: c.on_command,
                     on_requested_config: c.on_requested_config,
                     on_recovery_request: c.on_recovery_request,
+                    on_layer_changed: c.on_layer_changed,
                     on_signal_state: c.on_signal_state,
                     on_nat_report: c.on_nat_report,
                 })
@@ -433,9 +451,84 @@ pub unsafe extern "C" fn seyd_channel_add(
             name,
             codec,
             fps: cfg.fps,
+            // Layers are declared afterwards with `seyd_channel_add_layer`, so
+            // adding one channel stays a single struct with no array in it.
+            layers: Vec::new(),
         });
         if let Some(o) = out_channel_id.as_mut() {
             *o = id;
+        }
+        SEYD_OK
+    })
+}
+
+/// Declare one simulcast layer of a video channel (ADR 0008): the same picture,
+/// encoded again at a different operating point. Only valid before
+/// `seyd_agent_start`, on a channel added by `seyd_channel_add`.
+///
+/// Call once per layer, in any order. `activate_above_kbps` is the ABR target at
+/// or above which the layer is the right choice; the lowest layer is the base
+/// and must be 0. A channel with fewer than two layers behaves exactly as one
+/// with none, and `seyd_push_frame` keeps working unchanged.
+///
+/// Feed every declared layer with `seyd_push_frame_layer`. Seyd relays one and
+/// drops the rest, switching on the target layer's next keyframe, so the
+/// alternative encoding is always ready and a switch costs no reconnect.
+///
+/// # Safety
+/// `agent` must come from `seyd_agent_create`; `name` must be a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn seyd_channel_add_layer(
+    agent: *mut seyd_agent,
+    channel: u8,
+    name: *const c_char,
+    activate_above_kbps: u32,
+) -> seyd_status {
+    guard(|| {
+        let Some(agent) = agent.as_ref() else {
+            return fail(SEYD_ERR_INVALID_ARG, "agent must not be NULL");
+        };
+        let name = match opt_str(name) {
+            Ok(Some(n)) => n.to_string(),
+            _ => return fail(SEYD_ERR_INVALID_ARG, "layer name is required"),
+        };
+        let mut state = agent.state.lock().unwrap();
+        let State::Configuring { cfg: acfg } = &mut *state else {
+            return fail(SEYD_ERR_STATE, "layers must be added before start");
+        };
+        let Some(c) = acfg.channels.iter_mut().find(|c| c.id == channel) else {
+            return fail(SEYD_ERR_NOT_FOUND, "no such channel");
+        };
+        if c.kind != CoreKind::Video {
+            return fail(
+                SEYD_ERR_INVALID_ARG,
+                "simulcast layers are for video channels only",
+            );
+        }
+        if c.layers.iter().any(|l| l.name == name) {
+            return fail(SEYD_ERR_INVALID_ARG, format!("duplicate layer {name:?}"));
+        }
+        if c.layers
+            .iter()
+            .any(|l| l.activate_above_kbps == activate_above_kbps)
+        {
+            return fail(
+                SEYD_ERR_INVALID_ARG,
+                "another layer already activates at that bitrate; one of them \
+                 could never be selected",
+            );
+        }
+        if c.layers.len() >= 255 {
+            return fail(SEYD_ERR_INVALID_ARG, "at most 255 layers");
+        }
+        c.layers.push(seyd_qos::simulcast::VideoLayer {
+            id: 0, // renumbered below, lowest first
+            name,
+            activate_above_kbps,
+        });
+        c.layers.sort_by_key(|l| l.activate_above_kbps);
+        for (i, l) in c.layers.iter_mut().enumerate() {
+            l.id = i as u8;
         }
         SEYD_OK
     })
@@ -553,6 +646,48 @@ pub unsafe extern "C" fn seyd_push_frame(
             }
             core.push_video(
                 channel,
+                VideoFrame {
+                    data: Bytes::copy_from_slice(std::slice::from_raw_parts(data, len)),
+                    keyframe,
+                    capture_ts_us,
+                },
+            );
+            SEYD_OK
+        })
+    })
+}
+
+/// As `seyd_push_frame`, naming which simulcast layer the picture belongs to
+/// (ADR 0008). Feed every declared layer; Seyd relays one.
+///
+/// On a channel that declared no layers this is `seyd_push_frame` and `layer` is
+/// ignored, so a wrapper may always call this one.
+///
+/// # Safety
+/// `data` must point to `len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn seyd_push_frame_layer(
+    agent: *mut seyd_agent,
+    channel: u8,
+    layer: u8,
+    data: *const u8,
+    len: usize,
+    keyframe: bool,
+    capture_ts_us: u64,
+) -> seyd_status {
+    guard(|| {
+        with_running(agent, |core| {
+            match core.channels().iter().find(|c| c.id == channel) {
+                Some(c) if c.kind == CoreKind::Video => {}
+                Some(_) => return fail(SEYD_ERR_INVALID_ARG, "not a video channel"),
+                None => return fail(SEYD_ERR_NOT_FOUND, "no such channel"),
+            }
+            if data.is_null() || len == 0 {
+                return fail(SEYD_ERR_INVALID_ARG, "empty frame");
+            }
+            core.push_video_layer(
+                channel,
+                layer,
                 VideoFrame {
                     data: Bytes::copy_from_slice(std::slice::from_raw_parts(data, len)),
                     keyframe,
@@ -751,6 +886,7 @@ fn copy_callbacks(c: &seyd_callbacks) -> seyd_callbacks {
         on_command: c.on_command,
         on_requested_config: c.on_requested_config,
         on_recovery_request: c.on_recovery_request,
+        on_layer_changed: c.on_layer_changed,
         on_signal_state: c.on_signal_state,
         on_nat_report: c.on_nat_report,
     }
@@ -813,6 +949,17 @@ unsafe fn dispatch(c: &seyd_callbacks, ev: AgentEvent) {
             if let Some(f) = c.on_recovery_request {
                 let (kind, reason) = (cs(kind), cs(reason));
                 f(c.user, channel, kind.as_ptr(), reason.as_ptr());
+            }
+        }
+        AgentEvent::LayerChanged {
+            channel,
+            layer,
+            name,
+            reason,
+        } => {
+            if let Some(f) = c.on_layer_changed {
+                let (name, reason) = (cs(&name), cs(reason));
+                f(c.user, channel, layer, name.as_ptr(), reason.as_ptr());
             }
         }
         AgentEvent::SignalConnected => {

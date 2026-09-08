@@ -37,6 +37,31 @@ seyd_agent_start(agent);
 for (;;) seyd_push_frame(agent, video, au, au_len, is_idr, capture_ts_us);
 ```
 
+## Simulcast
+
+Where the publisher can encode the same picture more than once — most IP cameras
+do, simultaneously and for free — declare each encoding as a layer and feed them
+all. Seyd relays one and switches between them at a keyframe, so adapting costs
+one frame instead of a reconnect (ADR 0008):
+
+```c
+seyd_channel_add(agent, &vc, &video);
+seyd_channel_add_layer(agent, video, "low",  0);      /* the base rung */
+seyd_channel_add_layer(agent, video, "high", 1800);   /* needs 1800 kbps */
+
+seyd_agent_start(agent);
+seyd_push_frame_layer(agent, video, 0, low_au,  low_len,  is_idr, ts);
+seyd_push_frame_layer(agent, video, 1, high_au, high_len, is_idr, ts);
+```
+
+Set `on_layer_changed` and force a keyframe on the incoming layer when it fires;
+Seyd switches on that layer's next keyframe either way, so asking for one just
+makes it sooner. The channel's `codec` string must admit the *highest* layer —
+`avc1.42001f` is Baseline level 3.1, whose limit is exactly 1280x720.
+
+Degrade resolution first and frame rate last: for a remote pilot, the interval
+between frames is latency, not quality.
+
 Seyd is handed **encoded** access units and relays them. It never decodes,
 re-encodes or inspects payloads: whatever your encoder produced is what the
 pilot decodes, which is why the glass-to-glass number is what it is.

@@ -64,7 +64,20 @@ int main(void) {
 
     /* Nothing may be pushed before the agent starts. */
     uint8_t byte = 0;
+    /* Simulcast layers (ADR 0008): declared after the channel, before start. */
+    CHECK(seyd_channel_add_layer(agent, video, "low", 0) == SEYD_OK);
+    CHECK(seyd_channel_add_layer(agent, video, "high", 1800) == SEYD_OK);
+    /* A name, and a bitrate no other layer already claims, are both required:
+       two rungs activating together means one could never be selected. */
+    CHECK(seyd_channel_add_layer(agent, video, "high", 3000) == SEYD_ERR_INVALID_ARG);
+    CHECK(seyd_channel_add_layer(agent, video, "other", 1800) == SEYD_ERR_INVALID_ARG);
+    CHECK(seyd_channel_add_layer(agent, video, NULL, 500) == SEYD_ERR_INVALID_ARG);
+    /* Layers belong to video channels, and to channels that exist. */
+    CHECK(seyd_channel_add_layer(agent, sensor, "low", 0) == SEYD_ERR_INVALID_ARG);
+    CHECK(seyd_channel_add_layer(agent, 99, "low", 0) == SEYD_ERR_NOT_FOUND);
+
     CHECK(seyd_push_frame(agent, video, &byte, 1, true, 0) == SEYD_ERR_STATE);
+    CHECK(seyd_push_frame_layer(agent, video, 1, &byte, 1, true, 0) == SEYD_ERR_STATE);
     CHECK(seyd_push_message(agent, sensor, &byte, 1) == SEYD_ERR_STATE);
     CHECK(seyd_session_count(agent, NULL) == SEYD_ERR_INVALID_ARG);
 

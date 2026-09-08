@@ -169,6 +169,17 @@ typedef struct seyd_callbacks {
                                 const char *kind,
                                 const char *reason);
     /**
+     * The relayed simulcast layer changed (ADR 0008). Seyd switches on that
+     * layer's next keyframe; a publisher that can force one should, which turns
+     * "next keyframe" from up to a GOP into immediately. `reason` is `up` or
+     * `down`.
+     */
+    void (*on_layer_changed)(void *user,
+                             uint8_t channel,
+                             uint8_t layer,
+                             const char *name,
+                             const char *reason);
+    /**
      * The robot is unreachable while signaling is down. `detail` is NULL
      * except for `SEYD_SIGNAL_DENIED`.
      */
@@ -268,6 +279,28 @@ enum seyd_status seyd_channel_add(struct seyd_agent *agent,
                                   uint8_t *out_channel_id);
 
 /**
+ * Declare one simulcast layer of a video channel (ADR 0008): the same picture,
+ * encoded again at a different operating point. Only valid before
+ * `seyd_agent_start`, on a channel added by `seyd_channel_add`.
+ *
+ * Call once per layer, in any order. `activate_above_kbps` is the ABR target at
+ * or above which the layer is the right choice; the lowest layer is the base
+ * and must be 0. A channel with fewer than two layers behaves exactly as one
+ * with none, and `seyd_push_frame` keeps working unchanged.
+ *
+ * Feed every declared layer with `seyd_push_frame_layer`. Seyd relays one and
+ * drops the rest, switching on the target layer's next keyframe, so the
+ * alternative encoding is always ready and a switch costs no reconnect.
+ *
+ * # Safety
+ * `agent` must come from `seyd_agent_create`; `name` must be a valid C string.
+ */
+enum seyd_status seyd_channel_add_layer(struct seyd_agent *agent,
+                                        uint8_t channel,
+                                        const char *name,
+                                        uint32_t activate_above_kbps);
+
+/**
  * Bind, discover, announce and start serving. Blocks until the agent is
  * announced (discovery takes up to a second or two). Callbacks begin after
  * this returns `SEYD_OK`.
@@ -310,6 +343,24 @@ enum seyd_status seyd_push_frame(struct seyd_agent *agent,
                                  size_t len,
                                  bool keyframe,
                                  uint64_t capture_ts_us);
+
+/**
+ * As `seyd_push_frame`, naming which simulcast layer the picture belongs to
+ * (ADR 0008). Feed every declared layer; Seyd relays one.
+ *
+ * On a channel that declared no layers this is `seyd_push_frame` and `layer` is
+ * ignored, so a wrapper may always call this one.
+ *
+ * # Safety
+ * `data` must point to `len` readable bytes.
+ */
+enum seyd_status seyd_push_frame_layer(struct seyd_agent *agent,
+                                       uint8_t channel,
+                                       uint8_t layer,
+                                       const uint8_t *data,
+                                       size_t len,
+                                       bool keyframe,
+                                       uint64_t capture_ts_us);
 
 /**
  * Send a message on a sensor channel. Never blocks.

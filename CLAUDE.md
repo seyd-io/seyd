@@ -20,8 +20,10 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   and verification. Start here.
 - **docs/adr/** — architecture decision records. ADR 0001 (wire protocol v2),
   0002 (quinn), 0003 (MoQ), 0004 (C ABI), 0005 (presentation pacing),
-  0006 (loss measured on one clock). Add one for every decision of that
-  weight; never change a wire format or public API without one.
+  0006 (loss measured on one clock), 0007 (identity: pluggable authn, our
+  authz), 0008 (simulcast: adapt by selecting a stream, not reconfiguring
+  one). Add one for every decision of that weight; never change a wire
+  format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product
   decisions section at the top records what changed on 2026-08-28.
@@ -30,6 +32,9 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   inputs; its component descriptions describe the legacy Python/JS code only.
 - **DEMO.md** — the always-on Hikvision PTZ demo. The first customer program
   the new stack must run.
+- **docs/latency-roadmap.md** — ordered work on end-to-end latency, with the
+  measured bar from the competitor survey. Read before touching the recovery,
+  pacing or FEC paths.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
@@ -77,7 +82,9 @@ seyd/
 │   ├── c/       # generated seyd.h, Makefile, abi-smoke + sensor-robot examples
 │   ├── python/  # cffi ABI mode over libseyd; cpp/ and ros2/ not built yet
 │   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
-├── cloud/api  cloud/prober  cloud/monitor  cloud/db
+├── cloud/api      # signal v2 + console API; authn/ (pluggable) + accounts/ (ours)
+│   └── db/migrations/         # the schema, applied at boot
+├── cloud/prober  cloud/monitor
 ├── web/site  web/console  web/demo
 ├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
@@ -126,9 +133,25 @@ belong in `examples/`, not in a Seyd component — the agent states intent
 (`on_recovery_request`, `on_requested_config`, commands) and robot-side code
 decides how to meet it.
 
+**Authentication is pluggable; authorization is the product.** Seyd has three
+identity planes and only one touches an identity provider. Robot identity
+(Ed25519, enrolment tokens) and pilot session tokens (ES256, our key) are ours
+and must stay that way — a fleet keeps working while the IdP is down. Human
+identity comes from OIDC, behind `cloud/api/src/authn/`, which is the only
+place that knows how a person proves who they are. Everything downstream sees a
+`Principal`. Orgs, roles, robot grants and the audit log live in
+`cloud/api/src/accounts/` and Postgres, because no IdP can express "may drive
+robot 42 but only observe robot 7". If you find yourself reaching for a
+provider-specific SDK or storing an IdP concept in `accounts/`, the boundary
+has leaked. See ADR 0007 and `docs/self-hosting-auth.md`.
+
 **No transcoding in Seyd.** The agent is a pure relay of encoded bytes. It may
 depacketize RTP and split NAL units into chunks; it never decodes, re-encodes
-or inspects media payloads beyond that.
+or inspects media payloads beyond that. Adaptation obeys the same rule: where a
+publisher offers several encodings of one picture, the agent *chooses which
+already-encoded stream to forward* (simulcast, ADR 0008) rather than changing
+the video. Degrade resolution first and frame rate last — for a remote pilot,
+frame interval is latency, not quality.
 
 **Whole frame or nothing.** A frame is admitted before its first chunk leaves
 and then sent in full; a torn frame costs a GOP, a skipped frame costs a frame.
@@ -142,15 +165,23 @@ Keyframes are never dropped.
 | Agent form factors | C ABI via cbindgen; C++/Python(cffi)/ROS 2 wrappers; `seydd` daemon | ADR 0004 |
 | Web pilot SDK | TypeScript, WebTransport, WebCodecs `VideoDecoder`, Web Worker + OffscreenCanvas | Presentation paced on the source's capture clock, bounded by a latency budget (ADR 0005); off-main-thread so host apps cannot jank video |
 | Loss resilience | Reed-Solomon GF(256), Cauchy, per FEC block; NACK-driven LTR/intra-refresh/IDR recovery | FEC pays bandwidth, not round trips; recovery in one RTT for what FEC misses |
-| Cloud | TypeScript (Fastify + ws), Postgres, Redis, OIDC (provider TBD), Docker | Portable by construction; `docker compose` runs the whole cloud |
+| Cloud | TypeScript (Fastify + ws), Postgres, Redis (not yet), OIDC via self-hosted Logto, Docker | Portable by construction; `docker compose` runs the whole cloud (ADR 0007) |
 
 ## Hosting (current)
 
 `cloud/api` runs on Google Cloud Run in `europe-west1`, project `seydio`:
 `https://seyd-signal-flj7s44j4a-ew.a.run.app` (deploy with
-`GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`; dev-mode auth). It is a plain
-container on Postgres/Redis-shaped seams with the GCP dependency isolated to
-the deploy script; `cloud/docker-compose.yml` is the portability proof.
+`GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`). It is a plain container on
+Postgres/Redis-shaped seams with the GCP dependency isolated to the deploy
+script; `cloud/docker-compose.yml` is the portability proof.
+
+**The deployed revision still runs `SEYD_DEV_OPEN_ENROLMENT=1` and
+`SEYD_DEV_ALLOW_ANONYMOUS=1`** — anyone can claim an unused robot id on it and
+pilot without a token. `deploy.sh` no longer sets either, but it now requires
+`SEYD_DATABASE_URL`, and **no Postgres is provisioned yet**, so the fix cannot
+ship until one exists. Public access to the demo robot is expressed as a public
+`robot_grant` instead (`node dist/bootstrap.js public-grant seyd-demo observe
+drive`), which is verified working locally with both flags off.
 
 ## Running things — the scripts
 
@@ -159,7 +190,8 @@ the deploy script; `cloud/docker-compose.yml` is the portability proof.
 | `./demo-seyd.sh` | The camera demo robot: preflights the Hikvision over ISAPI, starts `seydd` + `examples/demo-robot/bridge.py` against the deployed cloud. Overrides: `CAMERA_IP` (CLI beats `.env.local`), `SIGNAL_URL`, `DARC_QOS_PROFILE`, `ROBOT_ID`. Needs `.env.local` (`CAMERA_USER`/`CAMERA_PASSWORD`). |
 | `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
 | `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs). |
-| `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, tools/.venv, first build). |
+| `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, Colima + Docker CLI, tools/.venv, first build). |
+| `cd cloud && docker compose up -d` | The whole cloud locally: Postgres, Logto, api. Needs `colima start` first on macOS; setup in `cloud/README.md`. |
 
 Both robot scripts `pkill` any running `seydd` and rebuild `target/release/seydd`
 from the working tree first. Pilot pages: deployed landing at `/`, pilot at

@@ -10,9 +10,13 @@ Seyd robot. It consumes seydd's two generic UDP interfaces
   * publisher control (seydd → udp://127.0.0.1:5003): JSON
     {"type": "recovery-request", ...} → ask the encoder for an IDR;
     {"type": "session", "state": "ended", "sessions": 0} → stop and park;
-    {"type": "video-config", "maxBitrateKbps": N, ...} → the camera's VBR upper
-    cap for stream 101 is set to N (seydd's ABR lowers it under loss or
-    latency and raises it back); at most one change per 2 s.
+    {"type": "layer", "name": "low"|"high", "reason": "up"|"down", ...} → ask
+    that layer's stream for an immediate IDR, so Seyd's switch lands at once;
+    {"type": "video-config", "maxBitrateKbps": N, "suggestedFps": F, ...} →
+    the camera's VBR upper cap for stream 101 is set to N (seydd's ABR lowers
+    it under loss or latency and raises it back), and its frame-rate cap to F
+    when the ABR is pinned at its bitrate floor, back to the configured
+    baseline when F is 0; at most one change per 2 s per setting.
 
 Nothing here is Seyd; it is what a customer writes for their own actuators.
 Credentials come from CAMERA_USER / CAMERA_PASSWORD in the environment.
@@ -47,6 +51,8 @@ async def main():
     ap.add_argument('--camera-ip', default=os.getenv('CAMERA_IP', '192.168.86.237'))
     ap.add_argument('--camera-channel', type=int, default=1)
     ap.add_argument('--stream-channel', type=int, default=101)
+    ap.add_argument('--layer-channels', default='low=102,high=101',
+                    help='simulcast layer name -> ISAPI stream channel, for forcing an IDR on a switch')
     ap.add_argument('--ptz-home', default='0,1800,10', help='elevation,azimuth,zoom in ISAPI units')
     ap.add_argument('--command-port', type=int, default=5004)
     ap.add_argument('--control-port', type=int, default=5003)
@@ -62,22 +68,52 @@ async def main():
     cam = CameraControl(args.camera_ip, user, password, channel=args.camera_channel, home=home)
     await cam.start()
     loop = asyncio.get_running_loop()
-    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0, 'bitrate_changes': 0}
-    cap = {'last': None, 'pending': None, 'at': 0.0}
+    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0, 'bitrate_changes': 0, 'fps_changes': 0, 'layer_switches': 0}
 
-    async def apply_bitrate():
-        # Coalesce: at most one ISAPI write per 2 s, latest value wins.
-        while cap['pending'] is not None:
-            wait = 2.0 - (time.time() - cap['at'])
-            if wait > 0:
-                await asyncio.sleep(wait)
-            kbps, cap['pending'] = cap['pending'], None
-            if kbps == cap['last']:
-                continue
-            if await cam.set_bitrate_cap(kbps, args.stream_channel):
-                cap['last'] = kbps
-                stats['bitrate_changes'] += 1
-            cap['at'] = time.time()
+    def coalescer(apply, stat_key):
+        """
+        At most one ISAPI write per 2 s, latest value wins. The camera is far
+        slower than the ABR's once-a-second decisions, so submitting every one
+        of them would queue writes faster than they drain.
+        """
+        st = {'last': None, 'pending': None, 'at': 0.0}
+
+        async def drain():
+            while st['pending'] is not None:
+                wait = 2.0 - (time.time() - st['at'])
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                value, st['pending'] = st['pending'], None
+                if value == st['last']:
+                    continue
+                if await apply(value):
+                    st['last'] = value
+                    stats[stat_key] += 1
+                st['at'] = time.time()
+
+        def submit(value):
+            idle = st['pending'] is None
+            st['pending'] = value
+            if idle:
+                asyncio.ensure_future(drain())
+
+        return submit
+
+    submit_bitrate = coalescer(
+        lambda kbps: cam.set_bitrate_cap(kbps, args.stream_channel), 'bitrate_changes')
+    submit_fps = coalescer(
+        lambda fps: cam.set_max_frame_rate(fps, args.stream_channel), 'fps_changes')
+
+    # The frame rate to come back to once the link recovers. Read from the
+    # camera rather than assumed, so the demo restores whatever the operator
+    # actually configured.
+    baseline_fps = await cam.get_max_frame_rate(args.stream_channel) or 25
+    log.info('baseline frame rate: %d fps (channel %d)', baseline_fps, args.stream_channel)
+
+    layer_channels = {}
+    for pair in filter(None, (p.strip() for p in args.layer_channels.split(','))):
+        name, _, ch = pair.partition('=')
+        layer_channels[name] = int(ch)
 
     def on_command(m):
         if m.get('home'):
@@ -101,14 +137,32 @@ async def main():
             log.info('session %s (%s) — %s active', m.get('state'), m.get('role', '?'), m.get('sessions'))
             if m.get('state') == 'ended' and m.get('sessions', 0) == 0:
                 asyncio.ensure_future(park(cam))
+        elif t == 'layer':
+            # Seyd switches on the new layer's next keyframe. Asking the camera
+            # for one now turns "next keyframe" from up to a GOP into
+            # immediately, which is the whole point of simulcast over a
+            # reconnect: the switch costs one frame, not a reconnection.
+            name = m.get('name')
+            ch = layer_channels.get(name)
+            log.info('layer -> %s (%s)%s', name, m.get('reason'),
+                     '' if ch else ' [no ISAPI channel mapped, switching on its own keyframe]')
+            if ch:
+                stats['layer_switches'] += 1
+                asyncio.ensure_future(cam.request_keyframe(ch))
         elif t == 'video-config':
             kbps = m.get('maxBitrateKbps')
-            log.info('video-config: %s kbps (%s)', kbps, m.get('reason'))
+            fps = m.get('suggestedFps')
+            log.info('video-config: %s kbps, fps %s (%s)', kbps, fps or '-', m.get('reason'))
             if isinstance(kbps, (int, float)) and kbps > 0:
-                idle = cap['pending'] is None
-                cap['pending'] = int(kbps)
-                if idle:
-                    asyncio.ensure_future(apply_bitrate())
+                submit_bitrate(int(kbps))
+            # suggestedFps is 0 whenever the controller is not pinned at its
+            # bitrate floor, which is the signal to restore full cadence. Frame
+            # rate is the last rung of the ladder precisely because it is a
+            # latency term for the pilot: 25 -> 15 fps stretches the interval
+            # between frames from 40 ms to 67 ms, so the operator waits that
+            # much longer to see the result of their own input.
+            if isinstance(fps, (int, float)):
+                submit_fps(int(fps) if fps > 0 else baseline_fps)
 
     await loop.create_datagram_endpoint(lambda: _Udp(on_command), local_addr=('127.0.0.1', args.command_port))
     await loop.create_datagram_endpoint(lambda: _Udp(on_control), local_addr=('127.0.0.1', args.control_port))

@@ -8,6 +8,7 @@ use crate::control::{encode_line, FromPilot, ToPilot};
 use crate::packer::{self, FrameParams};
 use bytes::Bytes;
 use seyd_qos::abr::{AbrController, Sample as AbrSample};
+use seyd_qos::simulcast::LayerSelector;
 use seyd_qos::Profile;
 use seyd_transport::{Endpoint, SendError, Session};
 use seyd_wire::v2::{ChunkHeader, FrameMeta};
@@ -57,6 +58,15 @@ pub enum Event {
         kind: &'static str,
         reason: &'static str,
     },
+    /// The relayed simulcast layer changed (ADR 0008). The host may use it to
+    /// force an IDR on the incoming layer so the switch lands sooner; the engine
+    /// switches on that layer's next keyframe either way.
+    LayerChanged {
+        channel: u8,
+        layer: u8,
+        name: String,
+        reason: &'static str,
+    },
 }
 
 /// One encoded picture from the host.
@@ -71,6 +81,10 @@ pub struct EngineConfig {
     pub channels: Vec<ChannelSpec>,
     pub profile: &'static Profile,
     pub max_sessions: usize,
+    /// Ask for the cheapest useful recovery point (LTR, then intra-refresh,
+    /// then IDR) rather than always demanding a keyframe. Set false for a
+    /// publisher that mishandles anything but `idr`.
+    pub recovery_ladder: bool,
     pub chunk_len: u16,
 }
 
@@ -80,6 +94,10 @@ pub struct Counters {
     pub frames_sent: AtomicU64,
     pub frames_dropped_backlog: AtomicU64,
     pub frames_skipped_stale: AtomicU64,
+    /// Frames arriving on a simulcast layer we are not relaying. Expected and
+    /// large whenever more than one layer is declared — it is the cost of
+    /// having the alternative already encoded and ready to switch to.
+    pub frames_dropped_inactive_layer: AtomicU64,
     pub keyframes_requested: AtomicU64,
     pub chunks_sent: AtomicU64,
     pub parity_sent: AtomicU64,
@@ -94,6 +112,9 @@ struct SessionState {
     /// Set after a delta frame was dropped for this session; every following
     /// delta is useless to its decoder until a keyframe arrives.
     skip_until_key: std::sync::atomic::AtomicBool,
+    /// Epoch-relative millisecond deadline after which delta frames resume
+    /// even without a keyframe. 0 while not waiting. See `FrameQueue::resume_due`.
+    skip_deadline_ms: std::sync::atomic::AtomicU64,
     /// What this pilot last reported, paired with our own counters, for ABR.
     pilot: Mutex<PilotSample>,
 }
@@ -140,6 +161,16 @@ struct Pending {
     since: Instant,
 }
 
+/// Which simulcast layer a video channel is relaying (ADR 0008).
+struct ChannelLayers {
+    selector: LayerSelector,
+    /// The layer whose frames reach the queue.
+    active: u8,
+    /// Set when the selector moved; the switch completes on this layer's next
+    /// keyframe, so the pilot's decoder never meets a mid-GOP change of SPS.
+    pending: Option<u8>,
+}
+
 /// Chunk loss across one window of pilot-paired counters, or `None` when the
 /// window is too short or too small to divide meaningfully. Both deltas must
 /// come from counters the pilot read at the same instant (see
@@ -169,6 +200,9 @@ fn windowed_loss_pct(span: Duration, d_sent: u64, d_rx: u64) -> Option<f64> {
 struct FrameQueue {
     frames: VecDeque<(u8, VideoFrame)>,
     skip_until_key: bool,
+    /// When to resume sending deltas even though no keyframe arrived. Set
+    /// when recovery was asked for in a form that never produces one.
+    resume_at: Option<Instant>,
 }
 
 const MAX_QUEUED_FRAMES: usize = 6;
@@ -193,8 +227,85 @@ const KEYFRAME_FLUSH_FRAMES: usize = MAX_QUEUED_FRAMES / 2;
 /// and sending them only delays the recovery point the pilot is waiting for.
 /// And from `KEYFRAME_FLUSH_FRAMES` up the sender is far enough behind that
 /// draining the queue matters more than the motion in it.
+impl FrameQueue {
+    /// Whether the wait for a recovery point has run out.
+    ///
+    /// A publisher answering with intra-refresh or an LTR reference never
+    /// sends a keyframe, so a latch that only a keyframe can clear would hold
+    /// the stream silent for the rest of the session. This is the release
+    /// valve, and the grace period is the QoS profile's (`recovery_grace_ms`).
+    fn resume_due(&self) -> bool {
+        self.resume_at.is_some_and(|t| Instant::now() >= t)
+    }
+}
+
 fn keyframe_flushes_queue(queued: usize, skip_until_key: bool) -> bool {
     skip_until_key || queued >= KEYFRAME_FLUSH_FRAMES
+}
+
+/// What the publisher is asked to produce to make the stream decodable again,
+/// cheapest first.
+///
+/// Seyd states intent and the robot-side publisher decides how to meet it: a
+/// publisher that cannot honour `Ltr` is free to send an IDR instead, and one
+/// that ignores `kind` entirely behaves exactly as before. Asking for the
+/// cheapest rung matters because an IDR is a bandwidth spike — measured at
+/// 30-60 KB against a ~2 KB delta — and on a ~2 Mbps uplink that spike is
+/// 120-240 ms of serialisation, which is what field run A recorded as p95.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Recovery {
+    /// Re-encode one frame against a long-term reference the pilot still has.
+    /// Cheapest: a single ordinary-sized frame restores decodability.
+    Ltr,
+    /// Refresh the picture progressively across many frames. No single frame
+    /// is large, so the bitrate stays flat, but decodability returns gradually.
+    IntraRefresh,
+    /// A full keyframe. The only rung that lets a decoder start from nothing,
+    /// and the only one a pilot's `request-keyframe` can be answered with.
+    Idr,
+}
+
+impl Recovery {
+    fn as_str(self) -> &'static str {
+        match self {
+            Recovery::Ltr => "ltr",
+            Recovery::IntraRefresh => "intra_refresh",
+            Recovery::Idr => "idr",
+        }
+    }
+
+    /// The next rung up, for when the previous request did not restore the
+    /// stream. Saturates at `Idr`.
+    fn escalate(self) -> Self {
+        match self {
+            Recovery::Ltr => Recovery::IntraRefresh,
+            Recovery::IntraRefresh | Recovery::Idr => Recovery::Idr,
+        }
+    }
+
+    /// Whether answering this request must produce a keyframe. Only `Idr`
+    /// does; the others recover without one, which is why a sender waiting
+    /// for a keyframe has to time out rather than wait forever.
+    fn yields_keyframe(self) -> bool {
+        matches!(self, Recovery::Idr)
+    }
+}
+
+/// Quiet for this long and the ladder resets to its cheapest rung: an
+/// isolated loss should not permanently escalate a link.
+const RECOVERY_ESCALATE_WINDOW: Duration = Duration::from_millis(2_000);
+
+#[derive(Clone, Copy)]
+struct RecoveryState {
+    /// When recovery was last asked for, for the rate limit and the reset.
+    last: Instant,
+    rung: Recovery,
+    /// When the ladder arrived at this rung. A rung is given the profile's
+    /// `recovery_grace_ms` to take effect before the ladder climbs — losses
+    /// arrive faster than any publisher can answer, and escalating on arrival
+    /// rate rather than on elapsed time reaches IDR within two requests and
+    /// makes the cheaper rungs unreachable.
+    rung_since: Instant,
 }
 
 struct Inner {
@@ -206,11 +317,15 @@ struct Inner {
     seqs: HashMap<u8, AtomicU16>,
     counters: Counters,
     events: mpsc::Sender<Event>,
-    last_recovery: Mutex<HashMap<u8, Instant>>,
+    /// Per channel: the state of the recovery ladder.
+    last_recovery: Mutex<HashMap<u8, RecoveryState>>,
     queue: Mutex<FrameQueue>,
     slot_notify: Notify,
     epoch: Instant,
     abr: Mutex<AbrState>,
+    /// Video channels that declared more than one layer. Absent for every
+    /// single-stream channel, which therefore pays nothing for this.
+    simulcast: Mutex<HashMap<u8, ChannelLayers>>,
 }
 
 #[derive(Clone)]
@@ -232,6 +347,26 @@ impl Engine {
             .map(|c| (c.id, AtomicU16::new(0)))
             .collect();
         let profile = cfg.profile;
+        // Only channels that actually declared a ladder get an entry, so a
+        // single-stream robot pays nothing for simulcast existing.
+        let simulcast: HashMap<u8, ChannelLayers> = cfg
+            .channels
+            .iter()
+            .filter(|c| c.kind == ChannelKind::Video && c.layers.len() > 1)
+            .filter_map(|c| {
+                LayerSelector::new(c.layers.clone(), profile.max_bitrate_kbps).map(|selector| {
+                    let active = selector.current();
+                    (
+                        c.id,
+                        ChannelLayers {
+                            selector,
+                            active,
+                            pending: None,
+                        },
+                    )
+                })
+            })
+            .collect();
         let inner = Arc::new(Inner {
             profile: RwLock::new(cfg.profile),
             cfg,
@@ -245,9 +380,11 @@ impl Engine {
             queue: Mutex::new(FrameQueue {
                 frames: VecDeque::new(),
                 skip_until_key: false,
+                resume_at: None,
             }),
             slot_notify: Notify::new(),
             epoch: Instant::now(),
+            simulcast: Mutex::new(simulcast),
             abr: Mutex::new(AbrState {
                 controllers: HashMap::new(),
                 fec: (profile.fec_delta_pct, profile.fec_key_pct),
@@ -353,6 +490,33 @@ impl Engine {
     /// the next keyframe, and a recovery request is raised so that keyframe
     /// arrives in ~1 RTT.
     pub fn push_video(&self, channel: u8, frame: VideoFrame) {
+        self.push_video_layer(channel, 0, frame)
+    }
+
+    /// As `push_video`, for a channel that publishes several simulcast layers
+    /// (ADR 0008). Frames of every declared layer are offered; the engine
+    /// relays one and drops the rest, so the alternative is always encoded and
+    /// one keyframe away. A channel that declared no ladder ignores `layer`.
+    pub fn push_video_layer(&self, channel: u8, layer: u8, frame: VideoFrame) {
+        {
+            let mut sim = self.inner.simulcast.lock().unwrap();
+            if let Some(st) = sim.get_mut(&channel) {
+                // The switch lands here rather than at selection time: a
+                // keyframe is the only point where a decoder can start on the
+                // new layer's parameter sets.
+                if st.pending == Some(layer) && frame.keyframe {
+                    st.active = layer;
+                    st.pending = None;
+                }
+                if st.active != layer {
+                    self.inner
+                        .counters
+                        .frames_dropped_inactive_layer
+                        .fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+            }
+        }
         self.inner
             .counters
             .frames_in
@@ -370,7 +534,8 @@ impl Engine {
                 }
             }
             q.skip_until_key = false;
-        } else if q.skip_until_key || q.frames.len() >= MAX_QUEUED_FRAMES {
+            q.resume_at = None;
+        } else if (q.skip_until_key && !q.resume_due()) || q.frames.len() >= MAX_QUEUED_FRAMES {
             let first = !q.skip_until_key;
             q.skip_until_key = true;
             self.inner
@@ -379,7 +544,8 @@ impl Engine {
                 .fetch_add(1, Ordering::Relaxed);
             drop(q);
             if first {
-                self.request_recovery(channel, "sender-backlog");
+                let asked = self.request_recovery(channel, "sender-backlog");
+                self.arm_resume(asked);
             }
             return;
         }
@@ -492,7 +658,10 @@ impl Engine {
             let space = s.transport.send_buffer_space();
             if frame.keyframe {
                 s.skip_until_key.store(false, Ordering::Relaxed);
-            } else if s.skip_until_key.load(Ordering::Relaxed) {
+                s.skip_deadline_ms.store(0, Ordering::Relaxed);
+            } else if s.skip_until_key.load(Ordering::Relaxed)
+                && self.now_ms() < s.skip_deadline_ms.load(Ordering::Relaxed)
+            {
                 self.inner
                     .counters
                     .frames_dropped_backlog
@@ -504,6 +673,10 @@ impl Engine {
                     .frames_dropped_backlog
                     .fetch_add(1, Ordering::Relaxed);
                 s.skip_until_key.store(true, Ordering::Relaxed);
+                s.skip_deadline_ms.store(
+                    self.now_ms() + self.profile().recovery_grace_ms as u64,
+                    Ordering::Relaxed,
+                );
                 tracing::debug!(
                     frame_id,
                     wire_bytes,
@@ -511,7 +684,8 @@ impl Engine {
                     threshold,
                     "delta frame dropped: backlog; skipping until keyframe"
                 );
-                self.request_recovery(channel, "backlog");
+                let asked = self.request_recovery(channel, "backlog");
+                self.arm_resume(asked);
                 continue;
             }
             let mut ok = true;
@@ -617,6 +791,7 @@ impl Engine {
             role,
             lines: lines_tx,
             skip_until_key: std::sync::atomic::AtomicBool::new(false),
+            skip_deadline_ms: std::sync::atomic::AtomicU64::new(0),
             pilot: Mutex::new(PilotSample::default()),
         });
         self.inner
@@ -745,8 +920,14 @@ impl Engine {
                         Ok(FromPilot::Ping { t1 }) => {
                             let _ = state.lines.send(encode_line(&ToPilot::Pong { t1, t2: self.now_us() }));
                         }
-                        Ok(FromPilot::Loss { ch, .. }) => self.request_recovery(ch, "pilot-loss"),
-                        Ok(FromPilot::RequestKeyframe { ch }) => self.request_recovery(ch, "pilot-request"),
+                        Ok(FromPilot::Loss { ch, .. }) => {
+                            let asked = self.request_recovery(ch, "pilot-loss");
+                            self.arm_resume(asked);
+                        }
+                        Ok(FromPilot::RequestKeyframe { ch }) => {
+                            // Always answered with an IDR, so no resume timer.
+                            let _ = self.request_recovery(ch, "pilot-request");
+                        }
                         Ok(FromPilot::SetQos { profile }) => {
                             match seyd_qos::get(&profile) {
                                 Some(p) => {
@@ -908,7 +1089,7 @@ impl Engine {
                 .filter(|c| c.kind == ChannelKind::Video)
                 .map(|c| c.id)
                 .collect();
-            for ch in video_channels {
+            for ch in video_channels.iter().copied() {
                 let ctl = abr
                     .controllers
                     .entry(ch)
@@ -940,31 +1121,128 @@ impl Engine {
                     "abr"
                 );
             }
+
+            // Which encoding those bits buy (ADR 0008). Stepped every tick and
+            // not only when the bitrate moved, so a link that recovers while
+            // sitting at a steady target still climbs back up the ladder.
+            let target = abr.bitrate_kbps;
+            let mut sim = self.inner.simulcast.lock().unwrap();
+            for ch in video_channels {
+                let Some(st) = sim.get_mut(&ch) else { continue };
+                let Some(sel) = st.selector.step(target) else { continue };
+                // Armed, not applied: `push_video_layer` completes the switch on
+                // the target layer's next keyframe.
+                st.pending = Some(sel.layer);
+                let _ = self.inner.events.try_send(Event::LayerChanged {
+                    channel: ch,
+                    layer: sel.layer,
+                    name: st.selector.current_name().to_string(),
+                    reason: sel.reason,
+                });
+                tracing::info!(
+                    channel = ch,
+                    layer = sel.layer,
+                    name = st.selector.current_name(),
+                    reason = sel.reason,
+                    target_kbps = target,
+                    "simulcast"
+                );
+            }
         }
     }
 
-    fn request_recovery(&self, channel: u8, reason: &'static str) {
+    fn now_ms(&self) -> u64 {
+        self.inner.epoch.elapsed().as_millis() as u64
+    }
+
+    /// After asking for a recovery point that will not produce a keyframe,
+    /// set the time at which the sender gives up waiting and resumes deltas.
+    ///
+    /// Without this a stream recovered by intra-refresh or an LTR reference
+    /// latches silent: `skip_until_key` is cleared only by a keyframe, and one
+    /// never comes.
+    fn arm_resume(&self, asked: Option<Recovery>) {
+        let Some(kind) = asked else { return };
+        if kind.yields_keyframe() {
+            return;
+        }
+        let grace = Duration::from_millis(self.profile().recovery_grace_ms as u64);
+        let mut q = self.inner.queue.lock().unwrap();
+        q.resume_at = Some(Instant::now() + grace);
+    }
+
+    /// Ask the publisher for a recovery point, climbing the ladder only as far
+    /// as the situation needs.
+    ///
+    /// Returns the rung asked for, so the caller can decide how long to wait:
+    /// only `Idr` promises a keyframe.
+    fn request_recovery(&self, channel: u8, reason: &'static str) -> Option<Recovery> {
         // One request per 250 ms: a lost delta frame smears the picture until
         // a recovery point arrives, so waiting longer costs the operator more
         // than the keyframe costs the link. Spurious requests are avoided at
         // the source (adaptive close-out in the pilot), not by waiting here.
         let min_gap = Duration::from_millis(250);
+        let now = Instant::now();
         let mut last = self.inner.last_recovery.lock().unwrap();
-        if let Some(t) = last.get(&channel) {
-            if t.elapsed() < min_gap {
-                return;
+        let previous = last.get(&channel).copied();
+        if let Some(p) = previous {
+            if now.duration_since(p.last) < min_gap {
+                return None;
             }
         }
-        last.insert(channel, Instant::now());
+
+        let grace = Duration::from_millis(self.profile().recovery_grace_ms as u64);
+        let kind = if reason == "pilot-request" {
+            // The pilot's decoder cannot start or resync without a key frame;
+            // no cheaper rung can answer this one.
+            Recovery::Idr
+        } else if !self.inner.cfg.recovery_ladder {
+            Recovery::Idr
+        } else {
+            match previous {
+                // Quiet for a while: an isolated loss, start cheap again.
+                Some(p) if now.duration_since(p.last) >= RECOVERY_ESCALATE_WINDOW => Recovery::Ltr,
+                // This rung has had its grace period and loss continues, so it
+                // did not work — climb.
+                Some(p) if now.duration_since(p.rung_since) >= grace => p.rung.escalate(),
+                // Still inside the grace: the publisher has not had time yet.
+                Some(p) => p.rung,
+                None => Recovery::Ltr,
+            }
+        };
+
+        // `pilot-request` is an out-of-band demand for a key chunk, not a rung.
+        // Recording it as one pins the ladder at IDR for every later loss,
+        // because IDR escalates to itself — which is how the cheaper rungs
+        // became unreachable the first time this ran against a real pilot.
+        let ladder_rung = reason != "pilot-request";
+        let (rung, rung_since) = match previous {
+            _ if !ladder_rung => previous
+                .map(|p| (p.rung, p.rung_since))
+                .unwrap_or((Recovery::Ltr, now)),
+            Some(p) if p.rung == kind => (kind, p.rung_since),
+            _ => (kind, now),
+        };
+        last.insert(
+            channel,
+            RecoveryState {
+                last: now,
+                rung,
+                rung_since,
+            },
+        );
+        drop(last);
+
         self.inner
             .counters
             .keyframes_requested
             .fetch_add(1, Ordering::Relaxed);
         let _ = self.inner.events.try_send(Event::RecoveryRequest {
             channel,
-            kind: "idr",
+            kind: kind.as_str(),
             reason,
         });
+        Some(kind)
     }
 }
 
@@ -1054,5 +1332,56 @@ mod tests {
         let (s0, r0) = pairs[0];
         let (s1, r1) = *pairs.last().unwrap();
         assert_eq!(windowed_loss_pct(W, s1 - s0, r1 - r0), Some(0.0));
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn the_ladder_climbs_on_repeat_and_resets_when_quiet() {
+        assert_eq!(Recovery::Ltr.escalate(), Recovery::IntraRefresh);
+        assert_eq!(Recovery::IntraRefresh.escalate(), Recovery::Idr);
+        // Saturates: there is nothing more expensive than a keyframe.
+        assert_eq!(Recovery::Idr.escalate(), Recovery::Idr);
+    }
+
+    #[test]
+    fn only_an_idr_promises_a_keyframe() {
+        // This is what decides whether the sender may wait for one, or must
+        // arm a timer instead. Getting it wrong latches a stream silent.
+        assert!(Recovery::Idr.yields_keyframe());
+        assert!(!Recovery::Ltr.yields_keyframe());
+        assert!(!Recovery::IntraRefresh.yields_keyframe());
+    }
+
+    #[test]
+    fn the_wire_names_match_the_documented_publisher_control_vocabulary() {
+        // docs/protocol/seydd.md publishes these strings; a robot-side
+        // publisher matches on them.
+        assert_eq!(Recovery::Ltr.as_str(), "ltr");
+        assert_eq!(Recovery::IntraRefresh.as_str(), "intra_refresh");
+        assert_eq!(Recovery::Idr.as_str(), "idr");
+    }
+
+    #[test]
+    fn a_queue_waiting_on_a_keyframe_releases_itself_when_the_grace_expires() {
+        // The no-IDR hazard: a publisher recovering by intra-refresh never
+        // sends a keyframe, so a latch only a keyframe can clear would hold
+        // the stream silent for the rest of the session.
+        let mut q = FrameQueue {
+            frames: VecDeque::new(),
+            skip_until_key: true,
+            resume_at: Some(Instant::now() - Duration::from_millis(1)),
+        };
+        assert!(q.resume_due(), "an expired grace must release the latch");
+
+        q.resume_at = Some(Instant::now() + Duration::from_secs(5));
+        assert!(!q.resume_due(), "an unexpired grace must still hold it");
+
+        // No deadline armed means an IDR was asked for: wait for it.
+        q.resume_at = None;
+        assert!(!q.resume_due());
     }
 }

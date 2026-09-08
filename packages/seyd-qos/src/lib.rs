@@ -9,8 +9,14 @@
 //!
 //! The closed-loop ABR controller that moves the bitrate *inside* the ceiling
 //! is `abr::AbrController`; the profile is its bound.
+//!
+//! Where a publisher offers several encodings of the same picture,
+//! `simulcast::LayerSelector` picks which one those bits buy (ADR 0008). Note
+//! that it names layers and the bitrate each needs — never their resolution, so
+//! the boundary above still holds.
 
 pub mod abr;
+pub mod simulcast;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +49,15 @@ pub struct Profile {
     /// own arrival — so it is the latency the profile is prepared to spend.
     /// 0 disables pacing and restores decode-on-arrival.
     pub pilot_presentation_delay_ms: u32,
+    /// How long the sender waits for a recovery point after asking for one
+    /// before it resumes sending delta frames regardless.
+    ///
+    /// A publisher that recovers with intra-refresh or an LTR reference never
+    /// produces a keyframe, so waiting for one latches the stream silent
+    /// forever. Roughly one refresh cycle: long enough that a real keyframe
+    /// arrives first when the publisher sends IDRs, short enough that a stall
+    /// is not visible as a freeze.
+    pub recovery_grace_ms: u32,
     pub on_loss: OnLoss,
 }
 
@@ -59,6 +74,7 @@ pub const LATENCY: Profile = Profile {
     // Half the default: still covers the measured keyframe excess (15–80 ms),
     // and this profile spends latency nowhere it does not have to.
     pilot_presentation_delay_ms: 50,
+    recovery_grace_ms: 700,
     on_loss: OnLoss::Continue,
 };
 
@@ -75,6 +91,7 @@ pub const BALANCED: Profile = Profile {
     // Measured on the demo camera: judder p95 77 ms → 40 ms, and hitches over
     // 120 ms fall from 61 to 7 per 40 s. See ADR 0005 for the full table.
     pilot_presentation_delay_ms: 100,
+    recovery_grace_ms: 900,
     on_loss: OnLoss::Continue,
 };
 
@@ -91,6 +108,7 @@ pub const QUALITY: Profile = Profile {
     // This profile already spends 200 ms of latency budget and a 2 s GOP, so
     // the extra 50 ms buys the smoothest picture available: judder p95 15 ms.
     pilot_presentation_delay_ms: 150,
+    recovery_grace_ms: 1400,
     on_loss: OnLoss::FreezeUntilIdr,
 };
 

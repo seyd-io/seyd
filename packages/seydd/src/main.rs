@@ -7,6 +7,7 @@
 //! publisher-control channel. `seyd-ffi` hosts the same agent differently.
 
 mod config;
+mod enrol;
 mod input;
 mod publisher_control;
 
@@ -27,6 +28,21 @@ struct Cli {
     /// Open the video inputs, print frame statistics for N seconds, exit.
     #[arg(long, value_name = "SECONDS")]
     probe_input: Option<u64>,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Redeem an enrolment token from the console, registering this robot.
+    Enrol {
+        /// The token shown once when the token was created.
+        #[arg(long)]
+        token: String,
+        /// Override the signal server from the config file.
+        #[arg(long)]
+        signal_url: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -38,7 +54,26 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse();
     let cfg = Config::load(&cli.config)?;
+
+    if let Some(Command::Enrol { token, signal_url }) = &cli.command {
+        let url = signal_url.as_deref().unwrap_or(&cfg.agent.signal_url);
+        return enrol::run(&cfg.agent.robot_id, url, &cfg.agent.credential_path, token).await;
+    }
+
     tracing::info!(robot_id = %cfg.agent.robot_id, channels = cfg.channels.len(), version = env!("CARGO_PKG_VERSION"), "seydd starting");
+
+    // A robot with no channels connects, announces nothing and looks healthy
+    // in the console — there is no media or telemetry for a pilot to receive.
+    // The usual cause is the section being spelled `[[channels]]`: the key is
+    // `channel`, and serde's `default` turns the typo into an empty list
+    // rather than an error.
+    if cfg.channels.is_empty() {
+        tracing::warn!(
+            config = %cli.config.display(),
+            "no channels configured — this robot will announce nothing and a pilot will \
+             receive no media. Channel sections are spelled [[channel]], not [[channels]]."
+        );
+    }
 
     if let Some(secs) = cli.probe_input {
         return probe_input(&cfg, secs).await;
@@ -46,7 +81,51 @@ async fn main() -> anyhow::Result<()> {
     run(cfg).await
 }
 
+/// Redeem an enrolment token on start, so provisioning a robot is one step
+/// rather than two.
+///
+/// This deliberately also runs when a credential already exists. Enrolment
+/// registers the *public* half of whatever key the robot holds, so a robot that
+/// predates enrolment — one that joined a dev server by trust-on-first-use —
+/// keeps its identity and simply becomes known. Requiring a missing credential
+/// stranded exactly those robots: they connected fine and the server answered
+/// `unknown-robot` with nothing to do about it.
+///
+/// With a credential already present the attempt is best-effort: a single-use
+/// token left in the config or environment will fail on the second start, and
+/// that must not stop a robot that is already enrolled from running.
+async fn enrol_if_needed(cfg: &Config) -> anyhow::Result<()> {
+    let Some(token) = cfg.agent.enrolment_token() else {
+        return Ok(());
+    };
+    let first_run = !cfg.agent.credential_path.exists();
+    let result = enrol::run(
+        &cfg.agent.robot_id,
+        &cfg.agent.signal_url,
+        &cfg.agent.credential_path,
+        &token,
+    )
+    .await;
+
+    match result {
+        Ok(()) => Ok(()),
+        // No credential yet means this robot cannot connect at all without
+        // enrolling, so the failure is fatal and worth stopping for.
+        Err(e) if first_run => Err(e),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "enrolment did not succeed, continuing with the existing credential — \
+                 expected if this robot is already enrolled and the token was spent"
+            );
+            Ok(())
+        }
+    }
+}
+
 async fn run(cfg: Config) -> anyhow::Result<()> {
+    enrol_if_needed(&cfg).await?;
+
     let specs: Vec<ChannelSpec> = cfg
         .channels
         .iter()
@@ -61,10 +140,12 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
             name: c.name.clone(),
             codec: c.codec.clone(),
             fps: c.fps,
+            layers: c.layer_specs(),
         })
         .collect();
 
     let (agent, mut events) = Agent::start(AgentConfig {
+        recovery_ladder: cfg.agent.recovery_ladder,
         robot_id: cfg.agent.robot_id.clone(),
         signal_url: cfg.agent.signal_url.clone(),
         credential_path: cfg.agent.credential_path.clone(),
@@ -84,25 +165,30 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
         let c = &cfg.channels[(spec.id - 1) as usize];
         match spec.kind {
             CoreKind::Video => {
-                let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-                input::spawn_video(
-                    input::rtsp::resolve_credentials(c.input.as_deref().unwrap()),
-                    tx,
-                )?;
-                let agent = agent.clone();
-                let id = spec.id;
-                tokio::spawn(async move {
-                    while let Some(au) = rx.recv().await {
-                        agent.push_video(
-                            id,
-                            VideoFrame {
-                                data: au.data,
-                                keyframe: au.keyframe,
-                                capture_ts_us: au.capture_ts_us,
-                            },
-                        );
-                    }
-                });
+                // One input per simulcast layer (ADR 0008); a single-`input`
+                // channel yields exactly one at layer 0. Every layer's frames
+                // are offered and the engine relays one, so the alternative is
+                // always encoded and one keyframe away.
+                let codec = input::Codec::from_codec_string(&c.codec)?;
+                for (layer, url) in c.inputs() {
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+                    input::spawn_video(input::rtsp::resolve_credentials(&url), codec, tx)?;
+                    let agent = agent.clone();
+                    let id = spec.id;
+                    tokio::spawn(async move {
+                        while let Some(au) = rx.recv().await {
+                            agent.push_video_layer(
+                                id,
+                                layer,
+                                VideoFrame {
+                                    data: au.data,
+                                    keyframe: au.keyframe,
+                                    capture_ts_us: au.capture_ts_us,
+                                },
+                            );
+                        }
+                    });
+                }
             }
             CoreKind::Sensor => {
                 let (tx, mut rx) = tokio::sync::mpsc::channel(64);
@@ -166,6 +252,13 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
                     AgentEvent::RecoveryRequest { channel, kind, reason } => {
                         publisher.send(&serde_json::json!({"type":"recovery-request","channel":channel,"kind":kind,"reason":reason}));
                     }
+                    // The engine switches on the new layer's next keyframe. A
+                    // publisher that can force an IDR on that stream turns "next
+                    // keyframe" from up to a GOP into right now.
+                    AgentEvent::LayerChanged { channel, layer, name, reason } => {
+                        tracing::info!(channel, layer, %name, reason, "layer");
+                        publisher.send(&serde_json::json!({"type":"layer","channel":channel,"layer":layer,"name":name,"reason":reason}));
+                    }
                     AgentEvent::SignalDenied { .. }
                     | AgentEvent::SignalConnected
                     | AgentEvent::SignalDisconnected
@@ -183,7 +276,7 @@ async fn probe_input(cfg: &Config, secs: u64) -> anyhow::Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     for c in cfg.channels.iter().filter(|c| c.kind == ChannelKind::Video) {
         let url = input::rtsp::resolve_credentials(c.input.as_deref().unwrap());
-        input::spawn_video(url, tx.clone())?;
+        input::spawn_video(url, input::Codec::from_codec_string(&c.codec)?, tx.clone())?;
     }
     drop(tx);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
