@@ -111,10 +111,21 @@ up to `MAX_QUEUED_FRAMES = 6` frames between the input and the single
   after every keyframe would be dropped and *another* keyframe requested — an
   IDR storm on a link that is merely full. For twice the keyframe's
   serialisation time at the current bitrate request its wire size is
-  discounted; beyond that a deep queue is real congestion. Field consequence
-  to verify on a throttled link: `frames_dropped_backlog` should now rise
-  within a frame or two of the queue building, and the ABR should cut on
-  `backlog` rather than waiting two seconds for the RTT gate (§8).
+  discounted; beyond that a deep queue is real congestion.
+
+  **Verified through a shaped link the same day, and it found a second
+  problem.** With the check live, a 4.5 Mbps link at 46 ms RTT produced a
+  burst of 21–28 dropped deltas exactly every 10 s, each followed by a
+  700–900 ms freeze while the sender waited for a keyframe. The 10 s period is
+  BBR's ProbeRTT (§5): quinn shrinks the window to 0.75 × its bandwidth-delay
+  estimate for 200 ms, the link runs at three quarters of the video rate, and
+  the queue crosses a two-frame threshold every time. The old check never saw
+  it because it never fired at all. The backlog must therefore be *sustained*
+  for `BACKLOG_SUSTAIN` = 300 ms before a delta is dropped
+  (`backlog_sustained`); re-measured, all four runs showed zero drops. A queue
+  that outlives the probe is congestion; one that does not is the controller
+  measuring the path, and the drop would cost a freeze to save 200 ms of queue
+  that drains by itself. See §11 for the numbers.
 
 ## 4. Packing and FEC
 
@@ -163,6 +174,14 @@ its mechanisms add latency that the engine cannot see:
    `BbrConfig::initial_window` and, more fundamentally, whether media
    datagrams should be cwnd-gated at all (they are not retransmitted, and
    Seyd already does its own admission control).
+   **ProbeRTT (measured).** Every 10 s, when not app-limited, quinn's BBR
+   enters ProbeRTT and holds the window at 0.75 × BDP for 200 ms
+   (`quinn-proto` `congestion/bbr/mod.rs`, `PROBE_RTT_BASED_ON_BDP`, not
+   configurable). At 46 ms RTT that throttles a 3.4 Mbps stream to about three
+   quarters of its rate for a fifth of a second: ~20–25 KB of queue and an RTT
+   spike from 58 to ~110 ms, once every 10 s, with nothing wrong on the link.
+   Harmless on its own; it became a freeze only through admission control (§3),
+   which now ignores a backlog shorter than 300 ms.
 2. **Pacer.** A token bucket refilling at 1.25 × cwnd per RTT
    (`quinn-proto connection/pacing.rs`) spreads a burst over most of an RTT.
    Protective on a modem, pure delay on a fast path.
@@ -326,13 +345,63 @@ and what has to be measured before comparing with Guident's 52 ms.
    ABR cuts on `backlog`.
 3. **Periodic intra refresh at the publisher, no periodic IDRs.** Removes the
    keyframe burst that drives §1, §4, §5 and the reason for §7's budget. The
-   protocol already has the rung; the sim and the camera don't use it.
-4. **Lower the presentation delay once (3) lands**, per profile, and re-run
-   ADR 0005's judder table.
+   protocol already has the rung. **Done in the sim 2026-09-08 and measured
+   (§11):** through a shaped 4.5 Mbps / 40 ms link, g2g p95 148 → 48 ms and
+   arrival gaps over two frames 41 → 8 per 40 s, the 8 being the sim's forced
+   IDRs. The camera still emits IDR GOPs; whether it can do intra refresh is
+   the next thing to find out.
+4. **Lower the presentation delay once (3) lands on the camera**, per
+   profile, and re-run ADR 0005's judder table. On the sim with intra refresh,
+   decode-on-arrival already paints with 4.5 ms mean judder and its only gaps
+   are the forced IDRs.
 5. **Investigate cwnd gating of datagrams** (§5) with the `cwnd` stat before
    touching quinn's configuration.
 6. **Raise `chunk_len` from PMTUD** (§4): fewer packets, fewer pacer tokens.
 7. **Sub-frame delivery** (roadmap item 4) and SIMD FEC (PLAN §1.7).
+
+## 11. Measured 2026-09-08: intra refresh against IDR GOPs
+
+Setup, reproducible with what is in the repo: `sim/video-source.sh` with
+`VIDEO_DEVICE=lavfi` (testsrc2, 1280×720 at 30 fps, balanced profile,
+3 Mbps cap) in both modes — `INTRA_REFRESH=1`, the new default, with a forced
+IDR every 5 s because FFmpeg cannot emit one on demand, and `INTRA_REFRESH=0`
+for the classic 1 s IDR GOP; `seydd` with `host_override = "127.0.0.1"`;
+`tools/link-shaper.py` at 4.5 Mbps, 200 KB queue, 20 ms one-way delay in
+front of it; `tools/latency-ab.py` recording 40 s per run in headless Chrome
+after a 6 s warm-up. Zero chunk loss in every run. "g2g" is the HUD's span
+(§0), not glass-to-glass; "gaps" counts intervals longer than two frames.
+
+| | IDR GOP | intra refresh | IDR GOP | intra refresh | IDR GOP | intra refresh |
+|---|---|---|---|---|---|---|
+| presentation delay | 0 | 0 | 50 ms | 50 ms | 100 ms | 100 ms |
+| keyframes in 40 s | 41 | 8 (forced) | 41 | 8 | 41 | 8 |
+| g2g p50 / p95 / p99 (ms) | 42 / 98 / 139 | 42 / 46 / 78 | 38 / 86 / 98 | 44 / 52 / 205¹ | 45 / 148 / 181 | 44 / 48 / 83 |
+| arrival gaps > 2 frames | 41 | 8 | 41 | 10 | 41 | 8 |
+| paint judder mean / p95 (ms) | 7.3 / 14.0 | 4.5 / 10.1 | 2.2 / 4.2 | 1.7 / 3.7 | 0.8 / 2.1 | 0.5 / 1.4 |
+| paint gaps > 2 frames | 41 | 8 | 2 | 3 | 2 | 0 |
+
+¹ One isolated 325 ms stall in that run, not periodic and with no backlog
+drop; the p95 is the representative figure.
+
+What the table says:
+
+- **The IDR burst is the tail.** With IDR GOPs every one of the 41 keyframes
+  arrives more than two frames after its predecessor, at any presentation
+  delay; g2g p95 is 2–3× the median. With intra refresh the tail collapses to
+  the forced IDRs, and between them p95 sits within 5 ms of the median.
+- **The presentation budget is what hides it.** At 0 ms the IDR stream paints
+  41 visible hitches in 40 s; at 100 ms, two. Intra refresh at 0 ms paints 8,
+  all at forced IDRs, which a publisher honouring on-demand IDR would not
+  emit. That is the case for lowering the budget once the publisher stops
+  sending periodic IDRs, exactly as §7 argued.
+- **On loopback none of this is visible.** The same A/B without the shaper
+  showed both modes at ~2 ms judder and sub-4 ms g2g p95: a 35 KB frame costs
+  nothing on an unconstrained link, which is why the shaper exists.
+- **Caveat on magnitude.** testsrc2 compresses badly, so its IDRs are only
+  3.3× a delta (34 KB against 11 KB); the demo camera's are 8×. The effect
+  on a real scene is larger than measured here.
+- **Found along the way:** the BBR ProbeRTT interaction (§3, §5), which only
+  the fixed admission check could expose and which the sustain guard removes.
 
 ## Command path (pilot → robot), for completeness
 

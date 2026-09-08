@@ -58,6 +58,17 @@ async def run(args):
         if state != 'connected':
             fail = await cdp.eval("JSON.stringify(document.getElementById('video').session?.lastFailure ?? null)")
             print('  failure:', fail)
+        # Wait for the first decoded frame before sampling. A publisher that
+        # emits IDRs only periodically (the sim with intra refresh forces one
+        # every IDR_INTERVAL_S, and cannot answer a recovery request) leaves a
+        # joining pilot black for up to that long; sampling on a fixed clock
+        # turned that wait into a spurious failure two runs in five.
+        first = None
+        for _ in range(int(args.timeout * 4)):
+            await cdp.pump(0.25)
+            first = await cdp.eval("document.getElementById('video').session?.lastStats?.framesDecoded ?? 0")
+            if first and first > 0: break
+        check(bool(first), f'first frame decoded within {args.timeout:.0f}s')
         await cdp.pump(3)
         s1 = await cdp.eval("JSON.stringify(document.getElementById('video').session?.lastStats ?? null)")
         await cdp.pump(2)

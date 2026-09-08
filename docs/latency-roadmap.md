@@ -110,6 +110,22 @@ the delta behind it would ask for another keyframe. Unit-tested; the field
 check — `frames_dropped_backlog` rising and the ABR cutting on `backlog` on a
 throttled link — is still to run.
 
+### 3c. Periodic intra refresh in the sim, measured; ProbeRTT guard
+
+`sim/video-source.sh` now encodes with x264 periodic intra refresh by default
+(`INTRA_REFRESH=0` for the old IDR GOP), forcing an IDR every `IDR_INTERVAL_S`
+= 5 s because FFmpeg cannot answer a recovery request. Measured through
+`tools/link-shaper.py` at 4.5 Mbps / 40 ms RTT with `tools/latency-ab.py`:
+g2g p95 148 → 48 ms, arrival gaps over two frames 41 → 8 per 40 s (the 8 are
+the forced IDRs), paint gaps at decode-on-arrival 41 → 8. Full table and
+caveats in `docs/latency-sources.md` §11. The camera still emits IDR GOPs.
+
+The shaped runs also exposed BBR's ProbeRTT: quinn shrinks the window to
+0.75 × BDP for 200 ms every 10 s, and the now-working admission check (3b)
+read the resulting two-frame queue as backlog — 21–28 deltas dropped and a
+700–900 ms freeze every 10 s. Admission now requires the backlog to persist
+for 300 ms (`BACKLOG_SUSTAIN`); re-measured with zero drops.
+
 ---
 
 ## Next

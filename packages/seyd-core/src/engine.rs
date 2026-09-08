@@ -121,6 +121,9 @@ struct SessionState {
     /// wire, so admission control can tell that keyframe draining from a
     /// congested link (`keyframe_allowance`).
     last_keyframe: Mutex<Option<(Instant, usize)>>,
+    /// Since when this session's backlog has been continuously over the
+    /// threshold; `None` while it is under. See `backlog_sustained`.
+    backlog_since: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -260,6 +263,37 @@ fn keyframe_flushes_queue(queued: usize, skip_until_key: bool) -> bool {
 /// stack and silenced the ABR's primary congestion signal, which is this drop.
 fn backlog_exceeds(queued: usize, threshold: usize, keyframe_allowance: usize) -> bool {
     queued.saturating_sub(keyframe_allowance) > threshold
+}
+
+/// How long the backlog must stay over the threshold before a delta is
+/// dropped for it.
+///
+/// This exists because of BBR's ProbeRTT. Every 10 s quinn's controller
+/// shrinks the congestion window to 0.75 × its bandwidth-delay estimate for
+/// 200 ms (`quinn-proto` `congestion/bbr`, `PROBE_RTT_BASED_ON_BDP`), so the
+/// link is throttled to three quarters of the video rate for a fifth of a
+/// second and the queue crosses a two-frame threshold every time — on a
+/// loopback RTT it does not matter, at 46 ms RTT it did (measured 2026-09-08
+/// through a 4.5 Mbps shaped link: 21–28 delta frames dropped once every 10 s,
+/// each followed by a 700–900 ms freeze while the sender waited for a
+/// keyframe). A backlog that persists longer than the probe is congestion; one
+/// that does not is the controller measuring the path, and dropping for it
+/// costs the operator a freeze to save 200 ms of queue that drains by itself.
+///
+/// Not a QoS-profile knob: it tracks the congestion controller's behaviour,
+/// not a latency/quality preference, and is the same for every profile.
+const BACKLOG_SUSTAIN: Duration = Duration::from_millis(300);
+
+/// Whether a backlog reading should drop the frame: `over` must have held
+/// continuously for `sustain`. `since` is the session's record of when the
+/// backlog was first seen over the threshold, cleared whenever it is under.
+fn backlog_sustained(over: bool, since: &mut Option<Instant>, now: Instant, sustain: Duration) -> bool {
+    if !over {
+        *since = None;
+        return false;
+    }
+    let start = *since.get_or_insert(now);
+    now.duration_since(start) >= sustain
 }
 
 /// How much of the queue a recently sent keyframe accounts for.
@@ -722,7 +756,14 @@ impl Engine {
                         .map(|(at, bytes)| (at.elapsed(), bytes)),
                     bitrate_kbps,
                 );
-                if wire_bytes > space || backlog_exceeds(queued, threshold, allowance) {
+                let over = backlog_exceeds(queued, threshold, allowance);
+                let sustained = backlog_sustained(
+                    over,
+                    &mut s.backlog_since.lock().unwrap(),
+                    Instant::now(),
+                    BACKLOG_SUSTAIN,
+                );
+                if wire_bytes > space || sustained {
                     self.inner
                         .counters
                         .frames_dropped_backlog
@@ -854,6 +895,7 @@ impl Engine {
             skip_deadline_ms: std::sync::atomic::AtomicU64::new(0),
             pilot: Mutex::new(PilotSample::default()),
             last_keyframe: Mutex::new(None),
+            backlog_since: Mutex::new(None),
         });
         self.inner
             .sessions
@@ -1373,6 +1415,25 @@ mod tests {
         // One byte over the budget drops, whatever the buffer's total size —
         // the old free-space check needed ~725 KB queued to reach this point.
         assert!(backlog_exceeds(threshold + 1, threshold, 0));
+    }
+
+    #[test]
+    fn a_backlog_shorter_than_a_probe_rtt_does_not_drop() {
+        // BBR's ProbeRTT throttles the link for 200 ms every 10 s; the queue
+        // it builds must not cost a frame, because a dropped delta costs a
+        // freeze until the next keyframe.
+        let t0 = Instant::now();
+        let mut since = None;
+        assert!(!backlog_sustained(true, &mut since, t0, BACKLOG_SUSTAIN));
+        assert!(!backlog_sustained(true, &mut since, t0 + Duration::from_millis(200), BACKLOG_SUSTAIN));
+        // Back under: the clock resets.
+        assert!(!backlog_sustained(false, &mut since, t0 + Duration::from_millis(250), BACKLOG_SUSTAIN));
+        assert!(since.is_none());
+        // Over again and staying over: drops once the sustain has elapsed.
+        let t1 = t0 + Duration::from_secs(1);
+        assert!(!backlog_sustained(true, &mut since, t1, BACKLOG_SUSTAIN));
+        assert!(backlog_sustained(true, &mut since, t1 + BACKLOG_SUSTAIN, BACKLOG_SUSTAIN));
+        assert!(backlog_sustained(true, &mut since, t1 + Duration::from_secs(2), BACKLOG_SUSTAIN));
     }
 
     #[test]

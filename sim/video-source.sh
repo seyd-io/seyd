@@ -19,11 +19,11 @@ PROFILE=${DARC_QOS_PROFILE:-balanced}
 # one budget.
 case "$PROFILE" in
   latency)
-    W=960;  H=540; FPS=30; KBPS=1500; GOP=30; PRESET=ultrafast; VBV_MS=100 ;;
+    W=960;  H=540; FPS=30; KBPS=1500; GOP=30; PRESET=ultrafast; VBV_MS=100; IDR_S=10 ;;
   balanced)
-    W=1280; H=720; FPS=30; KBPS=3000; GOP=30; PRESET=veryfast;  VBV_MS=100 ;;
+    W=1280; H=720; FPS=30; KBPS=3000; GOP=30; PRESET=veryfast;  VBV_MS=100; IDR_S=10 ;;
   quality)
-    W=1280; H=720; FPS=30; KBPS=6000; GOP=60; PRESET=veryfast;  VBV_MS=200 ;;
+    W=1280; H=720; FPS=30; KBPS=6000; GOP=60; PRESET=veryfast;  VBV_MS=200; IDR_S=4 ;;
   *)
     echo "Unknown DARC_QOS_PROFILE '${PROFILE}' — use latency, balanced, or quality." >&2
     exit 1 ;;
@@ -40,11 +40,43 @@ esac
 #   • ~100ms (3 frames) fits one IDR without allowing a deep queue.
 BUFK=$(( KBPS * VBV_MS / 1000 ))
 
+# Periodic intra refresh instead of periodic IDRs (INTRA_REFRESH=0 restores
+# the classic GOP for A/B). An IDR is several times a delta frame and is
+# produced in one frame slot, so once per GOP the encoder hands the link a
+# burst: measured on the demo camera as keyframes landing 46–122 ms late, the
+# once-a-second hitch that the pilot's presentation delay exists to hide
+# (ADR 0005), and the p95 tail in every field run (docs/latency-sources.md).
+# With intra refresh x264 refreshes a column of macroblocks per frame instead,
+# sweeping the picture once per GOP, so every frame is about the same size and
+# the reference chain is still repaired within `maxGopMs`.
+#
+# A decoder still needs one real IDR to start, and FFmpeg has no way to emit
+# one on demand when seydd's recovery-request arrives — a real publisher would
+# (the demo camera does over ISAPI). So the sim forces an IDR every
+# IDR_INTERVAL_S instead — the profile's `maxGopMs` (ADR 0009), which is also
+# the longest a joining pilot waits for its first picture here. x264 honours
+# the forced keyframe in intra-refresh mode (verified 2026-09-08 with ffprobe:
+# IDRs exactly at the forced instants, none between). GOP above stays the
+# refresh sweep period, so a loss is fully repaired within a second.
+INTRA_REFRESH=${INTRA_REFRESH:-1}
+IDR_INTERVAL_S=${IDR_INTERVAL_S:-$IDR_S}
+X264_PARAMS="scenecut=0"
+KEYFRAME_ARGS=()
+if [[ "$INTRA_REFRESH" == "1" ]]; then
+  X264_PARAMS="scenecut=0:intra-refresh=1"
+  KEYFRAME_ARGS=(-force_key_frames "expr:gte(t,n_forced*${IDR_INTERVAL_S})")
+fi
+
 echo "DARC video publisher"
 echo "  profile   ${PROFILE}"
 echo "  video     ${W}x${H} @ ${FPS}fps"
 echo "  bitrate   ${KBPS} kbps capped (VBV ${BUFK}k = ${VBV_MS}ms)"
 echo "  GOP       ${GOP} frames ($(( GOP * 1000 / FPS ))ms)"
+if [[ "$INTRA_REFRESH" == "1" ]]; then
+  echo "  refresh   periodic intra refresh (one sweep per GOP), forced IDR every ${IDR_INTERVAL_S}s (INTRA_REFRESH=0 for IDR GOPs)"
+else
+  echo "  refresh   IDR every GOP (INTRA_REFRESH=1 for periodic intra refresh)"
+fi
 echo "  preset    ${PRESET}"
 echo ""
 
@@ -131,7 +163,8 @@ exec ffmpeg \
   -profile:v baseline \
   -b:v "${KBPS}k" -maxrate "${KBPS}k" -bufsize "${BUFK}k" \
   -g "${GOP}" -keyint_min "${GOP}" -bf 0 \
-  -x264-params "scenecut=0" \
+  -x264-params "${X264_PARAMS}" \
+  "${KEYFRAME_ARGS[@]}" \
   -an \
   -flush_packets 1 \
   -max_delay 0 \

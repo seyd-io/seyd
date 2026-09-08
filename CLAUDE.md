@@ -110,7 +110,7 @@ seyd/
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
 ├── sim/                       # robot simulation — NOT part of Seyd
-│   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
+│   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings; intra refresh by default)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
 ├── demo-seyd.sh               # start the camera demo robot
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
