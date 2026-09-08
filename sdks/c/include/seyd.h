@@ -156,9 +156,12 @@ typedef struct seyd_callbacks {
     void (*on_session_ended)(void *user, const char *session_id, const char *reason);
     void (*on_command)(void *user, uint8_t channel, const uint8_t *data, size_t len);
     /**
-     * Seyd's transport-observable targets for the publisher, as JSON
-     * (`max_bitrate_kbps`, `latency_budget_ms`, `max_gop_ms`, `suggested_fps`,
-     * `reason`). The only place Seyd talks down to the encoder.
+     * Seyd's transport-observable targets for the publisher, as the
+     * `video-config` JSON of docs/protocol/seydd.md (`maxBitrateKbps`,
+     * `latencyBudgetMs`, `maxGopMs`, `preferIntraRefresh`, `suggestedFps`,
+     * `reason`). The only place Seyd talks down to the encoder. Keyframes are
+     * on demand (ADR 0009): honour `on_recovery_request`, and treat `maxGopMs`
+     * as a long ceiling rather than a cadence.
      */
     void (*on_requested_config)(void *user, const char *json);
     /**

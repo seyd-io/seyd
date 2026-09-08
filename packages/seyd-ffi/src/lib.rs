@@ -166,9 +166,12 @@ pub struct seyd_callbacks {
     >,
     pub on_command:
         Option<unsafe extern "C" fn(user: *mut c_void, channel: u8, data: *const u8, len: usize)>,
-    /// Seyd's transport-observable targets for the publisher, as JSON
-    /// (`max_bitrate_kbps`, `latency_budget_ms`, `max_gop_ms`, `suggested_fps`,
-    /// `reason`). The only place Seyd talks down to the encoder.
+    /// Seyd's transport-observable targets for the publisher, as the
+    /// `video-config` JSON of docs/protocol/seydd.md (`maxBitrateKbps`,
+    /// `latencyBudgetMs`, `maxGopMs`, `preferIntraRefresh`, `suggestedFps`,
+    /// `reason`). The only place Seyd talks down to the encoder. Keyframes are
+    /// on demand (ADR 0009): honour `on_recovery_request`, and treat `maxGopMs`
+    /// as a long ceiling rather than a cadence.
     pub on_requested_config: Option<unsafe extern "C" fn(user: *mut c_void, json: *const c_char)>,
     /// A pilot needs a recovery point: `kind` is `ltr`, `intra_refresh` or `idr`.
     pub on_recovery_request: Option<

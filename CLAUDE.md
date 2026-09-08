@@ -22,7 +22,8 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   0002 (quinn), 0003 (MoQ), 0004 (C ABI), 0005 (presentation pacing),
   0006 (loss measured on one clock), 0007 (identity: pluggable authn, our
   authz), 0008 (simulcast: adapt by selecting a stream, not reconfiguring
-  one). Add one for every decision of that weight; never change a wire
+  one), 0009 (keyframes on demand: intra refresh or a long GOP, never a
+  one-second IDR cadence). Add one for every decision of that weight; never change a wire
   format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product
@@ -35,6 +36,11 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
 - **docs/latency-roadmap.md** — ordered work on end-to-end latency, with the
   measured bar from the competitor survey. Read before touching the recovery,
   pacing or FEC paths.
+- **docs/latency-sources.md** — every stage where a byte waits between sensor
+  and screen, with what is measured and what is not. Read before claiming a
+  latency number; the HUD's "g2g" is not glass-to-glass.
+- **docs/encoder-setup.md** — how a publisher (x264, GStreamer, NVENC, Jetson,
+  Hikvision, Axis, ONVIF) must be configured for Seyd, and how to verify it.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
@@ -126,8 +132,10 @@ a crate.
 Encoder settings (resolution, preset, VBV, GOP) belong to the robot's video
 publisher — `sim/video-source.sh` in the simulation, the camera in the demo.
 Seyd states only transport-observable *targets* (bitrate ceiling, latency
-budget, max GOP) via `on_requested_config`, plus its own transport and pilot
-policy (FEC rate, drop threshold, close-out deadlines, presentation delay). If
+budget, max GOP, intra-refresh preference) via `on_requested_config`, plus its
+own transport and pilot policy (FEC rate, drop threshold, close-out deadlines,
+presentation delay). Keyframes are on demand (ADR 0009): `maxGopMs` is a long
+safety net, and the publisher must answer `recovery-request`. If
 you find yourself putting a resolution in `seyd-qos`, or an FEC percentage in
 `sim/`, the boundary has leaked.
 

@@ -343,17 +343,15 @@ and what has to be measured before comparing with Guident's 52 ms.
    on queued bytes with a keyframe allowance, and the buffer is 256 KB. Still to
    do: confirm on a throttled link that `frames_dropped_backlog` moves and the
    ABR cuts on `backlog`.
-3. **Periodic intra refresh at the publisher, no periodic IDRs.** Removes the
-   keyframe burst that drives §1, §4, §5 and the reason for §7's budget. The
-   protocol already has the rung. **Done in the sim 2026-09-08 and measured
-   (§11):** through a shaped 4.5 Mbps / 40 ms link, g2g p95 148 → 48 ms and
-   arrival gaps over two frames 41 → 8 per 40 s, the 8 being the sim's forced
-   IDRs. The camera still emits IDR GOPs; whether it can do intra refresh is
-   the next thing to find out.
-4. **Lower the presentation delay once (3) lands on the camera**, per
-   profile, and re-run ADR 0005's judder table. On the sim with intra refresh,
-   decode-on-arrival already paints with 4.5 ms mean judder and its only gaps
-   are the forced IDRs.
+3. **Keyframes on demand (ADR 0009) — done 2026-09-08.** Intra refresh in
+   the sim (§11) and a 10 s GOP with on-demand IDRs on the camera (§12), both
+   measured; the profiles now ask for `maxGopMs` 10 s / 10 s / 4 s with
+   `preferIntraRefresh`, and `docs/encoder-setup.md` says how other encoders
+   and cameras meet it.
+4. **Lower the presentation delay**, per profile, and re-run ADR 0005's
+   judder table. With the burst gone, decode-on-arrival paints with 4.5 ms mean
+   judder on the sim and 0.9 ms on the camera; the 100 ms budget was sized for
+   a hitch that no longer occurs.
 5. **Investigate cwnd gating of datagrams** (§5) with the `cwnd` stat before
    touching quinn's configuration.
 6. **Raise `chunk_len` from PMTUD** (§4): fewer packets, fewer pacer tokens.
@@ -402,6 +400,36 @@ What the table says:
   on a real scene is larger than measured here.
 - **Found along the way:** the BBR ProbeRTT interaction (§3, §5), which only
   the fixed admission check could expose and which the sustain guard removes.
+
+## 12. Measured 2026-09-08: the demo camera at GOP 25 and GOP 250
+
+The Hikvision DS-2DE2A404IWG1-E (V5.9.5), H.264 Baseline 1280×720 at 25 fps,
+VBR cap 1500 kbps, static scene, read over RTSP/TCP by `seydd` on the same
+machine as the pilot — no network between agent and pilot, so what follows is
+the camera's own behaviour. `tools/keyframe-probe.py` for cadence and
+request latency; `tools/latency-ab.py --pd 0` for the pilot view; ISAPI
+`GovLength`/`keyFrameInterval` for the change. The camera exposes no intra
+refresh for either codec.
+
+| | GovLength 25 | GovLength 250 |
+|---|---|---|
+| periodic keyframe interval | 1.000 s | 10.001 s |
+| `requestKeyFrame` → IDR | 96, 120 ms | 138, 155 ms |
+| of which the HTTP call | 32, 37 ms | 38, 41 ms |
+| keyframe / delta size | 26.3 / 1.13 KB (23×) | 26.1 / 0.93 KB |
+| stream bitrate | 696 kbps | 394 kbps |
+| keyframe arrival lag over the deltas' | +22 ms (p95 26) | — |
+| frame intervals of 60 then ~18 ms per 40 s | 85 + 83 | 0 |
+| arrival judder mean / p95 | 3.7 / 20.0 ms | 0.9 / 2.1 ms |
+| arrival gaps > 2 frames | 0 | 0 |
+
+What it shows: the camera's periodic keyframe is late by about half a frame
+every time, so the pilot sees a 60 ms hold followed by an 18 ms step once per
+GOP — ADR 0005's hitch, measured at the source — and that keyframe costs 43 %
+of the bitrate on a static scene. The on-demand IDR is unaffected by the GOP
+length and arrives in about six frames. Without a bridge to answer requests,
+the pilot's first picture waited up to 10 s (32 `request-keyframe` messages in
+one join), which is why ADR 0009 makes the request path load-bearing.
 
 ## Command path (pilot → robot), for completeness
 

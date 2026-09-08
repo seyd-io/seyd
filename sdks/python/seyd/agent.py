@@ -136,9 +136,12 @@ class Agent:
         self.on_session_ended: Callable[[str, str], None] | None = None
         #: Called as ``(channel_id, payload)`` for each driver command.
         self.on_command: Callable[[int, bytes], None] | None = None
-        #: Called as ``(config)`` with Seyd's targets for the publisher —
-        #: ``max_bitrate_kbps``, ``latency_budget_ms``, ``max_gop_ms``,
-        #: ``suggested_fps``, ``reason``. The one place Seyd talks to the encoder.
+        #: Called as ``(config)`` with Seyd's targets for the publisher — the
+        #: ``video-config`` document of docs/protocol/seydd.md: ``maxBitrateKbps``,
+        #: ``latencyBudgetMs``, ``maxGopMs``, ``preferIntraRefresh``,
+        #: ``suggestedFps``, ``reason``. The one place Seyd talks to the encoder.
+        #: Keyframes are on demand (ADR 0009): answer ``on_recovery_request`` and
+        #: treat ``maxGopMs`` as a long ceiling, not a cadence.
         self.on_requested_config: Callable[[Mapping], None] | None = None
         #: Called as ``(channel_id, kind, reason)`` where kind is ``ltr``,
         #: ``intra_refresh`` or ``idr``.

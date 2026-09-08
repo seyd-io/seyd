@@ -39,9 +39,9 @@ log = logging.getLogger("ffmpeg-robot")
 
 #: Mirrors sim/video-source.sh so the two sources are comparable.
 PROFILES = {
-    "latency": dict(w=960, h=540, fps=30, kbps=1500, gop=30, preset="ultrafast", vbv_ms=100),
-    "balanced": dict(w=1280, h=720, fps=30, kbps=3000, gop=30, preset="veryfast", vbv_ms=100),
-    "quality": dict(w=1280, h=720, fps=30, kbps=6000, gop=60, preset="veryfast", vbv_ms=200),
+    "latency": dict(w=960, h=540, fps=30, kbps=1500, gop=30, preset="ultrafast", vbv_ms=100, idr_s=10),
+    "balanced": dict(w=1280, h=720, fps=30, kbps=3000, gop=30, preset="veryfast", vbv_ms=100, idr_s=10),
+    "quality": dict(w=1280, h=720, fps=30, kbps=6000, gop=60, preset="veryfast", vbv_ms=200, idr_s=4),
 }
 
 
@@ -70,8 +70,13 @@ def ffmpeg_command(profile: dict, device: str) -> list[str]:
         "-b:v", f"{profile['kbps']}k",
         "-maxrate", f"{profile['kbps']}k",
         "-bufsize", f"{bufk}k",
+        # Periodic intra refresh instead of periodic IDRs (ADR 0009): `gop` is
+        # the refresh sweep period, and an IDR is forced only every `idr_s`, the
+        # profile's maxGopMs — x264 in a pipe cannot answer a recovery-request,
+        # so this bounds a joining pilot's wait for its first picture.
         "-g", str(profile["gop"]), "-keyint_min", str(profile["gop"]), "-bf", "0",
-        "-x264-params", "scenecut=0",
+        "-x264-params", "scenecut=0:intra-refresh=1",
+        "-force_key_frames", f"expr:gte(t,n_forced*{profile['idr_s']})",
         "-an", "-flush_packets", "1", "-max_delay", "0",
         "-bsf:v", "h264_metadata=aud=insert",
         "-f", "h264", "pipe:1",

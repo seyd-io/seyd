@@ -206,6 +206,61 @@ class CameraControl:
     async def get_bitrate_cap(self, stream_channel: int = 101) -> int | None:
         return await self._read_channel_field('vbrUpperCap', stream_channel)
 
+    async def set_gop(self, frames: int, stream_channel: int = 101) -> bool:
+        """
+        Set the stream's GOP length in frames (`video-config.maxGopMs` from
+        seydd's QoS profile, converted at the stream's frame rate).
+
+        ISAPI carries the same setting twice — `GovLength` in frames and
+        `keyFrameInterval` in milliseconds — and this firmware keeps whichever
+        was written last, so both are patched together. The value is clamped to
+        what the channel's `capabilities` document allows (1–400 on the demo
+        camera). Takes effect on the running stream without a reconnect;
+        measured 2026-09-08: a requested IDR still arrives ~140 ms after the
+        request at GovLength 250, and the periodic cadence is exactly 10.0 s.
+
+        Why this exists: at GovLength 25 every keyframe reached the pilot ~22 ms
+        after its slot (60 ms then 18 ms between frames, once a second), and the
+        periodic IDRs were 43 % of the stream's bitrate on a static scene. Seyd
+        asks for IDRs when it needs them (`recovery-request`, answered by
+        `request_keyframe`), so the periodic one is only a safety net (ADR 0009).
+        """
+        lo, hi = await self.get_gop_range(stream_channel)
+        frames = max(lo, min(hi, int(frames)))
+        fps = await self.get_max_frame_rate(stream_channel) or 25
+        ms = frames * 1000 // max(1, fps)
+        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}'
+        loop = asyncio.get_event_loop()
+        async with self._doc_lock:
+            xml = await loop.run_in_executor(self._pool, self._blocking_url, url, None, 4.0)
+            if not xml:
+                return False
+            text = xml.decode('utf-8', 'replace')
+            if '<GovLength>' not in text:
+                log.warning('set_gop: no <GovLength> in channel %s XML', stream_channel)
+                return False
+            patched = re.sub(r'<GovLength>\d+</GovLength>', f'<GovLength>{frames}</GovLength>', text, count=1)
+            patched = re.sub(r'<keyFrameInterval>\d+</keyFrameInterval>',
+                             f'<keyFrameInterval>{ms}</keyFrameInterval>', patched, count=1)
+            ok = bool(await loop.run_in_executor(self._pool, self._blocking_url, url, patched, 4.0))
+        if ok:
+            log.info('GOP → %d frames (%d ms at %d fps, channel %d)', frames, ms, fps, stream_channel)
+        return ok
+
+    async def get_gop(self, stream_channel: int = 101) -> int | None:
+        return await self._read_channel_field('GovLength', stream_channel)
+
+    async def get_gop_range(self, stream_channel: int = 101) -> tuple[int, int]:
+        """(min, max) GovLength the channel accepts, from its capabilities document."""
+        url = f'http://{self.host}/ISAPI/Streaming/channels/{stream_channel}/capabilities'
+        xml = await asyncio.get_event_loop().run_in_executor(
+            self._pool, self._blocking_url, url, None, 4.0)
+        if xml:
+            m = re.search(r'<GovLength min="(\d+)" max="(\d+)"', xml.decode('utf-8', 'replace'))
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        return 1, 400
+
     async def set_max_frame_rate(self, fps: int, stream_channel: int = 101) -> bool:
         """
         Set the stream's frame-rate cap (`video-config.suggestedFps` from seydd's

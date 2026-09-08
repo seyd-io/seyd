@@ -33,7 +33,24 @@ pub struct Profile {
     // ── targets the publisher must honour ───────────────────────────────
     pub max_bitrate_kbps: u32,
     pub latency_budget_ms: u32,
+    /// The longest the publisher may go without a full recovery point — an
+    /// IDR, or a completed intra-refresh sweep. A *ceiling*, and a safety net:
+    /// Seyd asks for recovery points when it needs them (`recovery-request`),
+    /// so the periodic one only has to catch a publisher that ignores it
+    /// (ADR 0009). It is long on purpose: a periodic IDR is several times a
+    /// delta frame, and measured on the demo camera it arrived ~22 ms late and
+    /// made every GOP's first two intervals 60 ms then 18 ms; at 10 s GOPs
+    /// arrival judder fell from 3.7 to 0.9 ms mean and the stream lost 43 % of
+    /// its bitrate, the IDRs' share. A joining pilot never waits for it: the
+    /// agent asks for an IDR on `hello`.
     pub max_gop_ms: u32,
+    /// Ask the publisher to refresh the picture gradually — a strip of
+    /// intra-coded blocks per frame sweeping the picture within `max_gop_ms` —
+    /// rather than with periodic IDRs, where its encoder can (x264, NVENC,
+    /// Jetson; not the ONVIF cameras surveyed). Removes the keyframe burst
+    /// entirely; measured on the sim through a shaped link as g2g p95
+    /// 148 → 48 ms (docs/latency-sources.md §11).
+    pub prefer_intra_refresh: bool,
     // ── Seyd's own transport policy ──────────────────────────────────────
     pub fec_delta_pct: u32,
     pub fec_key_pct: u32,
@@ -65,7 +82,8 @@ pub const LATENCY: Profile = Profile {
     name: "latency",
     max_bitrate_kbps: 1500,
     latency_budget_ms: 100,
-    max_gop_ms: 1000,
+    max_gop_ms: 10_000,
+    prefer_intra_refresh: true,
     fec_delta_pct: 25,
     fec_key_pct: 50,
     backlog_drop_frames: 1,
@@ -82,7 +100,8 @@ pub const BALANCED: Profile = Profile {
     name: "balanced",
     max_bitrate_kbps: 3000,
     latency_budget_ms: 100,
-    max_gop_ms: 1000,
+    max_gop_ms: 10_000,
+    prefer_intra_refresh: true,
     fec_delta_pct: 15,
     fec_key_pct: 30,
     backlog_drop_frames: 2,
@@ -99,7 +118,10 @@ pub const QUALITY: Profile = Profile {
     name: "quality",
     max_bitrate_kbps: 6000,
     latency_budget_ms: 200,
-    max_gop_ms: 2000,
+    // Shorter than the other profiles: this one freezes on loss until an IDR,
+    // so the safety net has to be closer for a publisher that ignores requests.
+    max_gop_ms: 4000,
+    prefer_intra_refresh: true,
     fec_delta_pct: 8,
     fec_key_pct: 15,
     backlog_drop_frames: 3,
@@ -141,6 +163,7 @@ impl Profile {
             "maxBitrateKbps": self.max_bitrate_kbps,
             "latencyBudgetMs": self.latency_budget_ms,
             "maxGopMs": self.max_gop_ms,
+            "preferIntraRefresh": self.prefer_intra_refresh,
             "suggestedFps": 0,
             "reason": reason,
         })
@@ -174,6 +197,23 @@ mod tests {
         // balanced, 30 fps: 2 frames × 12 500 B
         assert_eq!(BALANCED.drop_threshold_bytes(30), 25_000);
         assert_eq!(LATENCY.drop_threshold_bytes(25), 7_500);
+    }
+
+    #[test]
+    fn keyframes_are_on_demand_with_a_long_safety_net() {
+        // ADR 0009: the periodic keyframe is a safety net for a publisher that
+        // ignores recovery requests, not the recovery mechanism, so it is long
+        // — and intra refresh is asked for wherever the encoder has it.
+        for p in PROFILES {
+            assert!(p.max_gop_ms >= 4000, "{}: {} ms", p.name, p.max_gop_ms);
+            assert!(p.prefer_intra_refresh);
+        }
+        // The profile that freezes on loss until an IDR keeps its net closer.
+        let (q, b) = (get("quality").unwrap(), get("balanced").unwrap());
+        assert!(q.max_gop_ms < b.max_gop_ms, "{} vs {}", q.max_gop_ms, b.max_gop_ms);
+        let v = BALANCED.publisher_config(1, "profile");
+        assert_eq!(v["maxGopMs"], 10_000);
+        assert_eq!(v["preferIntraRefresh"], true);
     }
 
     #[test]

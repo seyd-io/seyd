@@ -130,6 +130,20 @@ for 300 ms (`BACKLOG_SUSTAIN`); re-measured with zero drops.
 
 ## Next
 
+### 3d. Keyframes on demand — ADR 0009, done
+
+The Hikvision exposes no intra refresh in either codec (capability document
+read), so the demo takes the other route: `GovLength` 250 with IDRs on demand.
+Measured (`tools/keyframe-probe.py`, `docs/latency-sources.md` §12): periodic
+cadence exactly 10.0 s, `requestKeyFrame` → IDR in 96–155 ms at either GOP,
+pilot arrival judder 3.7 → 0.9 ms mean and 20 → 2 ms p95, bitrate 696 → 394
+kbps. The QoS profiles now ask every publisher for this — `maxGopMs`
+10 s / 10 s / 4 s and `preferIntraRefresh` — the bridge applies `maxGopMs` to
+the camera, the sim and the Python example use intra refresh with a forced IDR
+at `maxGopMs`, and `docs/encoder-setup.md` covers x264, GStreamer, NVENC,
+Jetson, Pi, Hikvision, Axis and generic ONVIF. Still to do: re-run ADR 0005's
+judder table with a smaller `pilot_presentation_delay_ms`.
+
 ### 4. Sub-frame delivery — medium
 
 `pack_video` takes a complete access unit and the RTP depacketizer accumulates
@@ -143,7 +157,7 @@ block that is not yet complete, so smaller blocks trade protection efficiency
 for latency. This does **not** conflict with "whole frame or nothing", which is
 a drop policy, not a send policy.
 
-### 5. Encoder preflight and warnings — small
+### 5. Encoder preflight and warnings — small (the document half is done)
 
 Detect and report bad encoder configuration at ingest: B-frames (visible as
 timestamp reordering), GOP length, keyframe size against bitrate. The
@@ -154,7 +168,9 @@ Axis' own documentation warns that dynamic GOP "might need clients to adapt".
 
 Pairs with a one-page "configure your encoder like this" document, which is
 plausibly the cheapest latency improvement available to us — most of the
-encoder-side wins are the customer's to make, and we can only ask.
+encoder-side wins are the customer's to make, and we can only ask. **That page
+is `docs/encoder-setup.md` (2026-09-08)**; the ingest-side detection is still
+to build.
 
 ### 6. Continuous glass-to-glass measurement — medium
 

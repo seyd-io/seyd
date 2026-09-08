@@ -149,11 +149,11 @@ object per datagram, fire-and-forget:
 
 ```json
 {"type": "video-config", "channel": 1, "profile": "balanced",
- "maxBitrateKbps": 3000, "latencyBudgetMs": 100, "maxGopMs": 1000,
- "suggestedFps": 0, "reason": "profile"}
+ "maxBitrateKbps": 3000, "latencyBudgetMs": 100, "maxGopMs": 10000,
+ "preferIntraRefresh": true, "suggestedFps": 0, "reason": "profile"}
 {"type": "video-config", "channel": 1, "profile": "balanced",
- "maxBitrateKbps": 2250, "latencyBudgetMs": 100, "maxGopMs": 1000,
- "suggestedFps": 0, "reason": "abr-down"}
+ "maxBitrateKbps": 2250, "latencyBudgetMs": 100, "maxGopMs": 10000,
+ "preferIntraRefresh": true, "suggestedFps": 0, "reason": "abr-down"}
 {"type": "recovery-request", "channel": 1, "kind": "idr", "reason": "pilot-loss"}
 {"type": "layer", "channel": 1, "layer": 0, "name": "low", "reason": "down"}
 {"type": "session", "state": "started"|"ended", "session_id": "…", "role": "driver"|"observer", "sessions": 1}
@@ -168,6 +168,22 @@ only when the request is at the floor and the link is still congested. Seyd's
 own FEC rates move with it and are visible in `agent-stats` as
 `abr_bitrate_kbps`, `abr_ceiling_kbps`, `abr_fec_delta`, `abr_fec_key`,
 `abr_reason` (`steady|loss|latency|backlog|residual|recover|fec-down`).
+
+**Keyframes are on demand (ADR 0009).** `maxGopMs` is the longest the
+publisher may go without a full recovery point — an IDR, or a completed
+intra-refresh sweep — and it is a safety net, not the recovery mechanism:
+10 s on `latency` and `balanced`, 4 s on `quality`. Seyd asks for recovery
+points when a pilot needs them (`recovery-request`, below), so a publisher
+should not emit an IDR every second on a timer. `preferIntraRefresh: true`
+asks the publisher to refresh the picture gradually where its encoder can
+(x264 `intra-refresh`, NVENC, Jetson) with any sweep period up to `maxGopMs`;
+one that cannot uses the longest GOP up to `maxGopMs` and answers
+`recovery-request` with an IDR (the demo camera: `GovLength` 250 at 25 fps,
+`requestKeyFrame` answered in ~150 ms). The publisher-control channel is
+therefore load-bearing for a pilot's *first* picture as well as for
+adaptation — with nobody answering, a join waits up to `maxGopMs`.
+`docs/encoder-setup.md` has the per-encoder recipes and how to verify them
+with `tools/keyframe-probe.py`.
 
 `layer` is sent when the relayed simulcast layer changes (ADR 0008), on a
 channel that declared `[[channel.layer]]` entries. Seyd switches on that layer's

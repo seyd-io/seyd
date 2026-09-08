@@ -148,11 +148,24 @@ Applied to channel 101 via `PUT /ISAPI/Streaming/channels/101`:
 | resolution | 1280×720 | the `balanced` QoS profile's target |
 | frame rate | 25 fps | sensor is PAL; 2500 is the cap it offers |
 | rate control | VBR, 3000 kbps cap | `balanced` bitrate ceiling |
-| GOP | 25 | = 1000 ms, matching `balanced`'s `maxGopMs` |
+| GOP | **from the profile**: 250 (10 s) on `balanced`/`latency`, 100 on `quality` | ADR 0009: keyframes on demand via `requestKeyFrame`; `bridge.py` writes `GovLength` from every `video-config`. Was 25 until 2026-09-08 |
 
 Measured off the wire afterwards: `profile=Baseline level=31 1280x720
 has_b_frames=0`, 25 fps, keyframes at exactly 1.000 s intervals, ~500 kbps on a
 static scene against the 3000 kbps ceiling.
+
+**GOP, re-measured 2026-09-08 (`tools/keyframe-probe.py`).** At GovLength 25
+every keyframe reached the agent ~22 ms after its slot, so once a second the
+frame interval read 60 ms then 18 ms — the hitch ADR 0005's presentation delay
+hides — and the IDRs were 43 % of the bitrate on the static scene (696 kbps
+against 394 without them). At GovLength 250 the periodic cadence is exactly
+10.0 s, `requestKeyFrame` still produces an IDR 96–155 ms after the request
+(35–40 ms of that is the HTTP call, then two or three frames), arrival judder at
+the pilot fell from 3.7 to 0.9 ms mean and from 20 to 2 ms p95. The camera
+offers no intra refresh in either codec (its `capabilities` document was read
+to check), so the long GOP with on-demand IDRs is its route to ADR 0009. This
+makes `bridge.py` load-bearing for a pilot's first picture: without it a join
+waits up to 10 s for the periodic keyframe.
 
 **Baseline rather than Main is load-bearing, not a preference.** Main permits
 B-frames, and PROTOTYPE.md's pilot gates frames into strict monotonic decode

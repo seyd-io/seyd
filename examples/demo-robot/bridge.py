@@ -12,11 +12,15 @@ Seyd robot. It consumes seydd's two generic UDP interfaces
     {"type": "session", "state": "ended", "sessions": 0} → stop and park;
     {"type": "layer", "name": "low"|"high", "reason": "up"|"down", ...} → ask
     that layer's stream for an immediate IDR, so Seyd's switch lands at once;
-    {"type": "video-config", "maxBitrateKbps": N, "suggestedFps": F, ...} →
-    the camera's VBR upper cap for stream 101 is set to N (seydd's ABR lowers
-    it under loss or latency and raises it back), and its frame-rate cap to F
-    when the ABR is pinned at its bitrate floor, back to the configured
-    baseline when F is 0; at most one change per 2 s per setting.
+    {"type": "video-config", "maxBitrateKbps": N, "maxGopMs": G,
+     "suggestedFps": F, ...} → the camera's VBR upper cap for stream 101 is
+    set to N (seydd's ABR lowers it under loss or latency and raises it back),
+    its GOP to G converted to frames at the stream's frame rate (ADR 0009: a
+    long GOP, with IDRs on demand through recovery-request — this camera has
+    no intra refresh, so `preferIntraRefresh` is noted and ignored), and its
+    frame-rate cap to F when the ABR is pinned at its bitrate floor, back to
+    the configured baseline when F is 0; at most one change per 2 s per
+    setting.
 
 Nothing here is Seyd; it is what a customer writes for their own actuators.
 Credentials come from CAMERA_USER / CAMERA_PASSWORD in the environment.
@@ -68,7 +72,7 @@ async def main():
     cam = CameraControl(args.camera_ip, user, password, channel=args.camera_channel, home=home)
     await cam.start()
     loop = asyncio.get_running_loop()
-    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0, 'bitrate_changes': 0, 'fps_changes': 0, 'layer_switches': 0}
+    stats = {'ptz': 0, 'stale': 0, 'keyframes': 0, 'bitrate_changes': 0, 'gop_changes': 0, 'fps_changes': 0, 'layer_switches': 0}
 
     def coalescer(apply, stat_key):
         """
@@ -103,6 +107,8 @@ async def main():
         lambda kbps: cam.set_bitrate_cap(kbps, args.stream_channel), 'bitrate_changes')
     submit_fps = coalescer(
         lambda fps: cam.set_max_frame_rate(fps, args.stream_channel), 'fps_changes')
+    submit_gop = coalescer(
+        lambda frames: cam.set_gop(frames, args.stream_channel), 'gop_changes')
 
     # The frame rate to come back to once the link recovers. Read from the
     # camera rather than assumed, so the demo restores whatever the operator
@@ -152,9 +158,20 @@ async def main():
         elif t == 'video-config':
             kbps = m.get('maxBitrateKbps')
             fps = m.get('suggestedFps')
-            log.info('video-config: %s kbps, fps %s (%s)', kbps, fps or '-', m.get('reason'))
+            gop_ms = m.get('maxGopMs')
+            log.info('video-config: %s kbps, gop %s ms, fps %s (%s)%s', kbps, gop_ms, fps or '-', m.get('reason'),
+                     ' [intra refresh preferred; not available on this camera, using a long GOP]'
+                     if m.get('preferIntraRefresh') and m.get('reason') == 'profile' else '')
             if isinstance(kbps, (int, float)) and kbps > 0:
                 submit_bitrate(int(kbps))
+            # The GOP ceiling is the publisher's to meet however it can. This
+            # encoder has no intra refresh, so it takes the other route ADR 0009
+            # names: the longest GOP the profile allows, with IDRs supplied on
+            # demand through recovery-request above. The baseline frame rate,
+            # not the current cap, converts ms to frames, so a temporary fps cut
+            # does not also shorten the GOP.
+            if isinstance(gop_ms, (int, float)) and gop_ms > 0:
+                submit_gop(max(1, round(gop_ms * baseline_fps / 1000)))
             # suggestedFps is 0 whenever the controller is not pinned at its
             # bitrate floor, which is the signal to restore full cadence. Frame
             # rate is the last rung of the ladder precisely because it is a
