@@ -39,6 +39,26 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
 
+## Before starting a bigger task — check git first
+
+**Run `git status` before beginning any substantial piece of work. If the tree
+has uncommitted changes, stop and ask the owner what to do with them — commit,
+branch, or something else — before writing a line.** Do not start work on top of
+them and sort it out afterwards.
+
+Two things go wrong otherwise, both observed while building simulcast
+(ADR 0008) on top of an already-dirty tree:
+
+- **The finished work cannot be committed cleanly.** The new feature touched
+  `engine.rs`, `config.rs` and `seydd/src/main.rs`, which already held unrelated
+  uncommitted work, and `main.rs` had come to depend on an untracked
+  `enrol.rs`. The only remaining choices were a commit mixing several features
+  or one that did not build.
+- **Untracked files get destroyed silently.** `docs/adr/0008-simulcast.md` and
+  `packages/seyd-qos/src/simulcast.rs` existed as untracked drafts and were
+  overwritten; git had no copy, so they were gone. Read before overwriting, and
+  remember that for untracked files there is no recovery at all.
+
 ## Fixed product decisions (2026-08-28) — do not re-open without the owner
 
 - **P2P only.** No relay fallback. On P2P failure the pilot shows a diagnosis
