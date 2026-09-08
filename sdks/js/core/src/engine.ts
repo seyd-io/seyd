@@ -5,6 +5,7 @@
 import { Clock, nowUs } from './clock.js';
 import { ControlMessage, ControlStream } from './control.js';
 import { Decoder } from './decoder.js';
+import { MjpegDecoder } from './mjpeg.js';
 import { Presenter } from './presenter.js';
 import { AssembledFrame, Reassembler } from './reassembler.js';
 import { RaceError, p2pDeadlineMs, raceCandidates } from './race.js';
@@ -44,6 +45,12 @@ export interface EngineOptions {
 
 const MAX_TRANSFER_HISTORY = 0;
 
+/** Motion JPEG, however the agent spelled it. */
+function isMjpeg(codec: string | undefined | null): boolean {
+  const c = (codec ?? '').toLowerCase();
+  return c === 'mjpeg' || c === 'jpeg' || c === 'image/jpeg';
+}
+
 /**
  * Used until the agent's QoS profile says otherwise (and by agents older than
  * ADR 0005). Matches the `balanced` profile.
@@ -55,7 +62,7 @@ export class Engine {
   private dgWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private control: ControlStream | null = null;
   private reassemblers = new Map<number, Reassembler>();
-  private decoder: Decoder | null = null;
+  private decoder: Decoder | MjpegDecoder | null = null;
   private videoChannel: ChannelInfo | null = null;
   private channels: ChannelInfo[] = [];
   private qos: QosInfo | null = null;
@@ -208,13 +215,34 @@ export class Engine {
     if (video && (!this.videoChannel || this.videoChannel.id !== video.id || this.videoChannel.codec !== video.codec)) {
       this.videoChannel = video;
       this.decoder?.close();
-      this.decoder = new Decoder({
-        codec: video.codec || 'avc1.42001f',
-        onFrame: (f) => this.onDecoded(f),
-        onError: (e) => { this.tr(`DECERR ${e.message}`); this.sink({ t: 'error', message: `decoder: ${e.message}`, fatal: false }); },
-        onNeedKeyframe: () => this.control?.send({ type: 'request-keyframe', ch: video.id }),
-      });
+      const onErr = (e: Error) => { this.tr(`DECERR ${e.message}`); this.sink({ t: 'error', message: `decoder: ${e.message}`, fatal: false }); };
+      // MJPEG is not a WebCodecs codec, so it gets its own decoder rather than
+      // a codec string. Everything downstream is identical.
+      this.decoder = isMjpeg(video.codec)
+        ? new MjpegDecoder({ onFrame: (f) => this.onDecoded(f), onError: onErr })
+        : new Decoder({
+            codec: video.codec || 'avc1.42001f',
+            onFrame: (f) => this.onDecoded(f),
+            onError: onErr,
+            onNeedKeyframe: () => this.control?.send({ type: 'request-keyframe', ch: video.id }),
+          });
+      const codec = video.codec || 'avc1.42001f';
       try { this.decoder.configure(); } catch (e) { this.sink({ t: 'error', message: `decoder configure: ${(e as Error).message}`, fatal: true }); }
+      // Asked after configuring, not before, so the common case costs nothing:
+      // configure() succeeds for an unsupported codec on some builds and then
+      // simply never emits a frame. Without this the pilot connects, receives
+      // everything, and shows a blank canvas with nothing in the log.
+      void (isMjpeg(codec) ? MjpegDecoder.supported() : Decoder.supported(codec)).then((ok) => {
+        if (ok || this.videoChannel?.codec !== video.codec) return;
+        this.tr(`DECUNSUP ${codec}`);
+        this.sink({
+          t: 'error',
+          message: `this browser cannot decode ${codec}. H.265 needs a hardware `
+            + `decoder, which many machines and all headless browsers lack — `
+            + `try a different browser or machine, or ask for an H.264 stream.`,
+          fatal: true,
+        });
+      });
     }
     this.applyQos();
   }
@@ -240,10 +268,17 @@ export class Engine {
         onLoss: (l) => {
           this.tr(`LOSS id=${l.frameId} key=${l.keyframe} superseded=${l.superseded} missing=${l.chunksMissing}`);
           this.degraded = true;
-          // Any unrecoverable frame breaks the reference chain until the next
-          // IDR, so ask for one now (the agent rate-limits to 250 ms) rather
-          // than smearing for the rest of the GOP.
-          this.decoder?.requestRecovery();
+          // Report the loss and let the agent choose how to repair it. A broken
+          // reference chain does not necessarily need a keyframe — an LTR
+          // reference or an intra-refresh cycle is far cheaper, and the agent
+          // knows what it last asked for.
+          //
+          // Deliberately *not* also calling `requestRecovery()` here. Both
+          // messages reach the agent inside its 250 ms rate limit, the
+          // keyframe request wins, and every loss becomes an IDR regardless of
+          // what the ladder would have chosen. `request-keyframe` is reserved
+          // for the decoder genuinely needing a key chunk, which `decode()`
+          // signals on its own.
           this.control?.send({ type: 'loss', ch: channelId, frame_id: l.frameId, key: l.keyframe });
         },
       });

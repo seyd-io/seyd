@@ -16,6 +16,25 @@ export class Decoder {
 
   constructor(private o: DecoderOptions) {}
 
+  /**
+   * Whether this browser can decode the channel's codec at all.
+   *
+   * Worth asking before configuring, because the failure is otherwise silent:
+   * the session connects, chunks arrive, frames reassemble, and the canvas
+   * stays blank with no error anywhere. H.265 makes this common — Chrome
+   * decodes it only where the machine has a hardware HEVC decoder, so the
+   * same stream plays on one laptop and shows nothing on another.
+   */
+  static async supported(codec: string): Promise<boolean> {
+    try {
+      if (typeof VideoDecoder === 'undefined') return false;
+      const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true });
+      return r.supported === true;
+    } catch {
+      return false;   // a codec string the browser cannot even parse
+    }
+  }
+
   configure(): void {
     this.close();
     this.gotKeyframe = false;

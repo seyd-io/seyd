@@ -15,3 +15,5 @@ export * as wire from './wire.js';
 export * as fec from './fec.js';
 export { encodeFrame, BLOCK_DATA_CHUNKS } from './encode.js';
 export { parseV1 } from './wire-v1.js';
+
+export { MjpegDecoder } from './mjpeg.js';
