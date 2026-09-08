@@ -5,6 +5,10 @@ import { PtzController } from './ptz.js';
 
 const params = new URLSearchParams(location.search);
 const ROBOT_ID = params.get('robot') || 'seyd-demo';
+// A short-lived ES256 session token, minted by the console's "open pilot" or
+// by a customer's own backend. Absent on the public demo, where `seyd-demo`
+// carries a public grant instead.
+const TOKEN = params.get('token');
 const SIGNAL_URL = params.get('signal') || (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'ws://localhost:8080/ws' : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
 const QOS_PROFILES = ['latency', 'balanced', 'quality'];
 let qos = params.get('qos') || localStorage.getItem('seyd.qos') || 'balanced';
@@ -79,5 +83,38 @@ if (params.get('trace')) { video.setAttribute('trace', '1'); (window as unknown 
 if (params.get('pd') !== null) video.setAttribute('presentation-delay', params.get('pd')!);
 if (loss > 0) { video.setAttribute('loss', String(loss)); video.setAttribute('burst', params.get('burst') ?? '1'); }
 video.setAttribute('qos', qos);
-video.setAttribute('signal-url', SIGNAL_URL);
-video.setAttribute('robot-id', ROBOT_ID);   // last: this attribute set is what starts the session
+
+/**
+ * Every pilot needs a session token; the signal server accepts none without
+ * one. A link from the console carries `?token=`, but a visitor arriving at
+ * the public demo has nothing, so the page asks for one. The server grants it
+ * only if the robot carries a public grant — which is what replaced the old
+ * `SEYD_DEV_ALLOW_ANONYMOUS`, and is why this request is unauthenticated.
+ *
+ * Tries `drive` first and falls back to `observe`, so a robot published for
+ * viewing only still works instead of failing shut.
+ */
+async function obtainToken(): Promise<string | null> {
+  if (TOKEN) return TOKEN;
+  const api = SIGNAL_URL.replace(/^ws/, 'http').replace(/\/ws$/, '');
+  for (const scope of ['drive', 'observe']) {
+    try {
+      const res = await fetch(`${api}/api/v1/session-tokens`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ robot_id: ROBOT_ID, scope }),
+      });
+      if (res.ok) return (await res.json()).token as string;
+      if (res.status !== 401 && res.status !== 403) break;   // not a permissions problem
+    } catch {
+      break;   // offline or blocked; fall through to connecting without one
+    }
+  }
+  return null;
+}
+
+void obtainToken().then((token) => {
+  if (token) video.setAttribute('token', token);
+  video.setAttribute('signal-url', SIGNAL_URL);
+  video.setAttribute('robot-id', ROBOT_ID);   // last: this attribute set is what starts the session
+});

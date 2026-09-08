@@ -24,6 +24,8 @@ packages/signal/pilot/
 # Local secrets — camera credentials etc. Never committed.
 # See DEMO.md: the camera password must not appear in agent CLI args.
 .env.local
+# Compose reads cloud/.env: session signing key and Logto client id.
+cloud/.env
 
 # Editor
 .vscode/

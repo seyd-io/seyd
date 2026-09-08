@@ -8,6 +8,15 @@
 #   VIDEO_DEVICE=lavfi ./sim-robot.sh                # synthetic motion source instead of the webcam
 #   SIGNAL_URL=ws://localhost:8080/ws ./sim-robot.sh
 #   DARC_QOS_PROFILE=latency ROBOT_ID=my-robot ./sim-robot.sh
+#
+# The config is a temp file, so there is nothing to point `seydd enrol` at.
+# To join a fleet in the console, pass the enrolment token instead — it is
+# redeemed once, against the same credential the daemon then runs with:
+#
+#   ENROL_TOKEN=seyd_enr_… SIGNAL_URL=ws://localhost:8080/ws ./sim-robot.sh
+#
+# Without it the robot trusts-on-first-use (dev signal servers only) and
+# belongs to no org, so no signed-in console will see it.
 set -euo pipefail
 cd "$(dirname "$0")"
 SIGNAL_URL="${SIGNAL_URL:-wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws}"
@@ -52,6 +61,9 @@ pkill -f "seydd --config" 2>/dev/null || true
 pkill -f "ffmpeg.*rtp://127.0.0.1:5000" 2>/dev/null || true
 pkill -f "sim/sensor-source.py" 2>/dev/null || true
 trap 'kill 0 2>/dev/null; rm -f "$CFG"' EXIT
+if [ -n "${ENROL_TOKEN:-}" ]; then
+  ./target/release/seydd --config "$CFG" enrol --token "$ENROL_TOKEN"
+fi
 echo "robot $ROBOT_ID → $SIGNAL_URL (profile $PROFILE, video ${VIDEO_DEVICE:-webcam})"
 ./sim/video-source.sh &
 python3 sim/sensor-source.py &

@@ -18,7 +18,11 @@ export function classify(f: P2pFailure): Guidance {
   const g = (cls: FailureClass, title: string, body: string): Guidance => ({ cls, title, body, doc: DOCS + cls });
 
   if (f.reason === 'robot-offline') return g('robot-offline', 'Robot is offline', 'The robot is not registered with signaling. Check that the Seyd agent is running and has internet access.');
-  if (f.reason === 'cert-mismatch' || f.reason === 'token-rejected') return g('cert-or-token', 'Certificate or token mismatch', 'The robot certificate or your session token is stale. Reconnect; if it persists, restart the agent.');
+  // Two very different causes used to share one message that told an operator
+  // to restart the agent — useless advice when the real problem is that the
+  // robot simply is not public and the viewer has no session token.
+  if (f.reason === 'token-rejected') return g('cert-or-token', 'Not authorised for this robot', 'Signaling refused the session token. This robot is not published for public access, or the token has expired — sign in to the console and open the pilot from there.');
+  if (f.reason === 'cert-mismatch') return g('cert-or-token', 'Robot certificate mismatch', 'The robot presented a certificate that does not match the one it announced, usually because it rotated its certificate mid-session. Reconnect; if it persists, restart the agent.');
   if (f.reason === 'pilot-udp-blocked') return g('pilot-udp-blocked', 'Your network blocks UDP/QUIC', `Common on corporate Wi-Fi and VPNs. Try another network (a phone hotspot works) or ask IT to allow outbound UDP 443 and ${port}. The robot itself is reachable.`);
   if (n.ipv4?.cgnat && !portmapOk && !hasV6) return g('robot-cgnat', 'Robot is behind carrier-grade NAT', 'A direct connection from a browser is impossible from behind CGNAT with no IPv6. Fixes: enable IPv6 on the SIM/APN (most carriers offer it); use a SIM with a public IP; or put the robot behind a router that supports PCP/UPnP.');
   if (n.ipv4?.nat === 'symmetric' && !portmapOk) return g('robot-symmetric-nat', 'Robot router uses symmetric NAT', `Enable UPnP, NAT-PMP or PCP on the router, or add a manual forward of UDP ${port} → ${local}:${port}.`);
