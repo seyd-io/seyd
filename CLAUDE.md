@@ -113,7 +113,7 @@ seyd/
 │   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
 ├── demo-seyd.sh               # start the camera demo robot
-└── tools/                     # harnesses: seyd-smoke.py, cdp.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
+└── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
 ```
 
 **Import direction:** `tools/` may reach into `packages/`. `packages/` and
