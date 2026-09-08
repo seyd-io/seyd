@@ -91,6 +91,25 @@ emit it and none is obliged to emit anything better; Voysys accepts it on three
 input paths; and it is everywhere in robotics (`RS2_FORMAT_MJPEG`, the OAK
 encoder, `usb_cam`'s default `mjpeg2rgb`).
 
+### 3b. Admission control measured on queued bytes
+
+Found while mapping every latency source (`docs/latency-sources.md`, 2026-09-08).
+`send_frame` dropped a delta when quinn's *free* datagram space fell below the
+profile's backlog threshold — but the buffer was 750 KB, so ≥ 725 KB (about two
+seconds of video at 3 Mbps) had to queue up first. Two effects: up to ~2 s of
+latency could hide inside the transport, and `frames_dropped_backlog`, the
+ABR's primary congestion signal, was effectively never raised, leaving only the
+two-second RTT gate.
+
+Now `backlog_exceeds(queued, threshold, keyframe_allowance)` on
+`Session::send_buffer_queued()`; the buffer is 256 KB, sized only so that a
+keyframe with parity always fits. The allowance discounts a just-sent keyframe
+for twice its serialisation time at the requested bitrate, because a keyframe
+legitimately holds the queue over the threshold while it drains and dropping
+the delta behind it would ask for another keyframe. Unit-tested; the field
+check — `frames_dropped_backlog` rising and the ABR cutting on `backlog` on a
+throttled link — is still to run.
+
 ---
 
 ## Next

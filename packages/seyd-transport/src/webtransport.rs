@@ -22,6 +22,7 @@ pub(crate) async fn serve(
     conn: quinn::Connection,
     id: u64,
     sessions: mpsc::Sender<Session>,
+    send_buffer_capacity: usize,
 ) -> anyhow::Result<()> {
     let h3_conn = h3_quinn::Connection::new(conn.clone());
     let mut h3: h3::server::Connection<h3_quinn::Connection, Bytes> = h3::server::builder()
@@ -75,7 +76,7 @@ pub(crate) async fn serve(
 
         let (dg_tx, dg_rx) = mpsc::channel::<Bytes>(1024);
         let (ctl_tx, ctl_rx) = oneshot::channel::<(ControlReader, ControlWriter)>();
-        let session = Session::new(id, conn.clone(), prefix, dg_rx, ctl_rx);
+        let session = Session::new(id, conn.clone(), prefix, dg_rx, ctl_rx, send_buffer_capacity);
 
         // Inbound datagrams: strip the prefix, drop anything not ours.
         let dg_conn = conn.clone();

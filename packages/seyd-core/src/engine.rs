@@ -117,6 +117,10 @@ struct SessionState {
     skip_deadline_ms: std::sync::atomic::AtomicU64,
     /// What this pilot last reported, paired with our own counters, for ABR.
     pilot: Mutex<PilotSample>,
+    /// When the last keyframe was queued to this session and its size on the
+    /// wire, so admission control can tell that keyframe draining from a
+    /// congested link (`keyframe_allowance`).
+    last_keyframe: Mutex<Option<(Instant, usize)>>,
 }
 
 #[derive(Default)]
@@ -241,6 +245,43 @@ impl FrameQueue {
 
 fn keyframe_flushes_queue(queued: usize, skip_until_key: bool) -> bool {
     skip_until_key || queued >= KEYFRAME_FLUSH_FRAMES
+}
+
+/// Whether the transport backlog for one session has exceeded the profile's
+/// byte budget, so the next delta frame should be dropped rather than queued.
+///
+/// `queued` is what sits in quinn's datagram buffer, not yet packetised
+/// (`Session::send_buffer_queued`). The threshold is
+/// `Profile::drop_threshold_bytes`: a few frames' worth at the ceiling rate.
+///
+/// The check used to be `space < threshold` against the buffer's *free* space,
+/// which with a 750 KB buffer meant nothing was dropped until ~725 KB — about
+/// two seconds of video — had queued up. That hid the latency inside the
+/// stack and silenced the ABR's primary congestion signal, which is this drop.
+fn backlog_exceeds(queued: usize, threshold: usize, keyframe_allowance: usize) -> bool {
+    queued.saturating_sub(keyframe_allowance) > threshold
+}
+
+/// How much of the queue a recently sent keyframe accounts for.
+///
+/// A keyframe is several times a delta and is queued in one go, so for the
+/// time it takes to drain at the requested bitrate the queue is legitimately
+/// deeper than the threshold. Counting that as backlog would drop the delta
+/// after every keyframe and ask the publisher for *another* keyframe — an IDR
+/// storm on a link that is merely full, not congested. While the keyframe is
+/// still plausibly draining (twice its serialisation time at the current
+/// bitrate request, to allow for pacing), its size is discounted; after that a
+/// deep queue is real congestion and the drop is right.
+fn keyframe_allowance(last_keyframe: Option<(Duration, usize)>, bitrate_kbps: u32) -> usize {
+    let Some((since, wire_bytes)) = last_keyframe else {
+        return 0;
+    };
+    let drain_ms = wire_bytes as u64 * 8 / u64::from(bitrate_kbps.max(1));
+    if since <= Duration::from_millis(drain_ms * 2) {
+        wire_bytes
+    } else {
+        0
+    }
 }
 
 /// What the publisher is asked to produce to make the stream decodable again,
@@ -611,8 +652,13 @@ impl Engine {
             return;
         }
         let profile = self.profile();
-        // FEC rates in force: the profile's, or what ABR moved them to.
-        let (fec_delta, fec_key) = self.inner.abr.lock().unwrap().fec;
+        // FEC rates in force: the profile's, or what ABR moved them to; and
+        // the bitrate currently asked of the publisher, for the keyframe
+        // allowance in admission control.
+        let ((fec_delta, fec_key), bitrate_kbps) = {
+            let abr = self.inner.abr.lock().unwrap();
+            (abr.fec, abr.bitrate_kbps)
+        };
         let fec_pct = if frame.keyframe { fec_key } else { fec_delta };
         let fps = self
             .inner
@@ -653,9 +699,10 @@ impl Engine {
         for s in &sessions {
             // Admission control before the first chunk leaves: whole frame or
             // nothing. A delta frame that would not fit the remaining send
-            // buffer — or arrives while the backlog exceeds the profile's
-            // byte budget — is skipped cleanly. Keyframes always go.
+            // buffer — or arrives while the bytes already queued exceed the
+            // profile's backlog budget — is skipped cleanly. Keyframes always go.
             let space = s.transport.send_buffer_space();
+            let queued = s.transport.send_buffer_queued();
             if frame.keyframe {
                 s.skip_until_key.store(false, Ordering::Relaxed);
                 s.skip_deadline_ms.store(0, Ordering::Relaxed);
@@ -667,26 +714,36 @@ impl Engine {
                     .frames_dropped_backlog
                     .fetch_add(1, Ordering::Relaxed);
                 continue;
-            } else if wire_bytes > space || space < threshold {
-                self.inner
-                    .counters
-                    .frames_dropped_backlog
-                    .fetch_add(1, Ordering::Relaxed);
-                s.skip_until_key.store(true, Ordering::Relaxed);
-                s.skip_deadline_ms.store(
-                    self.now_ms() + self.profile().recovery_grace_ms as u64,
-                    Ordering::Relaxed,
+            } else {
+                let allowance = keyframe_allowance(
+                    s.last_keyframe
+                        .lock()
+                        .unwrap()
+                        .map(|(at, bytes)| (at.elapsed(), bytes)),
+                    bitrate_kbps,
                 );
-                tracing::debug!(
-                    frame_id,
-                    wire_bytes,
-                    space,
-                    threshold,
-                    "delta frame dropped: backlog; skipping until keyframe"
-                );
-                let asked = self.request_recovery(channel, "backlog");
-                self.arm_resume(asked);
-                continue;
+                if wire_bytes > space || backlog_exceeds(queued, threshold, allowance) {
+                    self.inner
+                        .counters
+                        .frames_dropped_backlog
+                        .fetch_add(1, Ordering::Relaxed);
+                    s.skip_until_key.store(true, Ordering::Relaxed);
+                    s.skip_deadline_ms.store(
+                        self.now_ms() + self.profile().recovery_grace_ms as u64,
+                        Ordering::Relaxed,
+                    );
+                    tracing::debug!(
+                        frame_id,
+                        wire_bytes,
+                        queued,
+                        allowance,
+                        threshold,
+                        "delta frame dropped: backlog; skipping until keyframe"
+                    );
+                    let asked = self.request_recovery(channel, "backlog");
+                    self.arm_resume(asked);
+                    continue;
+                }
             }
             let mut ok = true;
             for c in &pack.chunks {
@@ -710,6 +767,9 @@ impl Engine {
             }
             if ok {
                 sent_any = true;
+                if frame.keyframe {
+                    *s.last_keyframe.lock().unwrap() = Some((Instant::now(), wire_bytes));
+                }
             }
         }
         if sent_any {
@@ -793,6 +853,7 @@ impl Engine {
             skip_until_key: std::sync::atomic::AtomicBool::new(false),
             skip_deadline_ms: std::sync::atomic::AtomicU64::new(0),
             pilot: Mutex::new(PilotSample::default()),
+            last_keyframe: Mutex::new(None),
         });
         self.inner
             .sessions
@@ -1249,6 +1310,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use seyd_qos::BALANCED;
 
     const W: Duration = Duration::from_secs(5);
 
@@ -1300,6 +1362,43 @@ mod tests {
         // Sender far enough behind that draining beats the motion.
         assert!(keyframe_flushes_queue(KEYFRAME_FLUSH_FRAMES, false));
         assert!(keyframe_flushes_queue(MAX_QUEUED_FRAMES, false));
+    }
+
+    #[test]
+    fn backlog_is_measured_on_queued_bytes_not_free_space() {
+        // balanced at 30 fps: 2 frames = 25 000 B. Nothing queued → admit.
+        let threshold = BALANCED.drop_threshold_bytes(30);
+        assert!(!backlog_exceeds(0, threshold, 0));
+        assert!(!backlog_exceeds(threshold, threshold, 0), "at the budget still admits");
+        // One byte over the budget drops, whatever the buffer's total size —
+        // the old free-space check needed ~725 KB queued to reach this point.
+        assert!(backlog_exceeds(threshold + 1, threshold, 0));
+    }
+
+    #[test]
+    fn a_draining_keyframe_is_not_backlog() {
+        let threshold = BALANCED.drop_threshold_bytes(30);
+        let kf = 30_000; // wire bytes of a keyframe, ~80 ms at 3 Mbps
+        // Just after the keyframe the queue is keyframe + a delta: legitimately
+        // deep, and the allowance discounts the keyframe.
+        let a = keyframe_allowance(Some((Duration::from_millis(30), kf)), 3000);
+        assert_eq!(a, kf);
+        assert!(!backlog_exceeds(kf + 12_500, threshold, a));
+        // Still over the budget *beyond* the keyframe: real backlog, drop.
+        assert!(backlog_exceeds(kf + threshold + 1, threshold, a));
+        // Long after its drain time the keyframe is not an excuse any more.
+        let late = keyframe_allowance(Some((Duration::from_millis(500), kf)), 3000);
+        assert_eq!(late, 0);
+        assert!(backlog_exceeds(kf + 12_500, threshold, late));
+        // No keyframe yet: no allowance.
+        assert_eq!(keyframe_allowance(None, 3000), 0);
+    }
+
+    #[test]
+    fn a_slower_bitrate_request_gives_the_keyframe_longer_to_drain() {
+        let kf = 60_000; // 320 ms at 1500 kbps, so the window is 640 ms
+        assert_eq!(keyframe_allowance(Some((Duration::from_millis(600), kf)), 1500), kf);
+        assert_eq!(keyframe_allowance(Some((Duration::from_millis(700), kf)), 1500), 0);
     }
 
     #[test]

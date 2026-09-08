@@ -18,9 +18,17 @@ pub enum Congestion {
 #[derive(Debug, Clone)]
 pub struct TransportConfig {
     pub congestion: Congestion,
-    /// Bytes quinn may hold in its outgoing datagram buffer. Seyd keeps its own
-    /// single-slot frame buffer in front, so this only needs to absorb about
-    /// two frames — small enough that a backlog cannot hide inside the stack.
+    /// Bytes quinn may hold in its outgoing datagram buffer.
+    ///
+    /// This is a ceiling, not the latency bound: the engine's admission control
+    /// measures what is *queued* here against the QoS profile's backlog
+    /// threshold (`Session::send_buffer_queued`) and drops delta frames long
+    /// before the buffer fills. What the size must guarantee is that a keyframe
+    /// always fits — keyframes are never dropped, and a keyframe chunk that
+    /// finds no room is retried with 1 ms sleeps and then abandoned, tearing
+    /// the frame. So: the largest backlog a profile tolerates (3 frames at
+    /// 6 Mbps / 30 fps is 75 KB) plus the largest keyframe with parity (a 2 s
+    /// GOP at 6 Mbps can reach ~170 KB), with headroom.
     pub datagram_send_buffer: usize,
     pub datagram_receive_buffer: usize,
     pub max_idle: Duration,
@@ -33,7 +41,7 @@ impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             congestion: Congestion::Bbr,
-            datagram_send_buffer: 750 * 1024,
+            datagram_send_buffer: 256 * 1024,
             datagram_receive_buffer: 2 * 1024 * 1024,
             max_idle: Duration::from_secs(10),
             keep_alive: Duration::from_secs(2),
@@ -133,6 +141,7 @@ impl Endpoint {
             let accept_ep = ep.clone();
             let tx = tx.clone();
             let next_id = next_id.clone();
+            let send_buffer = cfg.datagram_send_buffer;
             tokio::spawn(async move {
                 while let Some(incoming) = accept_ep.accept().await {
                     let tx = tx.clone();
@@ -146,7 +155,7 @@ impl Endpoint {
                             }
                         };
                         tracing::info!(session = id, peer = %conn.remote_address(), "quic connection");
-                        if let Err(e) = webtransport::serve(conn, id, tx).await {
+                        if let Err(e) = webtransport::serve(conn, id, tx, send_buffer).await {
                             tracing::debug!(session = id, "h3 connection ended: {e:#}");
                         }
                     });

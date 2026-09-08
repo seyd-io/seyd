@@ -47,6 +47,9 @@ pub struct Session {
     datagrams: Mutex<Option<mpsc::Receiver<Bytes>>>,
     control: Mutex<Option<oneshot::Receiver<(ControlReader, ControlWriter)>>>,
     rate: Mutex<RateSample>,
+    /// `TransportConfig::datagram_send_buffer` for this connection, so the
+    /// queued backlog can be recovered from quinn's free-space figure.
+    send_buffer_capacity: usize,
 }
 
 impl Session {
@@ -56,6 +59,7 @@ impl Session {
         prefix: Bytes,
         datagrams: mpsc::Receiver<Bytes>,
         control: oneshot::Receiver<(ControlReader, ControlWriter)>,
+        send_buffer_capacity: usize,
     ) -> Self {
         let bytes = conn.stats().udp_tx.bytes;
         Self {
@@ -69,6 +73,7 @@ impl Session {
                 bytes,
                 min_rtt_ms: f64::MAX,
             }),
+            send_buffer_capacity,
         }
     }
 
@@ -95,6 +100,18 @@ impl Session {
         self.conn
             .datagram_send_buffer_space()
             .saturating_sub(self.prefix.len())
+    }
+
+    /// Payload bytes queued in the datagram send buffer and not yet packetised:
+    /// the backlog that admission control measures against the QoS profile's
+    /// threshold. Everything counted here is latency the pilot has not seen yet.
+    ///
+    /// quinn exposes only the free space (capacity minus queued payload, minus
+    /// one bookkeeping constant), so this is the complement; the constant makes
+    /// it read a few dozen bytes high, which is nothing against a frame.
+    pub fn send_buffer_queued(&self) -> usize {
+        self.send_buffer_capacity
+            .saturating_sub(self.conn.datagram_send_buffer_space())
     }
 
     /// Queue one datagram. Never blocks, never evicts queued datagrams.
