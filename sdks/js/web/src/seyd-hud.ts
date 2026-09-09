@@ -4,7 +4,7 @@ import { PilotStats, SeydSession } from '@seyd/core';
 export class SeydHudElement extends HTMLElement {
   private _session: SeydSession | null = null;
   private pre: HTMLPreElement;
-  private visible = false;
+  private _visible = false;
   private last: PilotStats | null = null;
   private unsub: (() => void) | null = null;
   private keyHandler = (e: KeyboardEvent) => { if (e.code === 'KeyS' && !e.metaKey && !e.ctrlKey) this.toggle(); };
@@ -18,7 +18,7 @@ export class SeydHudElement extends HTMLElement {
       pre[hidden] { display: none; } .ok { color: #7d7 } .warn { color: #fd6 } .bad { color: #f66 }
     </style><pre hidden></pre>`;
     this.pre = root.querySelector('pre')!;
-    try { this.visible = localStorage.getItem('seyd.hud') === '1'; } catch { /* no storage */ }
+    try { this._visible = localStorage.getItem('seyd.hud') === '1'; } catch { /* no storage */ }
   }
 
   connectedCallback(): void { document.addEventListener('keydown', this.keyHandler); this.render(); }
@@ -31,11 +31,14 @@ export class SeydHudElement extends HTMLElement {
     this.unsub = s ? s.on('stats', (st) => { this.last = st; this.render(); }) : null;
   }
 
-  toggle(): void { this.visible = !this.visible; try { localStorage.setItem('seyd.hud', this.visible ? '1' : '0'); } catch { /* ignore */ } this.render(); }
+  /** Whether the overlay is shown. Persisted in localStorage by `toggle()`. */
+  get visible(): boolean { return this._visible; }
+
+  toggle(): void { this._visible = !this._visible; try { localStorage.setItem('seyd.hud', this._visible ? '1' : '0'); } catch { /* ignore */ } this.render(); }
 
   private render(): void {
-    this.pre.hidden = !this.visible;
-    if (!this.visible) return;
+    this.pre.hidden = !this._visible;
+    if (!this._visible) return;
     const s = this.last;
     if (!s) { this.pre.textContent = 'waiting for stats…'; return; }
     const col = (v: number, warn: number, bad: number) => (v >= bad ? 'bad' : v >= warn ? 'warn' : 'ok');

@@ -15,7 +15,9 @@
     .badge.observer { color: #111; background: #fb5; border-color: #fb5; font-weight: 700; }
     .lan-hint { position: absolute; left: 10px; bottom: 10px; max-width: 520px; font-size: 12px; color: #fc8; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 4px; }
     header .spacer { flex: 1; }
-    select { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; }
+    select, button.hud-btn { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font: inherit; }
+    button.hud-btn { cursor: pointer; padding: 2px 10px; }
+    button.hud-btn[aria-pressed="true"] { background: #2e4a2e; border-color: #3a5; color: #7d7; }
     main { position: relative; min-height: 0; }
     seyd-video { width: 100%; height: 100%; }
     seyd-hud { position: absolute; top: 10px; left: 10px; }
@@ -33,6 +35,7 @@
       <span id="role" class="badge" hidden></span>
       <span class="spacer"></span>
       <label>QoS <select id="qos"><option value="latency">latency</option><option value="balanced">balanced</option><option value="quality">quality</option></select></label>
+      <button id="hud-btn" class="hud-btn" type="button" title="Show or hide the stats HUD (keyboard: S)" aria-pressed="false">stats</button>
     </header>
     <main>
       <seyd-video id="video"></seyd-video>

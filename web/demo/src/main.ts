@@ -18,6 +18,7 @@ const video = document.getElementById('video') as SeydVideoElement;
 const hud = document.getElementById('hud') as SeydHudElement;
 const err = document.getElementById('err') as SeydConnectErrorElement;
 const qosSelect = document.getElementById('qos') as HTMLSelectElement;
+const hudBtn = document.getElementById('hud-btn') as HTMLButtonElement;
 const hintEl = document.getElementById('hint')!;
 const sensorEl = document.getElementById('sensor')!;
 const roleEl = document.getElementById('role')!;
@@ -52,6 +53,14 @@ video.addEventListener('seyd-session', (e) => {
   session.on('sensor', ({ channel, data }) => { sensorEl.textContent = `${channel.name}: ${typeof data === 'string' ? data : JSON.stringify(data)}`; });
   session.on('state', ({ state }) => { if (state !== 'connected') { ptz?.setEnabled(false); roleEl.hidden = true; lanHintEl.hidden = true; } });
 });
+
+// The HUD toggles with `S`, which a phone or a touch panel does not have, so
+// the same toggle is a button. The pressed state mirrors the HUD's own
+// visibility, which it persists in localStorage across reloads.
+const syncHudBtn = () => hudBtn.setAttribute('aria-pressed', String(hud.visible));
+hudBtn.addEventListener('click', () => { hud.toggle(); syncHudBtn(); });
+document.addEventListener('keydown', (e) => { if (e.code === 'KeyS') queueMicrotask(syncHudBtn); });
+syncHudBtn();
 
 qosSelect.addEventListener('change', () => {
   qos = qosSelect.value;
