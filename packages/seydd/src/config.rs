@@ -36,6 +36,12 @@ pub struct Agent {
     /// mishandles any `kind` but `idr`.
     #[serde(default = "yes")]
     pub recovery_ladder: bool,
+    /// Serve a session through the cloud relay when the pilot could not
+    /// connect directly (ADR 0010). The pilot only asks after its direct
+    /// attempts fail, and its HUD says so; set false to refuse relayed
+    /// sessions altogether.
+    #[serde(default = "yes")]
+    pub relay: bool,
     /// One-time enrolment token, redeemed on first start when no credential
     /// exists yet. `SEYD_ENROLMENT_TOKEN` overrides it — prefer the
     /// environment, so a provisioning secret need not be written to disk.

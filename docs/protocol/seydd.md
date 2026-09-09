@@ -12,6 +12,7 @@ ipv6           = true
 port_mapping   = true
 qos_profile    = "balanced"                    # the ceiling
 max_sessions   = 4
+relay          = true     # serve a session through the cloud relay when the pilot could not connect directly (ADR 0010)
 
 [[channel]]
 kind  = "video"

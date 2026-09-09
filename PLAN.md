@@ -8,7 +8,7 @@ The goal is **remote control as a service**: an agent SDK (embeddable library + 
 
 **Fixed decisions (owner, 2026-08-28):**
 - **Rename DARC → Seyd now.** Domains `seyd.io` / `seydio.com`. Every new-stack identifier is born with the new name: crates `seyd-*`, npm `@seyd/*`, C prefix `seyd_` / `seyd.h`, daemon `seydd`, `/etc/seyd/`, ALPN `seyd/2`, WebTransport path `/seyd`. Legacy Python/relay code keeps "darc" until deleted.
-- **P2P only.** No relay fallback. On failure: a diagnosis and concrete network fixes. Relays are a future paid tier — leave room, don't build.
+- **Direct first; the cloud relay last** (amended 2026-09-09, ADR 0010). The race runs first, every time; when it fails and the robot allows it, the session is carried by a WebSocket relay on the signal server, shown as relayed in the HUD, the status line and the guidance box, with the direct-path diagnosis kept visible. Metered, separately priced. The QUIC-forwarding relay with its own address (item 22) remains the design for a *fast* relay.
 - **Rust core with a C ABI**; every other agent form factor is a thin wrapper. Supersedes SPEC.md's "C + MsQuic".
 - **Web pilot SDK first.** iOS/Android/Flutter when a customer needs them. A headless pilot agent is desirable but secondary.
 - **Auth provider deferred; no Google lock-in; EU residency likely.** Cloud Run on GCP (`europe-west1`) is the hosting for now, but every cloud component must be portable: plain containers, Postgres + Redis, no GCP-only SDKs or services, auth behind an OIDC abstraction so the identity provider can be chosen later (EU-hosted or self-hosted candidates). Login/sign-up ship regardless — against whichever OIDC provider is plugged in.
@@ -279,7 +279,7 @@ explain it (add to §2.6 classes) — pending.
 19. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.
 20. `seyd-pilot-core` + `seyd-pilot-agent` (native `seyd/2`, direction-agnostic, localhost RTP/UDP front end for Archetype B).
 21. iOS (`SeydKit`, UniFFI + VideoToolbox), Android (UniFFI + MediaCodec), Flutter — on customer demand, **and the only route to iPhone/iPad**: the web pilot is Chromium-only (open decision 5), so no iOS device can run it. A native app is not bound by WebKit and keeps fingerprint pinning and the candidate race exactly as they are, which is why this is the mobile answer rather than the CA-signed-cert fallback. Android needs no native SDK to be reachable — the web pilot runs in Chrome on a handset today (verified 2026-09-02) — so iOS is the one that closes a real gap; the Android SDK is for customers who want a native app, not for access.
-22. Relay tier (QUIC-forwarding relay with a public address, separately priced), MPQUIC bonding evaluation, session recording.
+22. Relay tier, fast: a QUIC-forwarding relay with a public UDP address (the WebSocket relay of ADR 0010 is the one that *exists*; this is the one that is fast), live upgrade from relay to direct (the prototype retried P2P every 30 s while relaying; the new engine needs the agent to accept a second `hello` for a session it already serves), FEC off over the relay, metering into the console; MPQUIC bonding evaluation; session recording.
 
 ---
 

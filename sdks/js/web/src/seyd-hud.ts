@@ -43,8 +43,14 @@ export class SeydHudElement extends HTMLElement {
     const loss = s.lossTruePct ?? s.lossEstPct;
     const a = s.agent;
     const g2g = s.g2gP50Ms === null ? '—' : `${s.g2gP50Ms.toFixed(0)}ms p50 ${s.g2gP95Ms!.toFixed(0)}ms p95`;
+    // A relayed session is never dressed up as direct: the path line says so,
+    // in amber, together with why the direct race failed (ADR 0010).
+    const why = this._session?.lastFailure;
+    const path = s.transport === 'relay'
+      ? `<span class="warn">RELAY via cloud</span>${why ? `  (direct failed: ${why.reason})` : ''}`
+      : `p2p (${s.pathLabel ?? '—'})`;
     this.pre.innerHTML =
-      `path   p2p (${s.pathLabel ?? '—'})   rtt ${s.rttMs === null ? '—' : s.rttMs.toFixed(1) + 'ms'}\n` +
+      `path   ${path}   rtt ${s.rttMs === null ? '—' : s.rttMs.toFixed(1) + 'ms'}\n` +
       `qos    ${s.qos?.profile ?? '—'}${s.qosPublisher === 'unavailable' ? ' (transport only)' : ''}\n` +
       `video  ${s.kbps} kbps  ${s.fps} fps   fec ${fecPct}%   g2g ${g2g}\n` +
       `loss   <span class="${col(loss, 1, 3)}">${s.lossTruePct === null ? '—' : s.lossTruePct.toFixed(1) + '% true'}  ${s.lossEstPct.toFixed(1)}% est</span>` +

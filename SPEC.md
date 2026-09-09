@@ -18,10 +18,13 @@ vehicle system can integrate to gain remote-operation capability.
 
 Fixed product positions (owner decisions, 2026-08-28):
 
-- **Point-to-point only.** Media never touches Seyd's servers. When a direct
-  connection cannot be made, the pilot explains *why* (NAT type, port-mapping
-  result, IPv6 presence, reachability probe) and how to fix it. Relays are a
-  future, separately priced tier — designed for, not built.
+- **Point-to-point first; the cloud relay as the last resort** (amended
+  2026-09-09, ADR 0010). Media touches Seyd's servers only when no direct
+  connection could be made and the robot allows a relayed session; the pilot
+  then still explains *why* the direct path failed (NAT type, port-mapping
+  result, IPv6 presence, reachability probe) and how to fix it, and every
+  surface says the session is relayed. The relay is metered and separately
+  priced; the fast, QUIC-forwarding relay tier remains future work.
 - **One Rust core with a C ABI** (ADR 0004) on the quinn QUIC stack (ADR
   0002). Every other agent form factor — daemon, C++, Python, ROS 2 — is a
   thin wrapper containing no protocol logic.
@@ -129,7 +132,7 @@ rsync, the C2's own tools), not on a real-time plane.
 | Session authentication & authorization | The operator UI (except optional SDK components) |
 | Connection-quality hooks and closed-loop rate control | The fleet management business logic |
 | Reachability diagnosis when P2P is impossible | Managed human operators |
-| Relay fallback (future paid tier — not in v1) | Transcoding or format conversion |
+| Relay as the last resort (ADR 0010; metered, always shown) | Transcoding or format conversion |
 | The real-time plane: video, commands, sensor streams | Bulk transfer: mission plans, logs, software updates |
 
 Seyd exposes SDKs and APIs. Integrators build the robot agent and the operator application on top.
@@ -212,7 +215,7 @@ A single operator is connected to more than one vehicle at once, switching focus
 - **Robot identity:** Ed25519 key pair generated on the robot at first run; challenge-response authentication on every connection. Dev mode enrols unknown robots on first sight (TOFU); production enrolment tokens are planned.
 - **Presence:** robots heartbeat every 5 s; the landing page shows the live fleet.
 - **Auth service** (planned): OIDC login, orgs/RBAC in Postgres, short-lived ES256 session tokens minted by Seyd and verified *by the robot* before any command channel opens.
-- **Relay (future tier):** not part of v1. Sessions that cannot go direct fail with a diagnosis.
+- **Relay (ADR 0010):** a WebSocket relay on the signal server, attached only after the direct race fails and only for robots that announce `relay`. The session is labelled `relay` end to end; the diagnosis of the direct failure stays on screen. The fast QUIC-forwarding relay tier is still future work.
 
 ---
 
@@ -429,7 +432,7 @@ an obstacle. In descending order of reliability:
 3. **STUN reflexive address + hole punching** — full-cone and
    address-restricted NAT only.
 4. **Manual port forwarding** of UDP 4433.
-5. **Relay** — the future paid tier, for networks where none of the above exist.
+5. **Relay** — the last resort (ADR 0010), for networks where none of the above exist: a WebSocket relay through the signal server, higher latency, metered, and shown as such.
 
 The agent gathers all of these at startup into prioritized candidates
 (`host` 240, `portmap` 220, `host6` 200, `srflx` 150), classifies its NAT from
@@ -663,7 +666,7 @@ Still open:
 3. **Session recording** — synchronized video + sensor + command capture for training data and post-incident review; design the data model early.
 4. **Auth provider** — the OIDC abstraction is decided; the provider (self-hosted Zitadel/Keycloak vs managed EU-hosted) is not. Must be settled before the first external customer signs up.
 5. **iOS in a browser** — settled negatively for now: WebKit has declined `serverCertificateHashes`, so the answer is the Milestone C native SDK. Reopen only on customer demand, and then choose between WebRTC data channels (works for every robot, costs a second transport) and CA-signed certs. Note the CA variant we have *not* evaluated: Let's Encrypt now issues certificates for IP addresses (GA 2026-01, IPv4 + IPv6, 160-hour `shortlived` profile only), which would keep candidate URLs as IP literals and avoid the DNS objections above. Its limits are the robots we most need: validation requires the address to be publicly reachable, private LAN candidates are not issuable, and every network move needs a re-issue inside a six-day window.
-6. **Relay-tier design** — a QUIC-forwarding relay with a public address (a browser WebTransport client cannot use TURN proper); geographic placement; pricing (see 1).
+6. **Fast relay design** — the WebSocket relay of ADR 0010 exists and is the last resort; a QUIC-forwarding relay with a public address (a browser WebTransport client cannot use TURN proper) is what would make relayed sessions fast; geographic placement; pricing (see 1).
 
 ---
 
@@ -727,5 +730,6 @@ records it and its still-valid measurements.
    keyframe-dominated p95 tail measured in the field.
 5. **Long-lived-robot robustness** — network-change re-gather, port-mapping
    renewal, cert rotation.
-6. **Relay tier design** — the priced tier for the locked-down-network segment
-   that field runs A/B established is real.
+6. **Fast relay design** — the priced tier for the locked-down-network segment
+   that field runs A/B established is real; the WebSocket relay (ADR 0010)
+   already carries those sessions, slowly.

@@ -81,7 +81,7 @@ export class SignalClient {
   }
   retry(sessionId: string): boolean { return this.send({ type: 'retry', session_id: sessionId }); }
   abort(sessionId: string): boolean { return this.send({ type: 'abort', session_id: sessionId }); }
-  report(sessionId: string, outcome: 'p2p' | 'failed', extra: Record<string, unknown> = {}): boolean {
+  report(sessionId: string, outcome: 'p2p' | 'relay' | 'failed', extra: Record<string, unknown> = {}): boolean {
     return this.send({ type: 'report', session_id: sessionId, outcome, ...extra });
   }
 

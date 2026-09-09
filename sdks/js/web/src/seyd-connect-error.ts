@@ -32,7 +32,12 @@ export function classify(f: P2pFailure): Guidance {
   return g('unknown', 'No direct connection', `All ${f.candidates.length} path(s) failed (${f.reason}). Check that UDP ${port} reaches the robot: enable UPnP/PCP, forward the port, or enable IPv6 on both ends.`);
 }
 
-/** <seyd-connect-error> — shows mitigation guidance for a P2P failure. Set `.session` or `.failure`. */
+/**
+ * <seyd-connect-error> — shows mitigation guidance for a P2P failure. Set
+ * `.session` or `.failure`. While a session is carried by the cloud relay
+ * (ADR 0010) the same guidance is shown in amber under a "relayed" heading:
+ * the picture works, but the network fix is still worth making.
+ */
 export class SeydConnectErrorElement extends HTMLElement {
   private box: HTMLDivElement;
   private unsub: (() => void)[] = [];
@@ -44,6 +49,7 @@ export class SeydConnectErrorElement extends HTMLElement {
     root.innerHTML = `<style>
       :host { display: block; font: 14px/1.45 system-ui, sans-serif; color: #eee; }
       .box { background: #3a1c1c; border: 1px solid #a33; border-radius: 8px; padding: 12px 16px; max-width: 560px; }
+      .box.relayed { background: #3a2a10; border-color: #c93; }
       .box[hidden] { display: none; } h3 { margin: 0 0 6px; font-size: 15px; } p { margin: 0 0 8px; } a { color: #9cf; }
       details { font-size: 12px; opacity: .8 } pre { white-space: pre-wrap; margin: 4px 0 0; }
     </style><div class="box" hidden></div>`;
@@ -54,16 +60,26 @@ export class SeydConnectErrorElement extends HTMLElement {
     this.unsub.forEach((u) => u()); this.unsub = [];
     this._session = s;
     if (!s) return;
-    this.unsub.push(s.on('p2p-failed', (f) => { this.failure = f; }));
-    this.unsub.push(s.on('state', ({ state }) => { if (state === 'connected') this.failure = null; }));
+    this.unsub.push(s.on('p2p-failed', (f) => { this.show(f, false); }));
+    this.unsub.push(s.on('relay', ({ failure }) => { this.show(failure, true); }));
+    this.unsub.push(s.on('state', ({ state }) => {
+      // Connected directly: nothing to fix. Connected through the relay: the
+      // diagnosis stays, because the relay is the symptom, not the cure.
+      if (state === 'connected' && s.transport !== 'relay') this.failure = null;
+    }));
   }
   get session(): SeydSession | null { return this._session; }
 
-  set failure(f: P2pFailure | null) {
+  set failure(f: P2pFailure | null) { this.show(f, false); }
+
+  private show(f: P2pFailure | null, relayed: boolean): void {
     if (!f) { this.box.hidden = true; return; }
     const g = classify(f);
     this.box.hidden = false;
-    this.box.innerHTML = `<h3>${g.title}</h3><p>${g.body}</p>` +
+    this.box.classList.toggle('relayed', relayed);
+    const title = relayed ? `Relayed through the Seyd cloud — ${g.title.charAt(0).toLowerCase()}${g.title.slice(1)}` : g.title;
+    const lead = relayed ? '<p>No direct path connected, so this session is carried by the cloud relay: it works, with higher latency, and is metered. To go direct: </p>' : '';
+    this.box.innerHTML = `<h3>${title}</h3>${lead}<p>${g.body}</p>` +
       `<p><a href="${g.doc}" target="_blank" rel="noopener">How to fix this →</a> <span style="opacity:.6">(${g.cls})</span></p>` +
       `<details><summary>Diagnostics</summary><pre>${escapeHtml(JSON.stringify({ reason: f.reason, detail: f.detail, candidates: f.candidates.map((c) => c.label + ' ' + c.url), nat_report: f.natReport }, null, 1))}</pre></details>`;
   }

@@ -45,6 +45,10 @@ pub struct Announce {
     pub channels: Vec<ChannelInfo>,
     pub p2p_hint: String,
     pub max_sessions: u32,
+    /// Whether this robot will accept a relayed session when no direct path
+    /// connects (ADR 0010). The cloud offers a relay to pilots only if so.
+    #[serde(default)]
+    pub relay: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,6 +110,17 @@ pub enum Inbound {
         #[serde(default)]
         reason: String,
     },
+    /// The pilot could not connect directly and has attached to the cloud
+    /// relay; dial `url`, attach with `token`, and serve the session there.
+    RelayOpen {
+        session_id: String,
+        url: String,
+        token: String,
+        #[serde(default = "driver")]
+        role: Role,
+        #[serde(default)]
+        pilot_ip: Option<String>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -131,6 +146,7 @@ mod tests {
             channels: vec![],
             p2p_hint: "likely".into(),
             max_sessions: 4,
+            relay: true,
         };
         let v = serde_json::to_value(Outbound::Announce(a)).unwrap();
         assert_eq!(v["type"], "announce");

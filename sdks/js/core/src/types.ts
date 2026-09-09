@@ -37,6 +37,9 @@ export interface NatReport {
   [k: string]: unknown;
 }
 
+/** How the cloud relay is reached for one session (ADR 0010); null when not offered. */
+export interface RelayOffer { url: string; token: string }
+
 export interface Offer {
   session_id: string;
   robot_id: string;
@@ -47,11 +50,19 @@ export interface Offer {
   direction: string;
   nat_report: NatReport | null;
   channels: ChannelInfo[];
+  relay?: RelayOffer | null;
 }
+
+/**
+ * 'p2p': a direct WebTransport session to the robot — the product.
+ * 'relay': the same bytes carried through the Seyd cloud because no direct
+ * path connected (ADR 0010). Higher latency, metered, always shown as such.
+ */
+export type TransportKind = 'p2p' | 'relay';
 
 export type FailureReason =
   | 'no-candidates' | 'all-candidates-timeout' | 'cert-mismatch' | 'token-rejected'
-  | 'pilot-udp-blocked' | 'robot-offline' | 'handshake-timeout';
+  | 'pilot-udp-blocked' | 'robot-offline' | 'handshake-timeout' | 'relay-unavailable';
 
 export interface P2pFailure {
   reason: FailureReason;
@@ -117,6 +128,8 @@ export interface PilotStats {
   /** Loss vs the agent's own send count, over the last ~5 s of agent-stats samples. */
   lossTruePct: number | null;
   pathLabel: string | null;
+  /** Which transport carries this session, once connected. */
+  transport: TransportKind | null;
   // Short aliases (same values) for HUDs and tests.
   path: string | null; lossTrue: number | null; g2gP50: number | null; g2gP95: number | null; rtt: number | null;
   qos: QosInfo | null;
@@ -140,7 +153,13 @@ export interface SensorEvent {
 
 export interface SessionEvents {
   state: { state: SessionState; detail?: string };
-  welcome: { sessionId: string; role: 'driver' | 'observer'; channels: ChannelInfo[]; qos: QosInfo; pathLabel: string };
+  welcome: { sessionId: string; role: 'driver' | 'observer'; channels: ChannelInfo[]; qos: QosInfo; pathLabel: string; transport: TransportKind };
+  /**
+   * The direct race failed and the session is falling back to the cloud
+   * relay (ADR 0010). Carries the diagnosis so the UI can say *why* the
+   * session is relayed; `p2p-failed` is not emitted for this attempt.
+   */
+  relay: { failure: P2pFailure };
   frame: VideoFrameEvent;
   sensor: SensorEvent;
   link: LinkQuality;

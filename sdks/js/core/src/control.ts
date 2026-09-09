@@ -1,5 +1,7 @@
 // The control stream: NDJSON on one pilot-opened bidirectional stream.
 // The pilot speaks first (docs/protocol/control-stream.md).
+import { Transport } from './transport.js';
+
 export type ControlMessage = { type: string; [k: string]: unknown };
 
 export class ControlStream {
@@ -9,8 +11,8 @@ export class ControlStream {
 
   constructor(private onMessage: (m: ControlMessage) => void, private onClosed: () => void) {}
 
-  async open(wt: WebTransport): Promise<void> {
-    const stream = await wt.createBidirectionalStream();
+  async open(t: Transport): Promise<void> {
+    const stream = await t.openControl();
     this.writer = stream.writable.getWriter();
     void this.readLoop(stream.readable);
   }

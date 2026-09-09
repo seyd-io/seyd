@@ -23,8 +23,9 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   0006 (loss measured on one clock), 0007 (identity: pluggable authn, our
   authz), 0008 (simulcast: adapt by selecting a stream, not reconfiguring
   one), 0009 (keyframes on demand: intra refresh or a long GOP, never a
-  one-second IDR cadence). Add one for every decision of that weight; never change a wire
-  format or public API without one.
+  one-second IDR cadence), 0010 (cloud relay as the last resort: taken only
+  after the direct race fails, always shown as relayed). Add one for every
+  decision of that weight; never change a wire format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product
   decisions section at the top records what changed on 2026-08-28.
@@ -67,8 +68,13 @@ Two things go wrong otherwise, both observed while building simulcast
 
 ## Fixed product decisions (2026-08-28) — do not re-open without the owner
 
-- **P2P only.** No relay fallback. On P2P failure the pilot shows a diagnosis
-  and concrete network fixes. Relays are a future, separately priced tier.
+- **Direct first; the cloud relay only as the last resort** (amended
+  2026-09-09, ADR 0010). The candidate race always runs first. Only when it
+  fails, and the robot allows it, does the pilot attach to the WebSocket relay
+  on the signal server — and then the HUD, the status line and the guidance
+  box all say the session is relayed and why the direct path failed. The
+  relay is metered and separately priced; never make it the first choice, and
+  never hide it.
 - **Rust core + C ABI.** All protocol logic in Rust crates; every other agent
   form factor (C++, Python, ROS 2, daemon) is a thin wrapper with no protocol
   logic. See ADR 0004.
@@ -236,7 +242,9 @@ script; `cloud/docker-compose.yml` is the portability proof.
 
 Both robot scripts `pkill` any running `seydd` and rebuild `target/release/seydd`
 from the working tree first. Pilot pages: deployed landing at `/`, pilot at
-`/pilot/?robot=<id>`; press `S` for the HUD. Field procedures: docs/field-test.md.
+`/pilot/?robot=<id>`; press `S` for the HUD. `?paths=none` forces the direct
+race to fail so the relay path can be exercised; `?relay=0` refuses the relay.
+Field procedures: docs/field-test.md.
 
 ## Deploying the backend
 
@@ -252,7 +260,9 @@ docs/eu-hosting.md carry the context):
   (see Hosting above): robots need an enrolment token, pilots a public grant.
   Deploy blips: presence is in-memory, so robots show offline until their
   WebSocket reconnects off the draining revision (≤ ~30 s; restart the robot to
-  force it).
+  force it). The same service is the relay (`/relay`, ADR 0010): relayed
+  sessions drop on deploy and at Cloud Run's 60-minute request cap
+  (`--timeout 3600` in the deploy script); the pilot re-races and re-relays.
 - **seyd-prober** (reachability probe, called by seyd-signal on every announce):
   build with Cloud Build from the REPO ROOT context —
   `gcloud builds submit --project seydio --config deploy/cloudbuild-prober.yaml .`

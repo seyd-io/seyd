@@ -1,10 +1,12 @@
 // SeydSession — the public entry point. Signaling on the main thread, the
-// media engine on a worker (or inline). P2P only: a failed race surfaces as a
-// `p2p-failed` event with the robot's NatReport, and is retried every 15 s.
+// media engine on a worker (or inline). Direct first: a failed race falls back
+// to the cloud relay when the offer carries one (ADR 0010, surfaced as a
+// `relay` event and `transport === 'relay'`), otherwise surfaces as a
+// `p2p-failed` event with the robot's NatReport and is retried every 15 s.
 import { EngineEvent } from './engine.js';
 import { Host, InlineHost, WorkerHost, workerSupported } from './host.js';
 import { SignalClient } from './signal.js';
-import { ChannelInfo, FailureReason, Offer, P2pFailure, PilotStats, QosInfo, SessionEvents, SessionState } from './types.js';
+import { ChannelInfo, FailureReason, Offer, P2pFailure, PilotStats, QosInfo, SessionEvents, SessionState, TransportKind } from './types.js';
 
 export interface SeydSessionOptions {
   signalUrl: string;
@@ -34,6 +36,12 @@ export interface SeydSessionOptions {
    */
   presentationDelayMs?: number;
   retryMs?: number;
+  /**
+   * Fall back to the cloud relay when no direct path connects and the robot
+   * allows it (ADR 0010). Default true. The session then reports
+   * `transport: 'relay'` and emits `relay` with the direct-path diagnosis.
+   */
+  relay?: boolean;
   /** Allow more than one live session to the same robot from this document (multi-view). Default: a new session closes the previous one. */
   allowMultiple?: boolean;
 }
@@ -54,6 +62,8 @@ export class SeydSession {
   sessionId: string | null = null;
   robotId: string | null = null;
   pathLabel: string | null = null;
+  /** 'p2p' or 'relay' once connected (ADR 0010); null before. */
+  transport: TransportKind | null = null;
   /** Candidates the robot advertised in the last offer (label/url/priority). */
   candidates: Offer['candidates'] = [];
   lastStats: PilotStats | null = null;
@@ -84,7 +94,7 @@ export class SeydSession {
       this.host = new InlineHost();
     }
     this.host.onEvent((ev) => this.onEngine(ev));
-    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, trace: !!o.trace, paths: o.paths ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token, presentationDelayMs: o.presentationDelayMs } }, transfer);
+    this.host.post({ t: 'init', options: { canvas, emitFrames: !!o.emitFrames, loss: o.loss ?? null, trace: !!o.trace, paths: o.paths ?? null, qosProfile: o.qos ?? null, clientName: o.clientName, token: o.token, presentationDelayMs: o.presentationDelayMs, relay: o.relay !== false } }, transfer);
 
     this.signal.on('auth-ok', () => {
       // A signaling reconnect while the P2P session is racing or live must not
@@ -141,6 +151,7 @@ export class SeydSession {
     this.role = offer.role;
     this.candidates = offer.candidates ?? [];
     this.channels = offer.channels ?? [];
+    this.transport = null;
     this.clearRetry();
     this.host.post({ t: 'connect', offer });
   }
@@ -176,11 +187,18 @@ export class SeydSession {
         else if (ev.state === 'closed') { if (this.onClosedAck) { const k = this.onClosedAck; this.onClosedAck = null; k(); } else this.setState('closed'); }
         break;
       case 'welcome':
-        this.channels = ev.channels; this.qos = ev.qos; this.role = ev.role; this.pathLabel = ev.pathLabel;
-        if (this.sessionId) this.signal.report(this.sessionId, 'p2p', { path_label: ev.pathLabel });
-        this.emit('welcome', { sessionId: ev.sessionId, role: ev.role, channels: ev.channels, qos: ev.qos, pathLabel: ev.pathLabel });
+        this.channels = ev.channels; this.qos = ev.qos; this.role = ev.role; this.pathLabel = ev.pathLabel; this.transport = ev.transport;
+        if (this.sessionId) this.signal.report(this.sessionId, ev.transport, { path_label: ev.pathLabel });
+        this.emit('welcome', { sessionId: ev.sessionId, role: ev.role, channels: ev.channels, qos: ev.qos, pathLabel: ev.pathLabel, transport: ev.transport });
         break;
-      case 'p2p-failed': this.fail(ev.failure.reason, ev.failure); break;
+      case 'relaying':
+        // Not a failure yet: the diagnosis is kept so the UI can say why the
+        // session is relayed, and `p2p-failed` stays for the real thing.
+        this.lastFailure = ev.failure;
+        this.transport = 'relay';
+        this.emit('relay', { failure: ev.failure });
+        break;
+      case 'p2p-failed': this.transport = null; this.fail(ev.failure.reason, ev.failure); break;
       case 'sensor': {
         const ch = this.channels.find((c) => c.id === ev.channelId);
         if (!ch) break;

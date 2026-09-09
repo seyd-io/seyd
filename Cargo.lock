@@ -2066,6 +2066,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "futures",
+ "futures-util",
  "h3",
  "h3-datagram",
  "h3-quinn",
@@ -2080,6 +2081,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
 ]

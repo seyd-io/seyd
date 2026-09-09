@@ -7,6 +7,10 @@
 //! WebTransport session with datagrams, the pilot-opened control stream, and
 //! path statistics. It knows nothing about chunks, FEC or channels.
 //!
+//! A [`Session`] is normally a WebTransport session over QUIC. When no direct
+//! path connected, the same type can be backed by the cloud relay (`relay`,
+//! ADR 0010): the engine is unchanged, and `Session::kind` says which it is.
+//!
 //! Datagram admission is the caller's job through [`Session::send_buffer_space`]
 //! and [`Session::send_datagram`]. quinn discards *older* queued datagrams when
 //! its buffer is full, which is exactly the torn-frame outcome Seyd forbids, so
@@ -16,6 +20,7 @@
 pub mod cert;
 mod endpoint;
 mod prober;
+pub mod relay;
 pub mod session;
 mod webtransport;
 
@@ -23,4 +28,4 @@ pub use cert::Cert;
 pub use endpoint::{Congestion, Endpoint, TransportConfig};
 pub use prober::Prober;
 pub use session as control;
-pub use session::{ControlReader, ControlWriter, PathStats, SendError, Session};
+pub use session::{ControlReader, ControlWriter, PathStats, SendError, Session, SessionKind};

@@ -73,6 +73,7 @@ async fn authenticates_announces_and_receives_pilot_connecting() {
             channels: vec![],
             p2p_hint: "likely".into(),
             max_sessions: 1,
+            relay: true,
         })
         .await;
 

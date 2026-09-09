@@ -42,6 +42,11 @@ pub struct AgentConfig {
     pub channels: Vec<ChannelSpec>,
     /// Reported to the signal server, e.g. `seydd/0.1.0`.
     pub agent_version: String,
+    /// Accept a session carried by the cloud relay when the pilot could not
+    /// connect directly (ADR 0010). The relay is a last resort the pilot
+    /// chooses after its candidate race fails; this only says whether the
+    /// robot will serve it. Off means such pilots get a diagnosis instead.
+    pub relay: bool,
 }
 
 impl Default for AgentConfig {
@@ -59,6 +64,7 @@ impl Default for AgentConfig {
             max_sessions: 4,
             channels: Vec::new(),
             agent_version: concat!("seyd-core/", env!("CARGO_PKG_VERSION")).into(),
+            relay: true,
         }
     }
 }
@@ -176,6 +182,7 @@ impl Agent {
                 fps.advertise(&cert),
                 &specs,
                 cfg.max_sessions,
+                cfg.relay,
             )?)
             .await;
 
@@ -358,6 +365,15 @@ async fn maintain(
                     }
                     seyd_signal_client::Event::Punch { pilot_ip, .. } => probe(&lc.endpoint, pilot_ip),
                     seyd_signal_client::Event::SessionRevoked { session_id, reason } => lc.engine.revoke(&session_id, &reason),
+                    seyd_signal_client::Event::RelayOpen { session_id, url, token, role, pilot_ip } => {
+                        if lc.cfg.relay {
+                            let role = match role { seyd_signal_client::messages::Role::Driver => Role::Driver, _ => Role::Observer };
+                            lc.engine.expect_pilot(&session_id, role);
+                            tokio::spawn(open_relay(lc.engine.clone(), session_id, url, token, pilot_ip));
+                        } else {
+                            tracing::warn!(session = %session_id, "relay-open ignored: relay disabled in config");
+                        }
+                    }
                     seyd_signal_client::Event::Denied { reason } => {
                         tracing::error!(%reason, "signal denied");
                         if host.send(AgentEvent::SignalDenied { reason }).await.is_err() { break }
@@ -466,7 +482,13 @@ async fn handle_maint(
 /// Returns `false` when the host is gone.
 async fn announce(lc: &mut Lifecycle, host: &mpsc::Sender<AgentEvent>) -> bool {
     let fingerprints = lc.fps.advertise(&lc.cert);
-    match build_announce(&lc.gathered, fingerprints, &lc.specs, lc.cfg.max_sessions) {
+    match build_announce(
+        &lc.gathered,
+        fingerprints,
+        &lc.specs,
+        lc.cfg.max_sessions,
+        lc.cfg.relay,
+    ) {
         Ok(a) => {
             let report = a.nat_report.clone();
             lc.signal.announce(a).await;
@@ -539,11 +561,41 @@ impl Fingerprints {
     }
 }
 
+/// Dial the cloud relay for one session and hand it to the engine (ADR 0010).
+/// Runs on its own task so a slow relay handshake never stalls signaling.
+async fn open_relay(
+    engine: Engine,
+    session_id: String,
+    url: String,
+    token: String,
+    pilot_ip: Option<String>,
+) {
+    let id = RELAY_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    tracing::info!(session = %session_id, %url, pilot_ip = ?pilot_ip, "pilot on the relay; dialling");
+    match seyd_transport::Session::relay(
+        id,
+        &url,
+        &session_id,
+        &token,
+        TransportConfig::default().datagram_send_buffer,
+    )
+    .await
+    {
+        Ok(session) => engine.serve(session),
+        Err(e) => tracing::warn!(session = %session_id, error = %e, "relay attach failed"),
+    }
+}
+
+/// Session ids for relayed sessions: the endpoint numbers its own from 1, so
+/// these start high enough never to collide.
+static RELAY_IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 40);
+
 fn build_announce(
     gathered: &seyd_nat::Gathered,
     cert_fingerprints: Vec<String>,
     specs: &[ChannelSpec],
     max_sessions: u32,
+    relay: bool,
 ) -> anyhow::Result<Announce> {
     Ok(Announce {
         candidates: gathered
@@ -578,6 +630,7 @@ fn build_announce(
             .to_lowercase()
             .replace("lanonly", "lan-only"),
         max_sessions,
+        relay,
     })
 }
 

@@ -78,6 +78,8 @@ function snapshot(): void {
 
 const loss = parseFloat(params.get('loss') ?? '0') || 0;
 if (params.get('paths')) video.setAttribute('paths', params.get('paths')!);
+// ?relay=0 refuses the cloud relay (ADR 0010), for diagnosing the direct path.
+if (params.get('relay') !== null) video.setAttribute('relay', params.get('relay')!);
 if (params.get('trace')) { video.setAttribute('trace', '1'); (window as unknown as { __seydTrace: string[] }).__seydTrace = []; }
 // ?pd=0 restores decode-on-arrival, for A/B against the paced default.
 if (params.get('pd') !== null) video.setAttribute('presentation-delay', params.get('pd')!);

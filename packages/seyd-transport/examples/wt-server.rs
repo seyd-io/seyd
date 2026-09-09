@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     while let Some(s) = ep.accept().await {
         tokio::spawn(async move {
             let s = std::sync::Arc::new(s);
-            println!("SESSION {} from {}", s.session_id(), s.remote_addr());
+            println!("SESSION {} from {:?}", s.session_id(), s.remote_addr());
             let dg = s.clone();
             let mut rx = s.take_datagrams().unwrap();
             tokio::spawn(async move {

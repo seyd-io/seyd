@@ -1,4 +1,4 @@
-import { AgentStats, PilotStats, QosInfo } from './types.js';
+import { AgentStats, PilotStats, QosInfo, TransportKind } from './types.js';
 
 export function percentile(arr: number[], p: number): number {
   if (!arr.length) return 0;
@@ -67,7 +67,7 @@ export class StatsTracker {
   snapshot(extra: {
     reassembler: { chunksDup: number; chunksTooOld: number; chunksTooLate: number; chunksMissing: number; framesSeen: number; framesClean: number; framesRecovered: number; framesIncomplete: number; keyframesClean: number; keyframesLost: number; framesTimedOut: number; keyframesTimedOut: number; framesTimedOutLate: number; deadlineDeltaEffectiveMs: number };
     decodeErrors: number; keyframesRequested: number; decodeQueue: number; degraded: boolean;
-    rttMs: number | null; offsetUs: number | null; pathLabel: string | null; qos: QosInfo | null; qosPublisher: string | null;
+    rttMs: number | null; offsetUs: number | null; pathLabel: string | null; transport: TransportKind | null; qos: QosInfo | null; qosPublisher: string | null;
     injecting: { rate: number; burst: number } | null;
     presenter: { shown: number; skippedLate: number; reanchors: number; queued: number; jitterMs: number };
     presentationDelayMs: number;
@@ -97,7 +97,7 @@ export class StatsTracker {
       renderQueue: extra.presenter.queued, renderReanchors: extra.presenter.reanchors,
       renderJitterMs: Math.round(extra.presenter.jitterMs * 10) / 10,
       presentationDelayMs: extra.presentationDelayMs,
-      lossEstPct: lossEst, lossTruePct: lossTrue, pathLabel: extra.pathLabel, qos: extra.qos, qosPublisher: extra.qosPublisher,
+      lossEstPct: lossEst, lossTruePct: lossTrue, pathLabel: extra.pathLabel, transport: extra.transport, qos: extra.qos, qosPublisher: extra.qosPublisher,
       agent: a, injecting: extra.injecting,
       path: extra.pathLabel, lossTrue, g2gP50, g2gP95, rtt: extra.rttMs,
     };

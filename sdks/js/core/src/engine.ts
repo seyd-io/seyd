@@ -2,6 +2,11 @@
 // decode → render, plus the control stream. Runs unchanged inside a Web
 // Worker (worker.ts) or on the main thread (host.ts InlineHost); the only
 // difference is where `sink` delivers events.
+//
+// When the race fails and the offer carries a relay, the same pipeline runs
+// over the cloud relay instead (ADR 0010). That is the only fallback there is,
+// it is taken last, and everything above learns about it (`relaying`,
+// `transport: 'relay'` in stats and welcome) rather than being shielded from it.
 import { Clock, nowUs } from './clock.js';
 import { ControlMessage, ControlStream } from './control.js';
 import { Decoder } from './decoder.js';
@@ -10,12 +15,14 @@ import { Presenter } from './presenter.js';
 import { AssembledFrame, Reassembler } from './reassembler.js';
 import { RaceError, p2pDeadlineMs, raceCandidates } from './race.js';
 import { StatsTracker } from './stats.js';
+import { RelayTransport, Transport, WebTransportTransport } from './transport.js';
 import { ChannelInfo, LinkQuality, Offer, P2pFailure, PilotStats, QosInfo } from './types.js';
 import { encodeMessage, parseChunk } from './wire.js';
 
 export type EngineEvent =
   | { t: 'state'; state: 'connecting' | 'connected' | 'p2p-failed' | 'closed'; detail?: string }
-  | { t: 'welcome'; sessionId: string; role: 'driver' | 'observer'; channels: ChannelInfo[]; qos: QosInfo; pathLabel: string }
+  | { t: 'welcome'; sessionId: string; role: 'driver' | 'observer'; channels: ChannelInfo[]; qos: QosInfo; pathLabel: string; transport: 'p2p' | 'relay' }
+  | { t: 'relaying'; failure: P2pFailure }
   | { t: 'sensor'; channelId: number; seq: number; raw: Uint8Array; sendTs: number }
   | { t: 'frame'; channelId: number; frame: VideoFrame }
   | { t: 'video-size'; width: number; height: number }
@@ -35,6 +42,12 @@ export interface EngineOptions {
   paths?: string[] | null;
   clientName?: string;
   token?: string;
+  /**
+   * Fall back to the cloud relay when the direct race fails and the offer
+   * carries one (ADR 0010). Default true; false keeps the pre-0010 behaviour
+   * of failing with a diagnosis.
+   */
+  relay?: boolean;
   /**
    * Hold each frame until its capture timestamp is due, up to this many ms
    * behind the capture timeline (see presenter.ts). Overrides the QoS
@@ -58,8 +71,7 @@ function isMjpeg(codec: string | undefined | null): boolean {
 export const DEFAULT_PRESENTATION_DELAY_MS = 100;
 
 export class Engine {
-  private wt: WebTransport | null = null;
-  private dgWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private transport: Transport | null = null;
   private control: ControlStream | null = null;
   private reassemblers = new Map<number, Reassembler>();
   private decoder: Decoder | MjpegDecoder | null = null;
@@ -108,7 +120,7 @@ export class Engine {
     if (this.closed) return;
     // A second connect supersedes whatever is live or racing: tear it down so
     // two sessions can never decode into one canvas.
-    if (this.wt) this.teardownTransport();
+    if (this.transport) this.teardownTransport();
     const gen = ++this.raceGen;
     this.offer = offer;
     this.sessionId = offer.session_id;
@@ -120,23 +132,45 @@ export class Engine {
       res = await raceCandidates(offer.candidates ?? [], offer.cert_fingerprints ?? [], { timeoutMs: p2pDeadlineMs(offer.p2p_hint) });
     } catch (e) {
       const err = e instanceof RaceError ? e : new RaceError('handshake-timeout', String((e as Error)?.message ?? e));
-      this.sink({ t: 'p2p-failed', failure: { reason: err.reason, natReport: offer.nat_report ?? null, candidates: offer.candidates ?? [], detail: err.message } });
-      this.sink({ t: 'state', state: 'p2p-failed', detail: err.message });
+      const failure: P2pFailure = { reason: err.reason, natReport: offer.nat_report ?? null, candidates: offer.candidates ?? [], detail: err.message };
+      if (this.closed || gen !== this.raceGen) return;
+      const relay = offer.relay;
+      if (!relay || this.o.relay === false) {
+        this.sink({ t: 'p2p-failed', failure });
+        this.sink({ t: 'state', state: 'p2p-failed', detail: err.message });
+        return;
+      }
+      // Last resort (ADR 0010): the same session through the cloud. The
+      // diagnosis travels with the fallback so the pilot still learns what
+      // to fix — a relayed session is a degraded one, not a fixed one.
+      this.sink({ t: 'relaying', failure });
+      this.sink({ t: 'state', state: 'connecting', detail: 'relay' });
+      let rt: RelayTransport;
+      try {
+        rt = await RelayTransport.connect(relay.url, offer.session_id, relay.token);
+      } catch (e2) {
+        const detail = `${err.message}; relay: ${String((e2 as Error)?.message ?? e2)}`;
+        if (this.closed || gen !== this.raceGen) return;
+        this.sink({ t: 'p2p-failed', failure: { ...failure, reason: 'relay-unavailable', detail } });
+        this.sink({ t: 'state', state: 'p2p-failed', detail });
+        return;
+      }
+      if (this.closed || gen !== this.raceGen) { rt.close(); return; }
+      await this.attach(rt);
       return;
     }
     if (this.closed || gen !== this.raceGen) { try { res.wt.close(); } catch { /* ignore */ } return; }
-    await this.attach(res.wt, res.label);
+    await this.attach(new WebTransportTransport(res.wt, res.label));
   }
 
-  private async attach(wt: WebTransport, label: string): Promise<void> {
-    this.wt = wt;
-    this.pathLabel = label;
-    this.dgWriter = wt.datagrams.writable.getWriter();
-    void this.datagramLoop(wt);
+  private async attach(t: Transport): Promise<void> {
+    this.transport = t;
+    this.pathLabel = t.label;
+    void this.datagramLoop(t);
 
     this.control = new ControlStream((m) => this.onControl(m), () => this.onTransportClosed('control stream closed'));
-    try { await this.control.open(wt); } catch (e) { this.sink({ t: 'error', message: `control stream: ${(e as Error).message}`, fatal: true }); return; }
-    wt.closed.then(() => this.onTransportClosed('closed')).catch((e) => this.onTransportClosed(String(e?.message ?? e)));
+    try { await this.control.open(t); } catch (e) { this.sink({ t: 'error', message: `control stream: ${(e as Error).message}`, fatal: true }); return; }
+    void t.closed.then((reason) => { if (this.transport === t) this.onTransportClosed(reason); });
 
     // Pilot speaks first — the agent learns the stream id from this line.
     this.control.send({ type: 'hello', proto: 2, session_id: this.sessionId, client: { kind: 'browser', name: this.o.clientName ?? '@seyd/core', version: '0.1.0' }, token: this.o.token });
@@ -146,10 +180,11 @@ export class Engine {
   }
 
   private onTransportClosed(detail: string): void {
-    if (this.closed || !this.wt) return;
+    if (this.closed || !this.transport) return;
+    const wasRelay = this.transport.kind === 'relay';
     this.teardownTransport();
     this.sink({ t: 'state', state: 'p2p-failed', detail });
-    this.sink({ t: 'p2p-failed', failure: { reason: 'handshake-timeout', natReport: this.offer?.nat_report ?? null, candidates: this.offer?.candidates ?? [], detail: `session dropped: ${detail}` } });
+    this.sink({ t: 'p2p-failed', failure: { reason: wasRelay ? 'relay-unavailable' : 'handshake-timeout', natReport: this.offer?.nat_report ?? null, candidates: this.offer?.candidates ?? [], detail: `session dropped: ${detail}` } });
   }
 
   private teardownTransport(): void {
@@ -157,11 +192,9 @@ export class Engine {
     this.timers = [];
     void this.control?.close();
     this.control = null;
-    try { this.dgWriter?.releaseLock(); } catch { /* ignore */ }
-    this.dgWriter = null;
-    const wt = this.wt;
-    this.wt = null;
-    if (wt) { try { wt.close(); } catch { /* ignore */ } }
+    const t = this.transport;
+    this.transport = null;
+    t?.close();
     for (const r of this.reassemblers.values()) r.reset();
     this.presenter.reset();
     this.decoder?.close();
@@ -184,7 +217,7 @@ export class Engine {
         this.channels = (m.channels as ChannelInfo[]) ?? this.channels;
         this.qos = (m.qos as QosInfo) ?? null;
         this.setupChannels();
-        this.sink({ t: 'welcome', sessionId: String(m.session_id), role: (m.role as 'driver' | 'observer') ?? 'observer', channels: this.channels, qos: this.qos!, pathLabel: this.pathLabel ?? '' });
+        this.sink({ t: 'welcome', sessionId: String(m.session_id), role: (m.role as 'driver' | 'observer') ?? 'observer', channels: this.channels, qos: this.qos!, pathLabel: this.pathLabel ?? '', transport: this.transport?.kind ?? 'p2p' });
         this.sink({ t: 'state', state: 'connected' });
         if (this.o.qosProfile && this.qos && this.o.qosProfile !== this.qos.profile) this.setQos(this.o.qosProfile);
         if (this.videoChannel) this.control?.send({ type: 'request-keyframe', ch: this.videoChannel.id });
@@ -308,16 +341,17 @@ export class Engine {
     return false;
   }
 
-  private async datagramLoop(wt: WebTransport): Promise<void> {
-    const reader = wt.datagrams.readable.getReader();
+  private async datagramLoop(t: Transport): Promise<void> {
+    const reader = t.datagrams.getReader();
     try {
       for (;;) {
         const { value, done } = await reader.read();
-        if (done || this.wt !== wt) break;
+        if (done || this.transport !== t) break;
         if (this.shouldDrop()) { this.stats.chunksDropped++; continue; }
         this.onDatagram(value);
       }
-    } catch { /* transport closed; wt.closed handles it */ }
+    } catch { /* transport closed; t.closed handles it */ }
+    try { reader.releaseLock(); } catch { /* ignore */ }
   }
 
   private onDatagram(u8: Uint8Array): void {
@@ -389,10 +423,10 @@ export class Engine {
   }
 
   send(channelId: number, payload: Uint8Array): boolean {
-    if (!this.dgWriter) return false;
+    if (!this.transport) return false;
     const seq = (this.seqs.get(channelId) ?? 0) + 1;
     this.seqs.set(channelId, seq);
-    this.dgWriter.write(encodeMessage(channelId, seq, payload, nowUs())).catch(() => { /* closed */ });
+    this.transport.sendDatagram(encodeMessage(channelId, seq, payload, nowUs()));
     return true;
   }
 
@@ -406,7 +440,7 @@ export class Engine {
       decodeQueue: this.decoder?.queueSize ?? 0, degraded: this.degraded,
       presenter: this.presenter.counters, presentationDelayMs: this.presenter.delayMs,
       rttMs: this.clock.rttUs === null ? null : this.clock.rttUs / 1000, offsetUs: this.clock.offsetUs,
-      pathLabel: this.pathLabel, qos: this.qos, qosPublisher: this.qosPublisher, injecting: this.o.loss && this.o.loss.rate > 0 ? this.o.loss : null,
+      pathLabel: this.pathLabel, transport: this.transport?.kind ?? null, qos: this.qos, qosPublisher: this.qosPublisher, injecting: this.o.loss && this.o.loss.rate > 0 ? this.o.loss : null,
     });
   }
 
@@ -415,7 +449,7 @@ export class Engine {
     if (this.o.trace) { s.trace = this.traceBuf; this.traceBuf = []; }
     this.sink({ t: 'stats', stats: s });
     const loss = s.lossTruePct ?? s.lossEstPct;
-    const state: LinkQuality['state'] = !this.wt ? 'lost' : loss >= 5 || s.keyframesLost > 0 && this.degraded ? 'poor' : loss >= 1 || this.degraded ? 'degraded' : 'good';
+    const state: LinkQuality['state'] = !this.transport ? 'lost' : loss >= 5 || s.keyframesLost > 0 && this.degraded ? 'poor' : loss >= 1 || this.degraded ? 'degraded' : 'good';
     this.sink({ t: 'link', link: { state, rttMs: s.rttMs, offsetUs: s.offsetUs, lossPct: loss, degradedPicture: this.degraded } });
   }
 

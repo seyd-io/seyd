@@ -8,6 +8,8 @@ export { Decoder } from './decoder.js';
 export { Clock, nowUs } from './clock.js';
 export { StatsTracker, percentile } from './stats.js';
 export { raceCandidates, p2pDeadlineMs, RaceError } from './race.js';
+export { RelayTransport, WebTransportTransport, RelayError } from './transport.js';
+export type { Transport } from './transport.js';
 export { Engine } from './engine.js';
 export type { EngineEvent, EngineOptions } from './engine.js';
 export { InlineHost, WorkerHost, workerSupported } from './host.js';

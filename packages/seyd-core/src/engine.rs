@@ -659,6 +659,13 @@ impl Engine {
         }
     }
 
+    /// Serve a session that did not come from the endpoint — a relayed one
+    /// (ADR 0010). It is treated exactly like an accepted WebTransport session;
+    /// only its path label differs.
+    pub fn serve(&self, session: Session) {
+        tokio::spawn(self.clone().run_session(Arc::new(session)));
+    }
+
     async fn frame_sender(self) {
         loop {
             let next = self.inner.queue.lock().unwrap().frames.pop_front();
@@ -829,7 +836,10 @@ impl Engine {
 
     async fn run_session(self, transport: Arc<Session>) {
         let tid = transport.session_id();
-        let remote = transport.remote_addr();
+        let remote = transport
+            .remote_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "relay".to_string());
         let Ok(Some((mut reader, mut writer))) =
             tokio::time::timeout(Duration::from_secs(5), transport.control()).await
         else {
@@ -902,10 +912,14 @@ impl Engine {
             .lock()
             .unwrap()
             .insert(tid, state.clone());
-        let path_label = if remote.ip().is_ipv6() {
-            "host6"
-        } else {
-            "host"
+        // What the pilot is told it is on. A relayed session is never
+        // dressed up as a direct one: the label reaches the HUD (ADR 0010).
+        let path_label = match transport.kind() {
+            seyd_transport::SessionKind::Relay => "relay",
+            seyd_transport::SessionKind::Direct => match transport.remote_addr() {
+                Some(a) if a.ip().is_ipv6() => "host6",
+                _ => "host",
+            },
         }
         .to_string();
         let _ = state.lines.send(encode_line(&ToPilot::Welcome {

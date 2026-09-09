@@ -375,6 +375,9 @@ pub unsafe extern "C" fn seyd_agent_create(
             },
             channels: Vec::new(),
             agent_version: format!("seyd-ffi/{}", env!("CARGO_PKG_VERSION")),
+            // Not in the C config struct either (ABI). The relay is a last
+            // resort the pilot chooses and shows; serving it costs nothing.
+            relay: defaults.relay,
         };
 
         let runtime = match tokio::runtime::Builder::new_multi_thread()

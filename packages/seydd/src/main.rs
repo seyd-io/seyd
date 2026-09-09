@@ -157,6 +157,7 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
         max_sessions: cfg.agent.max_sessions,
         channels: specs.clone(),
         agent_version: format!("seydd/{}", env!("CARGO_PKG_VERSION")),
+        relay: cfg.agent.relay,
     })
     .await?;
 

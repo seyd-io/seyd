@@ -55,6 +55,14 @@ pub enum Event {
         session_id: String,
         reason: String,
     },
+    /// A pilot is waiting on the cloud relay for this session (ADR 0010).
+    RelayOpen {
+        session_id: String,
+        url: String,
+        token: String,
+        role: Role,
+        pilot_ip: Option<String>,
+    },
     /// The socket dropped; the client is reconnecting. Sessions already
     /// established over QUIC are unaffected.
     Disconnected,
@@ -263,6 +271,9 @@ async fn session(
                     }
                     Ok(Inbound::SessionRevoked { session_id, reason }) => {
                         let _ = ev_tx.send(Event::SessionRevoked { session_id, reason }).await;
+                    }
+                    Ok(Inbound::RelayOpen { session_id, url, token, role, pilot_ip }) => {
+                        let _ = ev_tx.send(Event::RelayOpen { session_id, url, token, role, pilot_ip }).await;
                     }
                     Ok(Inbound::Denied { reason }) => return Err(Error::Denied(reason)),
                     Ok(other) => tracing::debug!(?other, "ignoring signal message"),
