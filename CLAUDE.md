@@ -258,11 +258,13 @@ docs/eu-hosting.md carry the context):
   (plain `--set-env-vars` would wipe it). URL:
   `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Real accounts on Neon Postgres
   (see Hosting above): robots need an enrolment token, pilots a public grant.
-  Deploy blips: presence is in-memory, so robots show offline until their
-  WebSocket reconnects off the draining revision (≤ ~30 s; restart the robot to
-  force it). The same service is the relay (`/relay`, ADR 0010): relayed
-  sessions drop on deploy and at Cloud Run's 60-minute request cap
-  (`--timeout 3600` in the deploy script); the pilot re-races and re-relays.
+  **After every deploy, restart the robot.** Presence is in-memory, and a
+  robot's signaling WebSocket stays on the *draining* old revision until it
+  drops — which, since `--timeout 3600` (needed for relayed sessions), can be
+  up to an hour: the new revision lists the robot as offline for all of it
+  (observed 2026-09-09). The same service is the relay (`/relay`, ADR 0010):
+  relayed sessions drop on deploy and at Cloud Run's 60-minute request cap;
+  the pilot re-races and re-relays.
 - **seyd-prober** (reachability probe, called by seyd-signal on every announce):
   build with Cloud Build from the REPO ROOT context —
   `gcloud builds submit --project seydio --config deploy/cloudbuild-prober.yaml .`
