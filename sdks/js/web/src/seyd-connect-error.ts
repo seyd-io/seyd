@@ -35,25 +35,44 @@ export function classify(f: P2pFailure): Guidance {
 /**
  * <seyd-connect-error> — shows mitigation guidance for a P2P failure. Set
  * `.session` or `.failure`. While a session is carried by the cloud relay
- * (ADR 0010) the same guidance is shown in amber under a "relayed" heading:
- * the picture works, but the network fix is still worth making.
+ * (ADR 0010) the same guidance is available in amber under a "relayed"
+ * heading, collapsed to one line by default so it never sits in the way of
+ * driving: the picture works, but the network fix is still worth making.
+ * Both forms can be dismissed with the × (or Escape); the next failure or
+ * relay brings the box back.
  */
 export class SeydConnectErrorElement extends HTMLElement {
   private box: HTMLDivElement;
   private unsub: (() => void)[] = [];
   private _session: SeydSession | null = null;
+  private current: { f: P2pFailure; relayed: boolean } | null = null;
+  private expanded = false;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>
       :host { display: block; font: 14px/1.45 system-ui, sans-serif; color: #eee; }
-      .box { background: #3a1c1c; border: 1px solid #a33; border-radius: 8px; padding: 12px 16px; max-width: 560px; }
+      .box { position: relative; background: #3a1c1c; border: 1px solid #a33; border-radius: 8px; padding: 12px 36px 12px 16px; max-width: 560px; }
       .box.relayed { background: #3a2a10; border-color: #c93; }
+      .box.relayed.compact { padding: 6px 36px 6px 12px; font-size: 13px; white-space: nowrap; }
       .box[hidden] { display: none; } h3 { margin: 0 0 6px; font-size: 15px; } p { margin: 0 0 8px; } a { color: #9cf; }
       details { font-size: 12px; opacity: .8 } pre { white-space: pre-wrap; margin: 4px 0 0; }
+      button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+      .close { position: absolute; top: 6px; right: 8px; font-size: 18px; line-height: 1; opacity: .7; padding: 2px 6px; }
+      .close:hover { opacity: 1; }
+      .why { text-decoration: underline; color: #ffd27a; margin-left: 8px; }
     </style><div class="box" hidden></div>`;
     this.box = root.querySelector('.box')!;
+    this.box.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('.close')) { this.dismiss(); return; }
+      if (t.closest('.why')) { this.expanded = !this.expanded; this.render(); }
+    });
+    // Drags that start on the box must never reach the video surface as
+    // camera input, and the box must never swallow the keyboard.
+    this.box.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.box.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.dismiss(); });
   }
 
   set session(s: SeydSession | null) {
@@ -64,7 +83,7 @@ export class SeydConnectErrorElement extends HTMLElement {
     this.unsub.push(s.on('relay', ({ failure }) => { this.show(failure, true); }));
     this.unsub.push(s.on('state', ({ state }) => {
       // Connected directly: nothing to fix. Connected through the relay: the
-      // diagnosis stays, because the relay is the symptom, not the cure.
+      // diagnosis stays (collapsed), because the relay is the symptom, not the cure.
       if (state === 'connected' && s.transport !== 'relay') this.failure = null;
     }));
   }
@@ -72,15 +91,35 @@ export class SeydConnectErrorElement extends HTMLElement {
 
   set failure(f: P2pFailure | null) { this.show(f, false); }
 
+  /** Hide until the next failure or relay event. */
+  dismiss(): void { this.box.hidden = true; }
+
   private show(f: P2pFailure | null, relayed: boolean): void {
-    if (!f) { this.box.hidden = true; return; }
+    if (!f) { this.current = null; this.box.hidden = true; return; }
+    this.current = { f, relayed };
+    this.expanded = !relayed;
+    this.render();
+  }
+
+  private render(): void {
+    const cur = this.current;
+    if (!cur) return;
+    const { f, relayed } = cur;
     const g = classify(f);
     this.box.hidden = false;
     this.box.classList.toggle('relayed', relayed);
+    this.box.classList.toggle('compact', relayed && !this.expanded);
+    const close = '<button class="close" type="button" title="Dismiss" aria-label="Dismiss">×</button>';
+    if (relayed && !this.expanded) {
+      this.box.innerHTML = `Relayed via Seyd cloud — ${escapeHtml(g.title.charAt(0).toLowerCase() + g.title.slice(1))}.`
+        + `<button class="why" type="button">why / how to fix</button>${close}`;
+      return;
+    }
     const title = relayed ? `Relayed through the Seyd cloud — ${g.title.charAt(0).toLowerCase()}${g.title.slice(1)}` : g.title;
     const lead = relayed ? '<p>No direct path connected, so this session is carried by the cloud relay: it works, with higher latency, and is metered. To go direct: </p>' : '';
-    this.box.innerHTML = `<h3>${title}</h3>${lead}<p>${g.body}</p>` +
-      `<p><a href="${g.doc}" target="_blank" rel="noopener">How to fix this →</a> <span style="opacity:.6">(${g.cls})</span></p>` +
+    this.box.innerHTML = `${close}<h3>${title}</h3>${lead}<p>${g.body}</p>` +
+      `<p><a href="${g.doc}" target="_blank" rel="noopener">How to fix this →</a> <span style="opacity:.6">(${g.cls})</span>` +
+      (relayed ? ' <button class="why" type="button">less</button>' : '') + '</p>' +
       `<details><summary>Diagnostics</summary><pre>${escapeHtml(JSON.stringify({ reason: f.reason, detail: f.detail, candidates: f.candidates.map((c) => c.label + ' ' + c.url), nat_report: f.natReport }, null, 1))}</pre></details>`;
   }
 }
