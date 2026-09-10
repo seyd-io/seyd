@@ -124,6 +124,7 @@ seyd/
 ├── sim/                       # robot simulation — NOT part of Seyd
 │   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings; intra refresh by default)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
+├── demo-start.sh              # find the camera, then start the camera demo robot and wait for it online
 ├── demo-seyd.sh               # start the camera demo robot
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
 ```
@@ -234,6 +235,7 @@ script; `cloud/docker-compose.yml` is the portability proof.
 
 | Script | What it does |
 |---|---|
+| `./demo-start.sh` | "Find a camera and start the demo" in one go: probes `CAMERA_IP`, falls back to `tools/find-camera.py` discovery, starts `./demo-seyd.sh` with the address that answered, waits until the cloud lists the robot online and prints the pilot URL. `--detach` leaves it running; otherwise Ctrl-C stops it. Log in `$DEMO_LOG` (default `$TMPDIR/seyd-demo.log`). |
 | `./demo-seyd.sh` | The camera demo robot: preflights the Hikvision over ISAPI, starts `seydd` + `examples/demo-robot/bridge.py` against the deployed cloud. Overrides: `CAMERA_IP` (CLI beats `.env.local`), `SIGNAL_URL`, `DARC_QOS_PROFILE`, `ROBOT_ID`. Needs `.env.local` (`CAMERA_USER`/`CAMERA_PASSWORD`). |
 | `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
 | `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs). |
