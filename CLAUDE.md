@@ -229,7 +229,16 @@ script; `cloud/docker-compose.yml` is the portability proof.
   `node dist/bootstrap.js public-grant <robot-id> observe drive` (needs the
   robot enrolled first). `/api/v1/robots` lists only those robots.
 - Enrolled so far: `seyd-demo`, `seyd-sim` and `seyd-py`, all in org "Seyd", all public.
-  No human member exists yet, so the console has nobody who can sign in.
+- **The console is deployed at `/console/`** on the same service (since
+  2026-09-10), signing in through the deployed Logto (`seyd-logto` on Cloud
+  Run, `cloud/logto/`). Invite-only in both senses: Seyd grants no org without
+  an invitation, and Logto has self-registration off — an invitation carries a
+  one-time sign-in token that creates the account (`cloud/README.md`,
+  "Invitations under a closed door"). The owner holds a pending owner
+  invitation for org "Seyd"; nobody has signed in yet. Invite people from the
+  console's Members page, or `node dist/bootstrap.js invite <org-id> <email> <role>`
+  with `.env.local` sourced, and hand over the printed link. Logto's admin
+  console is not public: `bash cloud/logto/admin-local.sh`.
 
 ## Running things — the scripts
 
@@ -250,14 +259,15 @@ Field procedures: docs/field-test.md.
 
 ## Deploying the backend
 
-Two Cloud Run services, project `seydio`, region `europe-west1` (memory +
+Three Cloud Run services, project `seydio`, region `europe-west1` (memory +
 docs/eu-hosting.md carry the context):
 
-- **seyd-signal** (signal server + static demo pages):
+- **seyd-signal** (signal server + static demo pages + the console at `/console/`):
   `pnpm -r build && GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`.
-  The script bundles `web/demo/dist` into the image (`.gcloudignore` keeps it in
-  the upload) and re-applies the prober env from `.env.local` after deploy
-  (plain `--set-env-vars` would wipe it). URL:
+  The script bundles `web/demo/dist` and `web/console/dist` into the image
+  (`.gcloudignore` keeps them in the upload), passes the OIDC, Logto and
+  console settings from `.env.local`, and re-applies the prober env after
+  deploy (plain `--set-env-vars` would wipe it). URL:
   `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Real accounts on Neon Postgres
   (see Hosting above): robots need an enrolment token, pilots a public grant.
   **After every deploy, restart the robot.** Presence is in-memory, and a
@@ -267,6 +277,12 @@ docs/eu-hosting.md carry the context):
   (observed 2026-09-09). The same service is the relay (`/relay`, ADR 0010):
   relayed sessions drop on deploy and at Cloud Run's 60-minute request cap;
   the pilot re-races and re-relays.
+- **seyd-logto** (the identity provider, ADR 0007): `GCLOUD_PROJECT=seydio bash
+  cloud/logto/deploy.sh` — the stock `svhd/logto:1.43.0` image on its own Neon
+  database, admin console disabled, scale-to-zero. Administer it with
+  `cloud/logto/admin-local.sh` (admin console on the laptop, same database) and
+  `cloud/logto/configure.mjs` (Seyd's objects, idempotent). Details in
+  `cloud/README.md`, "The deployed identity provider".
 - **seyd-prober** (reachability probe, called by seyd-signal on every announce):
   build with Cloud Build from the REPO ROOT context —
   `gcloud builds submit --project seydio --config deploy/cloudbuild-prober.yaml .`

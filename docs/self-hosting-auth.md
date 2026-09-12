@@ -65,6 +65,17 @@ login — demote someone in your directory and they are demoted in Seyd. Under
 the other two policies Seyd's roles win, so an IdP claim can never silently
 demote an owner.
 
+Under `invite-only` you will usually also close self-registration at the
+provider, or anyone can still create an account there and sit on the "no
+organisation yet" page. Seyd then has to open the door for invitees itself: an
+invitation asks the provider for a one-time sign-in token and hands out one
+link that both registers the account and joins the org. For Logto this is
+`SEYD_LOGTO_M2M_CLIENT_ID/SECRET` (`cloud/README.md`, "Invitations under a
+closed door"); for another provider it is an implementation of `UserInviter`
+in `cloud/api/src/authn/inviter.ts`, the only place that speaks a provider's
+management API. Leave registration open and configure nothing, and invitations
+work the older way: the invitee signs up first, then the link accepts.
+
 An invitation is always honoured, whatever the policy, because it is an
 explicit act by an administrator. It matches only on a **verified** email:
 without that check, anyone could claim an invitation by typing the address into

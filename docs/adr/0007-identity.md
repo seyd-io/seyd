@@ -142,3 +142,50 @@ session tokens through `POST /api/v1/session-tokens`.
   alternative and the seam makes it a configuration change. Also unresolved:
   Logto publishes no DPA, and there is no mail transport in the cloud, so
   invitation tokens are currently handed over by whoever issued them.
+
+## Amendment 2026-09-10 — invite-only means closed registration, and an invitation opens the door
+
+The console went live on the deployed cloud with `SEYD_PROVISIONING=invite-only`
+and the owner asked that *only invited people be able to sign up*. Seyd's
+policy alone does not deliver that: the provider's own registration is a
+second door, and with it open anyone could create an account and sit on the
+"no organisation yet" page. So the deployed Logto runs in sign-in-only mode,
+and an invitation has to create the account itself.
+
+Decided:
+
+1. **An invitation mints the invitee's one-time sign-in token at the
+   provider** (Logto's Management API, `POST /api/one-time-tokens`) and the
+   invitation becomes one link: `console#/invite?email&token&ott`. The console
+   starts the login with `one_time_token` + `login_hint`; Logto registers from
+   a verified one-time token even with registration off, asks for a password,
+   and reports `email_verified` (which it derives from the primary email
+   existing). Seyd's invitation then matches on the verified email as before.
+   This is the one place Seyd speaks a provider's management API; it sits
+   behind `UserInviter` in `authn/` so another provider is another
+   implementation, and a provider left with open registration needs none.
+2. **The provider has no public admin surface.** Cloud Run exposes one port
+   and Logto wants two; rather than a second service for the admin console,
+   it is disabled deployed and run on a laptop against the same database when
+   needed. `configure.mjs` sets up Seyd's objects through the Management API
+   with the seeded proxy credential, so a deployment can be configured without
+   ever creating an admin account by script.
+3. **A formal email connector, no mail transport.** Logto refuses email as a
+   sign-up identifier without an email connector, so its HTTP connector posts
+   to the API, which logs the message. The invite flow needs no message; a
+   password reset code therefore lands in the server log until a real
+   transport exists — an accepted, documented stopgap, and the `MailSink`
+   interface is where the first transport goes.
+4. **The console gets the provider settings from the API** at boot
+   (`GET /api/v1/console-config`), not from its build, so one build serves any
+   deployment and changing provider stays an environment change.
+
+Verified 2026-09-10: Logto 1.43.0 on Cloud Run (`seyd-logto`, Neon database,
+seeded with `--encrypt-base-role` because Neon refuses a password-less role),
+the console served at `/console/` from `seyd-signal`, one-time tokens minted
+against the deployed provider, the console's Sign in reaching the provider's
+email + password page with no "create account" link, and an invitation link
+carrying the console through the provider straight to its set-a-password step
+for an address that had no account. Setting that password and completing the
+first login is a human step and was left to the owner.
+
