@@ -1,0 +1,214 @@
+<!doctype html>
+<!--
+  Seyd slide template — the starting point for every new presentation artifact
+  (docs/design.md, section 6). The tokens below are copied verbatim from
+  web/theme/src/tokens.css; when a token changes there, change it here too.
+  Artifacts cannot bundle fonts, so this file is the one place the three faces
+  are loaded from Google Fonts. Delete the example slides and keep the shell.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seyd slide template</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ── tokens: docs/design.md section 2 — complete light palette on bare :root ── */
+  :root {
+    color-scheme: light;
+    --seyd-bg: #f2f5f4; --seyd-surface: #ffffff; --seyd-surface-2: #e6ecea;
+    --seyd-ink: #10201f; --seyd-ink-2: #4a5c5a; --seyd-muted: #7f9290; --seyd-line: #cfd9d6;
+    --seyd-accent: #0f8a68; --seyd-accent-ink: #ffffff; --seyd-accent-bg: #dcefe7;
+    --seyd-amber: #b8801c; --seyd-amber-bg: #fbf1dc; --seyd-danger: #b3382f; --seyd-danger-bg: #f9e4e1;
+    --seyd-font-display: "Familjen Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+    --seyd-font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --seyd-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --seyd-radius: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --seyd-bg: #0e1618; --seyd-surface: #162124; --seyd-surface-2: #1d2a2e;
+      --seyd-ink: #e7eeec; --seyd-ink-2: #b4c2bf; --seyd-muted: #7f9290; --seyd-line: #2a3a3e;
+      --seyd-accent: #12a37a; --seyd-accent-ink: #06130f; --seyd-accent-bg: #143229;
+      --seyd-amber: #d9a441; --seyd-amber-bg: #2a2413; --seyd-danger: #e0776c; --seyd-danger-bg: #3a1f1c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --seyd-bg: #0e1618; --seyd-surface: #162124; --seyd-surface-2: #1d2a2e;
+    --seyd-ink: #e7eeec; --seyd-ink-2: #b4c2bf; --seyd-muted: #7f9290; --seyd-line: #2a3a3e;
+    --seyd-accent: #12a37a; --seyd-accent-ink: #06130f; --seyd-accent-bg: #143229;
+    --seyd-amber: #d9a441; --seyd-amber-bg: #2a2413; --seyd-danger: #e0776c; --seyd-danger-bg: #3a1f1c;
+  }
+
+  /* ── deck shell ─────────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--seyd-bg); color: var(--seyd-ink); font: 16px/1.5 var(--seyd-font-body); }
+  .slide { min-height: 100vh; scroll-snap-align: start; display: grid; place-items: center; padding: 3vh 4vw; }
+  .frame {
+    width: min(1180px, 92vw); aspect-ratio: 16 / 9; background: var(--seyd-surface); border: 1px solid var(--seyd-line);
+    border-radius: var(--seyd-radius); padding: clamp(20px, 3.1vw, 42px) clamp(24px, 3.5vw, 50px);
+    display: grid; grid-template-rows: auto 1fr auto; gap: 12px; overflow: hidden; position: relative;
+  }
+  @media (max-aspect-ratio: 16/10) { .frame { aspect-ratio: auto; min-height: 88vh; } }
+
+  /* ── type roles ─────────────────────────────────────────────────────────── */
+  .eyebrow { font-family: var(--seyd-font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--seyd-accent); display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+  .eyebrow .n { color: var(--seyd-muted); flex: none; }
+  h1, h2, h3 { font-family: var(--seyd-font-display); font-weight: 600; letter-spacing: -.015em; margin: 0; text-wrap: balance; }
+  h1 { font-size: clamp(34px, 4.9vw, 60px); line-height: 1.05; }
+  h2 { font-size: clamp(21px, 2.35vw, 31px); line-height: 1.14; }
+  h3 { font-size: 16.5px; margin-bottom: 5px; letter-spacing: -.005em; }
+  p { margin: 0; max-width: 62ch; color: var(--seyd-ink-2); }
+  .lede { font-size: clamp(16px, 1.42vw, 20px); color: var(--seyd-ink); max-width: 52ch; }
+  ul { margin: 0; padding-left: 17px; color: var(--seyd-ink-2); font-size: 13.5px; line-height: 1.45; display: grid; gap: 7px; }
+  li b { color: var(--seyd-ink); font-weight: 600; }
+  code, pre { font-family: var(--seyd-font-mono); }
+  code { font-size: .92em; background: var(--seyd-surface-2); padding: 1px 5px; border-radius: 3px; color: var(--seyd-ink); }
+  pre { margin: 0; background: var(--seyd-surface-2); border-radius: var(--seyd-radius); padding: 12px 14px; font-size: 12.5px; line-height: 1.5; overflow-x: auto; color: var(--seyd-ink); }
+  .accent { color: var(--seyd-accent); }
+
+  /* ── layout inside a frame ──────────────────────────────────────────────── */
+  .body { display: grid; gap: 16px; align-content: start; min-height: 0; }
+  .body > * { min-width: 0; min-height: 0; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-32 { grid-template-columns: 3fr 2fr; }
+  .cols-23 { grid-template-columns: 2fr 3fr; }
+  .col { display: grid; gap: 11px; align-content: start; min-height: 0; }
+  .foot { display: flex; justify-content: space-between; gap: 20px; font-family: var(--seyd-font-mono); font-size: 11px; color: var(--seyd-muted); border-top: 1px solid var(--seyd-line); padding-top: 9px; }
+  .foot span:last-child { flex: none; }
+
+  /* ── components: docs/design.md section 5 ───────────────────────────────── */
+  .card { background: var(--seyd-surface-2); border-radius: var(--seyd-radius); padding: 13px 15px; }
+  .card p { font-size: 13.5px; line-height: 1.45; }
+  .card.lit { border: 1px solid var(--seyd-accent); background: transparent; }
+  .stat { display: grid; gap: 3px; }
+  .stat b { font-family: var(--seyd-font-display); font-size: clamp(24px, 2.7vw, 37px); font-weight: 700; line-height: 1.05; color: var(--seyd-ink); font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 13px; line-height: 1.4; color: var(--seyd-muted); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .tag { display: inline-block; font-family: var(--seyd-font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--seyd-line); color: var(--seyd-ink-2); }
+  .tag.on { border-color: var(--seyd-accent); color: var(--seyd-accent); }
+  .tag.warn { border-color: var(--seyd-amber); color: var(--seyd-amber); background: var(--seyd-amber-bg); }
+  .tag.stop { border-color: var(--seyd-danger); color: var(--seyd-danger); background: var(--seyd-danger-bg); }
+  .tablewrap { overflow-x: auto; min-width: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--seyd-line); vertical-align: top; }
+  th { font-family: var(--seyd-font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--seyd-muted); font-weight: 500; }
+  td.num { font-family: var(--seyd-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.good { color: var(--seyd-accent); font-weight: 600; }
+  td.bad { color: var(--seyd-amber); }
+  tr.us td { background: var(--seyd-surface-2); }
+  figure { margin: 0; display: grid; gap: 7px; align-content: start; min-height: 0; }
+  figure svg { width: 100%; height: auto; max-height: 100%; color: var(--seyd-ink); font-family: var(--seyd-font-mono); }
+  figcaption { font-size: 12px; line-height: 1.4; color: var(--seyd-muted); }
+  .wordmark { display: inline-flex; align-items: center; gap: 10px; font-family: var(--seyd-font-display); font-weight: 700; font-size: 22px; letter-spacing: -.02em; text-transform: none; color: var(--seyd-ink); }
+  .wordmark i { width: 22px; height: 22px; border-radius: 50%; background: var(--seyd-accent); position: relative; display: inline-block; }
+  .wordmark i::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--seyd-surface); }
+
+  /* ── navigation chrome ──────────────────────────────────────────────────── */
+  .rail { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); display: grid; gap: 8px; z-index: 5; }
+  .rail a { width: 8px; height: 8px; border-radius: 50%; background: var(--seyd-line); display: block; }
+  .rail a:focus-visible, .rail a.on { background: var(--seyd-accent); outline: none; }
+  .counter, .hint { position: fixed; bottom: 14px; font-family: var(--seyd-font-mono); font-size: 12px; color: var(--seyd-muted); z-index: 5; }
+  .counter { left: 18px; } .hint { right: 18px; }
+  .title-frame .body { align-content: center; gap: 26px; }
+  @media print { .slide { min-height: auto; page-break-after: always; padding: 0; } .rail, .counter, .hint { display: none; } .frame { border: none; width: 100%; } }
+  @media (max-width: 860px) {
+    .cols-2, .cols-3, .cols-32, .cols-23 { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr; }
+    .frame { aspect-ratio: auto; min-height: 0; }
+    html { scroll-snap-type: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-label="Slides"><a href="#s1" aria-label="Slide 1"></a><a href="#s2" aria-label="Slide 2"></a></nav>
+<div class="counter" id="counter">1 / 2</div>
+<div class="hint">← → to navigate</div>
+
+<!-- 1 · Title -->
+<section class="slide" id="s1">
+  <div class="frame title-frame">
+    <div class="eyebrow"><span class="wordmark"><i></i>Seyd</span><span class="n">seyd.io</span></div>
+    <div class="body">
+      <div style="display:grid;gap:16px">
+        <h1>A headline in the display face,<br>two lines at most.</h1>
+        <p class="lede">One sentence of standfirst in the body face. Say what the deck is for and who it is for.</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>17–31 ms</b><span>a measured number, with where it was measured</span></div>
+        <div class="stat"><b>Zero servers</b><span>a claim in three words, explained in one line</span></div>
+        <div class="stat"><b>A Chrome tab</b><span>the third of three; never four</span></div>
+      </div>
+    </div>
+    <div class="foot"><span>Footer text: the honest caveat or the source</span><span>1 / 2</span></div>
+  </div>
+</section>
+
+<!-- 2 · A content slide -->
+<section class="slide" id="s2">
+  <div class="frame">
+    <div class="eyebrow"><span>Section name</span><span class="n">2 / 2</span></div>
+    <div class="body cols-2">
+      <div class="col">
+        <h2>A slide title that states the point, not the topic.</h2>
+        <p>Body copy in the body face, at most 62 characters wide. Keep to two short paragraphs per column.</p>
+        <ul>
+          <li><b>Bold lead.</b> Then the sentence that earns it.</li>
+          <li><b>Colour means something.</b> <span class="tag on">direct</span> <span class="tag warn">relayed</span> <span class="tag stop">unreachable</span></li>
+        </ul>
+      </div>
+      <div class="col">
+        <div class="card"><h3>A card heading</h3><p>Cards sit on the sunken grey with no border. Use them for three parallel points, never for one.</p></div>
+        <div class="card lit"><h3>The one to notice</h3><p>An accent outline marks the single card that matters most on the slide.</p></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Path</th><th>Round trip</th><th>Glass to glass</th></tr></thead>
+            <tbody>
+              <tr><td>Wired LAN</td><td class="num">~1 ms</td><td class="num good">&lt;1 / 3 ms</td></tr>
+              <tr class="us"><td>Two cellular hops</td><td class="num">51 ms</td><td class="num good">31 / 59 ms</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="foot"><span>Where the numbers come from</span><span>2 / 2</span></div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+    var counter = document.getElementById('counter');
+    var current = 0;
+    function setCurrent(i) {
+      current = i;
+      dots.forEach(function (d, j) { d.classList.toggle('on', j === i); });
+      counter.textContent = (i + 1) + ' / ' + slides.length;
+    }
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting && e.intersectionRatio > 0.6) setCurrent(slides.indexOf(e.target)); });
+      }, { threshold: [0.6] });
+      slides.forEach(function (s) { io.observe(s); });
+    }
+    function go(i) { i = Math.max(0, Math.min(slides.length - 1, i)); slides[i].scrollIntoView({ block: 'start' }); setCurrent(i); }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); go(current + 1); }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); go(current - 1); }
+      if (e.key === 'Home') { e.preventDefault(); go(0); }
+      if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+    });
+    setCurrent(0);
+  })();
+</script>
+</body>
+</html>

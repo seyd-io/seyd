@@ -25,12 +25,27 @@ export class SeydVideoElement extends HTMLElement {
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
-        :host { display: block; position: relative; background: #000; color: #eee; font: 13px/1.4 system-ui, sans-serif; }
+        /* Overlays sit on the picture, so they use the scrim tokens, which do not flip
+           with the theme (docs/design.md). Fallbacks equal the tokens' values. */
+        :host {
+          display: block; position: relative; background: #000; color: var(--seyd-on-scrim, #e7eeec);
+          font: 12.5px/1.4 var(--seyd-font-body, "IBM Plex Sans", system-ui, sans-serif);
+        }
         canvas { display: block; width: 100%; height: 100%; object-fit: contain; touch-action: none; box-sizing: border-box; border: 3px solid transparent; }
-        canvas.degraded { border-color: #e33; }
-        .status { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; background: rgba(0,0,0,.6); border-radius: 4px; }
-        .status.connected { color: #7d7; } .status.error { color: #f77; } .status.relay { color: #fc6; }
-        .relay-badge { position: absolute; right: 8px; top: 8px; padding: 3px 9px; background: rgba(120,70,0,.85); color: #ffd27a; border: 1px solid #fc6; border-radius: 4px; font-weight: 600; letter-spacing: .04em; }
+        canvas.degraded { border-color: var(--seyd-danger, #e0776c); }
+        .status {
+          position: absolute; left: 8px; bottom: 8px; padding: 3px 9px; border-radius: var(--seyd-radius-sm, 3px);
+          background: var(--seyd-scrim, rgba(8,14,15,.72)); color: var(--seyd-on-scrim-2, #b4c2bf);
+          font-family: var(--seyd-font-mono, "IBM Plex Mono", ui-monospace, monospace); font-size: 11.5px;
+        }
+        .status.connected { color: var(--seyd-accent, #12a37a); }
+        .status.error { color: var(--seyd-danger, #e0776c); }
+        .status.relay { color: var(--seyd-amber, #d9a441); }
+        .relay-badge {
+          position: absolute; right: 8px; top: 8px; padding: 3px 9px; border-radius: 999px;
+          background: var(--seyd-scrim, rgba(8,14,15,.72)); color: var(--seyd-amber, #d9a441); border: 1px solid var(--seyd-amber, #d9a441);
+          font-family: var(--seyd-font-mono, "IBM Plex Mono", ui-monospace, monospace); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+        }
         .relay-badge[hidden] { display: none; }
         ::slotted(*) { position: absolute; }
       </style>

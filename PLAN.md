@@ -92,6 +92,7 @@ seyd/
 ├── cloud/api                  # TS Fastify+ws: /ws signal v2 + /api/v1; OIDC token verification (provider-agnostic); Postgres + Redis
 ├── cloud/prober               # cloud-side QUIC reachability probe of robot candidates
 ├── cloud/monitor              # synthetic pilot against the public demo robot
+├── web/theme                  # @seyd/theme: the design system as code — tokens, base styles, fonts, light/dark switch (docs/design.md)
 ├── web/site (Astro landing, seyd.io)   web/console (React: login, fleet, robots, tokens; console.seyd.io)   web/demo (demo.seyd.io on @seyd/web)
 ├── docs/  (Starlight, docs.seyd.io + docs/adr/)   deploy/ (Terraform GCP, Dockerfiles)
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program on sdks/python (camera.py lands here)
@@ -150,6 +151,8 @@ s.send('drive', payload, { reliable: false });
 await s.connect('robot-42');
 ```
 `@seyd/web`: `<seyd-video>`, `<seyd-hud>`, `<seyd-connect-error>` (Shadow DOM custom elements). `@seyd/react`: `<SeydVideo/>`, `useSeydSession()`, `useSeydStats()`. The public demo page is the first consumer.
+
+**One design system for everything a person sees (decided 2026-09-16, `docs/design.md`).** The demo, the console, the SDK overlays and the presentations share one set of tokens, three typefaces and four colour meanings (green = direct/online/primary, amber = relayed/in use/attention, red = stop, the rest neutral), in light and dark. `web/theme` (`@seyd/theme`) is the system as code: product surfaces import it and keep only layout in their own stylesheets; the SDK overlays read the same `--seyd-*` tokens from the host page with fallbacks, so a customer page that never heard of the theme still looks right. Fonts are bundled, never fetched from a CDN, because Seyd runs self-hosted and offline and a visitor's address must not leak for a typeface.
 
 ### 2.5 Cloud
 - **Hosting (portable by construction):** Cloud Run in `europe-west1` today, but nothing may depend on it. `cloud/api` is a plain Docker image talking to **Postgres** and **Redis** over standard protocols — Cloud SQL and Memorystore are used only as managed instances of those, never through GCP-specific SDKs. No Firestore, Pub/Sub, Cloud Tasks, Secret Manager APIs or IAM-bound identities in application code: secrets arrive as environment variables, background jobs are containers on a cron, cross-instance routing is Redis pub/sub. `deploy/` is Terraform with the GCP bits isolated in one module and a `docker-compose.yml` that runs the whole cloud locally — the same compose file is the migration proof (Hetzner/OVH/Scaleway or Kubernetes anywhere). Images are pushed to GHCR as well as Artifact Registry. Redis presence + pub/sub removes `--max-instances 1`; `min-instances 1` kills cold starts. New GCP project under the Seyd name; `signal.seyd.io`.

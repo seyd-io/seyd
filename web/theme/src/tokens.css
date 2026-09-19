@@ -1,0 +1,91 @@
+/*
+ * Seyd design tokens — the single source of truth for colour, type, spacing
+ * and radius on every Seyd web surface (docs/design.md). Presentations copy
+ * the two palettes below verbatim; product surfaces import this file.
+ *
+ * Theme mechanism: the complete light palette lives on bare :root. Dark is
+ * applied twice — once for the system preference (guarded so an explicit
+ * data-theme="light" still wins) and once for an explicit data-theme="dark".
+ * Never give a colour its only definition inside one of the dark blocks.
+ */
+:root {
+  color-scheme: light;
+
+  /* neutrals — a cool grey-green, never pure grey */
+  --seyd-bg:        #f2f5f4;   /* page ground */
+  --seyd-surface:   #ffffff;   /* cards, panels, table rows */
+  --seyd-surface-2: #e6ecea;   /* sunken: inputs, code, hover rows, nav */
+  --seyd-ink:       #10201f;   /* headings, primary text */
+  --seyd-ink-2:     #4a5c5a;   /* body text */
+  --seyd-muted:     #7f9290;   /* captions, labels, placeholders */
+  --seyd-line:      #cfd9d6;   /* 1px rules and borders */
+
+  /* meaning, not decoration */
+  --seyd-accent:     #0f8a68;  /* Seyd: the direct path, links, primary action, "online" */
+  --seyd-accent-ink: #ffffff;  /* text on an accent fill */
+  --seyd-accent-bg:  #dcefe7;  /* accent tint: active nav, selected row */
+  --seyd-amber:      #b8801c;  /* attention: relayed, in use, degraded, LAN-only */
+  --seyd-amber-bg:   #fbf1dc;
+  --seyd-danger:     #b3382f;  /* stop: errors, unreachable, destructive actions */
+  --seyd-danger-bg:  #f9e4e1;
+
+  /* over video: the picture is always dark, so these never flip with the theme */
+  --seyd-scrim:      rgba(8, 14, 15, 0.72);
+  --seyd-on-scrim:   #e7eeec;
+  --seyd-on-scrim-2: #b4c2bf;
+
+  /* type */
+  --seyd-font-display: "Familjen Grotesk", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --seyd-font-body:    "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --seyd-font-mono:    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* shape and rhythm */
+  --seyd-radius:    6px;
+  --seyd-radius-sm: 3px;
+  --seyd-space-1: 4px;
+  --seyd-space-2: 8px;
+  --seyd-space-3: 12px;
+  --seyd-space-4: 16px;
+  --seyd-space-5: 24px;
+  --seyd-space-6: 32px;
+  --seyd-space-7: 48px;
+  --seyd-measure: 62ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --seyd-bg:        #0e1618;
+    --seyd-surface:   #162124;
+    --seyd-surface-2: #1d2a2e;
+    --seyd-ink:       #e7eeec;
+    --seyd-ink-2:     #b4c2bf;
+    --seyd-muted:     #7f9290;
+    --seyd-line:      #2a3a3e;
+    --seyd-accent:     #12a37a;
+    --seyd-accent-ink: #06130f;
+    --seyd-accent-bg:  #143229;
+    --seyd-amber:      #d9a441;
+    --seyd-amber-bg:   #2a2413;
+    --seyd-danger:     #e0776c;
+    --seyd-danger-bg:  #3a1f1c;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --seyd-bg:        #0e1618;
+  --seyd-surface:   #162124;
+  --seyd-surface-2: #1d2a2e;
+  --seyd-ink:       #e7eeec;
+  --seyd-ink-2:     #b4c2bf;
+  --seyd-muted:     #7f9290;
+  --seyd-line:      #2a3a3e;
+  --seyd-accent:     #12a37a;
+  --seyd-accent-ink: #06130f;
+  --seyd-accent-bg:  #143229;
+  --seyd-amber:      #d9a441;
+  --seyd-amber-bg:   #2a2413;
+  --seyd-danger:     #e0776c;
+  --seyd-danger-bg:  #3a1f1c;
+}

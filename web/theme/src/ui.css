@@ -1,0 +1,178 @@
+/*
+ * Seyd base styles and shared components (docs/design.md). Element defaults
+ * plus the small vocabulary every product surface uses: eyebrow, wordmark,
+ * tag, dot, card, note, buttons, inputs, tables, facts list, theme switch.
+ * Page-specific layout stays in the page; nothing here knows about a page.
+ */
+@import "./tokens.css";
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--seyd-bg);
+  color: var(--seyd-ink);
+  font: 14px/1.5 var(--seyd-font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: var(--seyd-font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--seyd-ink);
+  margin: 0;
+  text-wrap: balance;
+}
+h1 { font-size: 24px; line-height: 1.15; }
+h2 { font-size: 18px; line-height: 1.2; }
+h3 { font-size: 15px; line-height: 1.3; letter-spacing: -0.005em; }
+p { margin: 0; }
+p + p { margin-top: 0.75em; }
+strong, b { font-weight: 600; color: var(--seyd-ink); }
+
+a { color: var(--seyd-accent); text-decoration: none; text-underline-offset: 2px; }
+a:hover { text-decoration: underline; }
+
+code, pre, kbd, .mono { font-family: var(--seyd-font-mono); }
+code { font-size: 0.92em; background: var(--seyd-surface-2); color: var(--seyd-ink); padding: 1px 5px; border-radius: var(--seyd-radius-sm); }
+pre { margin: 0; background: var(--seyd-surface-2); border-radius: var(--seyd-radius); padding: 12px 14px; font-size: 12.5px; line-height: 1.5; overflow-x: auto; color: var(--seyd-ink); }
+kbd { font-size: 0.85em; padding: 0 5px; border: 1px solid var(--seyd-line); border-bottom-width: 2px; border-radius: var(--seyd-radius-sm); background: var(--seyd-surface); color: var(--seyd-ink-2); }
+
+:focus-visible { outline: 2px solid var(--seyd-accent); outline-offset: 2px; }
+
+/* ── text roles ─────────────────────────────────────────────────────────── */
+
+.eyebrow {
+  font-family: var(--seyd-font-mono);
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--seyd-muted); margin: 0;
+}
+.eyebrow.accent { color: var(--seyd-accent); }
+.muted { color: var(--seyd-muted); }
+.error { color: var(--seyd-danger); }
+.empty { color: var(--seyd-muted); padding: 16px 0; }
+.lede { font-size: 16px; color: var(--seyd-ink-2); max-width: var(--seyd-measure); }
+.num { font-variant-numeric: tabular-nums; font-family: var(--seyd-font-mono); }
+
+/* ── wordmark ───────────────────────────────────────────────────────────── */
+
+.wordmark {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--seyd-font-display); font-weight: 700; font-size: 19px;
+  letter-spacing: -0.02em; color: var(--seyd-ink); text-decoration: none;
+}
+.wordmark:hover { text-decoration: none; }
+.wordmark i {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--seyd-accent);
+  position: relative; display: inline-block; flex: none;
+}
+.wordmark i::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: var(--seyd-bg); }
+.wordmark.on-surface i::after { background: var(--seyd-surface); }
+
+/* ── status: dot and tag ────────────────────────────────────────────────── */
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--seyd-line); vertical-align: 1px; flex: none; }
+.dot.on   { background: var(--seyd-accent); }
+.dot.warn { background: var(--seyd-amber); }
+.dot.stop { background: var(--seyd-danger); }
+.dot.off  { background: var(--seyd-line); }
+
+.tag {
+  display: inline-block; font-family: var(--seyd-font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.5;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--seyd-line);
+  color: var(--seyd-ink-2); background: transparent; white-space: nowrap;
+}
+.tag.on   { border-color: var(--seyd-accent); color: var(--seyd-accent); }
+.tag.warn { border-color: var(--seyd-amber);  color: var(--seyd-amber);  background: var(--seyd-amber-bg); }
+.tag.stop { border-color: var(--seyd-danger); color: var(--seyd-danger); background: var(--seyd-danger-bg); }
+.tag.fill { background: var(--seyd-accent); border-color: var(--seyd-accent); color: var(--seyd-accent-ink); }
+
+/* ── surfaces ───────────────────────────────────────────────────────────── */
+
+.card { background: var(--seyd-surface); border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius); padding: 14px 16px; }
+.card.sunk { background: var(--seyd-surface-2); border-color: transparent; }
+.card h3 { margin-bottom: 4px; }
+.card p { color: var(--seyd-ink-2); }
+
+.note {
+  border-left: 3px solid var(--seyd-accent); background: var(--seyd-surface);
+  border-radius: 0 var(--seyd-radius) var(--seyd-radius) 0; padding: 12px 16px;
+}
+.note.warn { border-left-color: var(--seyd-amber); background: var(--seyd-amber-bg); }
+.note.stop { border-left-color: var(--seyd-danger); background: var(--seyd-danger-bg); }
+.note .eyebrow { margin-bottom: 6px; }
+.note.warn .eyebrow { color: var(--seyd-amber); }
+.note.stop .eyebrow { color: var(--seyd-danger); }
+
+hr { border: 0; border-top: 1px solid var(--seyd-line); margin: 24px 0; }
+
+/* ── controls ───────────────────────────────────────────────────────────── */
+
+button, input, select, textarea {
+  font: inherit; color: var(--seyd-ink);
+  border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius);
+  background: var(--seyd-surface); padding: 6px 11px; line-height: 1.4;
+}
+input, select, textarea { background: var(--seyd-surface); min-width: 0; }
+input::placeholder, textarea::placeholder { color: var(--seyd-muted); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--seyd-accent); box-shadow: 0 0 0 3px var(--seyd-accent-bg); }
+
+button { cursor: pointer; white-space: nowrap; }
+button:hover:not(:disabled) { border-color: var(--seyd-muted); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary, button[type="submit"], a.button.primary {
+  background: var(--seyd-accent); border-color: var(--seyd-accent); color: var(--seyd-accent-ink); font-weight: 600;
+}
+button.primary:hover:not(:disabled), button[type="submit"]:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--seyd-accent); }
+button.link { background: none; border-color: transparent; color: var(--seyd-accent); padding: 2px 4px; }
+button.link:hover:not(:disabled) { text-decoration: underline; border-color: transparent; }
+button.danger, a.danger { color: var(--seyd-danger); }
+button.danger:not(.link) { border-color: var(--seyd-danger); background: transparent; }
+button.danger:not(.link):hover:not(:disabled) { background: var(--seyd-danger-bg); }
+button.small, a.button.small { padding: 3px 9px; font-size: 12.5px; }
+button[aria-pressed="true"] { background: var(--seyd-accent-bg); border-color: var(--seyd-accent); color: var(--seyd-accent); }
+
+a.button {
+  display: inline-block; border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius);
+  padding: 6px 11px; line-height: 1.4; color: var(--seyd-ink); background: var(--seyd-surface); white-space: nowrap;
+}
+a.button:hover { text-decoration: none; border-color: var(--seyd-muted); }
+a.button.disabled { opacity: 0.45; pointer-events: none; }
+
+form.inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── tables ─────────────────────────────────────────────────────────────── */
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-family: var(--seyd-font-mono); font-weight: 500;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--seyd-muted); padding: 6px 10px; border-bottom: 1px solid var(--seyd-line);
+}
+td { padding: 9px 10px; border-bottom: 1px solid var(--seyd-line); vertical-align: middle; color: var(--seyd-ink); }
+tbody tr:last-child td { border-bottom-color: transparent; }
+tbody tr.row-link { cursor: pointer; }
+tbody tr.row-link:hover td { background: var(--seyd-surface-2); }
+td.num, th.num { text-align: right; }
+
+/* ── facts: a key/value list ────────────────────────────────────────────── */
+
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 0; }
+dl.facts dt { font-family: var(--seyd-font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--seyd-muted); padding-top: 3px; }
+dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { dl.facts { grid-template-columns: 1fr; gap: 2px 0; } dl.facts dd { margin-bottom: 8px; } }
+
+/* ── theme switch (index.ts owns the behaviour) ─────────────────────────── */
+
+.theme-switch { display: inline-flex; border: 1px solid var(--seyd-line); border-radius: 999px; padding: 2px; background: var(--seyd-surface); gap: 2px; }
+.theme-switch button {
+  border: 0; background: transparent; border-radius: 999px; padding: 2px 9px;
+  font-family: var(--seyd-font-mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--seyd-muted);
+}
+.theme-switch button:hover:not(:disabled) { color: var(--seyd-ink); }
+.theme-switch button[aria-pressed="true"] { background: var(--seyd-surface-2); color: var(--seyd-ink); }

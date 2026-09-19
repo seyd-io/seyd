@@ -52,16 +52,26 @@ export class SeydConnectErrorElement extends HTMLElement {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>
-      :host { display: block; font: 14px/1.45 system-ui, sans-serif; color: #eee; }
-      .box { position: relative; background: #3a1c1c; border: 1px solid #a33; border-radius: 8px; padding: 12px 36px 12px 16px; max-width: 560px; }
-      .box.relayed { background: #3a2a10; border-color: #c93; }
-      .box.relayed.compact { padding: 6px 36px 6px 12px; font-size: 13px; white-space: nowrap; }
-      .box[hidden] { display: none; } h3 { margin: 0 0 6px; font-size: 15px; } p { margin: 0 0 8px; } a { color: #9cf; }
-      details { font-size: 12px; opacity: .8 } pre { white-space: pre-wrap; margin: 4px 0 0; }
+      /* Over the picture: scrim tokens, so the box reads the same in both themes.
+         Red border = no session; amber border = relayed (docs/design.md). */
+      :host { display: block; font: 13.5px/1.45 var(--seyd-font-body, "IBM Plex Sans", system-ui, sans-serif); color: var(--seyd-on-scrim, #e7eeec); }
+      .box {
+        position: relative; max-width: 560px; padding: 12px 36px 12px 16px; border-radius: var(--seyd-radius, 6px);
+        background: var(--seyd-scrim, rgba(8,14,15,.72)); border: 1px solid var(--seyd-danger, #e0776c); border-left-width: 3px;
+        backdrop-filter: blur(6px);
+      }
+      .box.relayed { border-color: var(--seyd-amber, #d9a441); }
+      .box.relayed.compact { padding: 6px 36px 6px 12px; font-size: 12.5px; white-space: nowrap; }
+      .box[hidden] { display: none; }
+      h3 { margin: 0 0 6px; font: 600 14px/1.3 var(--seyd-font-display, "Familjen Grotesk", system-ui, sans-serif); letter-spacing: -.005em; }
+      .relayed h3 { color: var(--seyd-amber, #d9a441); }
+      p { margin: 0 0 8px; color: var(--seyd-on-scrim-2, #b4c2bf); }
+      a { color: var(--seyd-accent, #12a37a); }
+      details { font-size: 11.5px; opacity: .8; font-family: var(--seyd-font-mono, ui-monospace, monospace); } pre { white-space: pre-wrap; margin: 4px 0 0; }
       button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
       .close { position: absolute; top: 6px; right: 8px; font-size: 18px; line-height: 1; opacity: .7; padding: 2px 6px; }
       .close:hover { opacity: 1; }
-      .why { text-decoration: underline; color: #ffd27a; margin-left: 8px; }
+      .why { text-decoration: underline; color: var(--seyd-amber, #d9a441); margin-left: 8px; }
     </style><div class="box" hidden></div>`;
     this.box = root.querySelector('.box')!;
     this.box.addEventListener('click', (e) => {

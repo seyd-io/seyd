@@ -14,8 +14,14 @@ export class SeydHudElement extends HTMLElement {
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>
       :host { display: block; }
-      pre { margin: 0; padding: 8px 10px; background: rgba(0,0,0,.7); color: #ddd; font: 12px/1.35 ui-monospace, Menlo, monospace; border-radius: 6px; white-space: pre; }
-      pre[hidden] { display: none; } .ok { color: #7d7 } .warn { color: #fd6 } .bad { color: #f66 }
+      /* Over the picture: scrim tokens, never the theme's surface (docs/design.md). */
+      pre {
+        margin: 0; padding: 8px 10px; border-radius: var(--seyd-radius, 6px); white-space: pre;
+        background: var(--seyd-scrim, rgba(8,14,15,.72)); color: var(--seyd-on-scrim, #e7eeec);
+        font: 12px/1.35 var(--seyd-font-mono, "IBM Plex Mono", ui-monospace, Menlo, monospace);
+      }
+      pre[hidden] { display: none; }
+      .ok { color: var(--seyd-accent, #12a37a) } .warn { color: var(--seyd-amber, #d9a441) } .bad { color: var(--seyd-danger, #e0776c) }
     </style><pre hidden></pre>`;
     this.pre = root.querySelector('pre')!;
     try { this._visible = localStorage.getItem('seyd.hud') === '1'; } catch { /* no storage */ }

@@ -1,4 +1,5 @@
 import '@seyd/web';
+import { mountThemeSwitch } from '@seyd/theme';
 import type { SeydSession } from '@seyd/core';
 import type { SeydConnectErrorElement, SeydHudElement, SeydVideoElement } from '@seyd/web';
 import { PtzController } from './ptz.js';
@@ -25,6 +26,7 @@ const roleEl = document.getElementById('role')!;
 const lanHintEl = document.getElementById('lan-hint')!;
 document.getElementById('robot')!.textContent = ROBOT_ID;
 qosSelect.value = qos;
+mountThemeSwitch(document.getElementById('theme-switch')!);
 
 let ptz: PtzController | null = null;
 
@@ -38,7 +40,8 @@ video.addEventListener('seyd-session', (e) => {
     const hasPtz = session.hasCommandChannel('ptz');
     ptz?.setEnabled(hasPtz && role === 'driver');
     roleEl.textContent = role === 'driver' ? 'driver' : 'observer — someone else is driving; controls disabled';
-    roleEl.className = `badge ${role}`;
+    // Driver in the accent (you hold the direct path); observer in amber (someone else does).
+    roleEl.className = role === 'driver' ? 'tag on' : 'tag warn';
     roleEl.hidden = false;
     // Chrome refuses a public-origin page a direct connection to a private IP
     // (Local Network Access) unless the user allows it; the race then falls

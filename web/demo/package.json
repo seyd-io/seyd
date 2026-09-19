@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@seyd/core": "workspace:*",
+    "@seyd/theme": "workspace:*",
     "@seyd/web": "workspace:*"
   },
   "devDependencies": {

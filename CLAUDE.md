@@ -42,6 +42,11 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   latency number; the HUD's "g2g" is not glass-to-glass.
 - **docs/encoder-setup.md** — how a publisher (x264, GStreamer, NVENC, Jetson,
   Hikvision, Axis, ONVIF) must be configured for Seyd, and how to verify it.
+- **docs/design.md** — the design system: tokens, type, the meaning of each
+  colour, light and dark mode, the shared components. `web/theme`
+  (`@seyd/theme`) is the same system as code; every web surface imports it,
+  and presentations copy its palettes. Read before touching anything a person
+  sees.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
@@ -117,7 +122,8 @@ seyd/
 ├── cloud/api      # signal v2 + console API; authn/ (pluggable) + accounts/ (ours)
 │   └── db/migrations/         # the schema, applied at boot
 ├── cloud/prober  cloud/monitor
-├── web/site  web/console  web/demo
+├── web/theme      # @seyd/theme: design tokens, base styles, self-hosted fonts, theme switch (docs/design.md)
+├── web/site  web/console  web/demo   # every surface imports @seyd/theme; page files hold layout only
 ├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
