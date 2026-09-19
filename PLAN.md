@@ -177,7 +177,27 @@ Agent `NatReport` in `announce` (refreshed on network change): ipv4 `{local, pub
 | cert / token mismatch | Stale robot cert or token; reconnect. |
 
 ### 2.7 Landing page and public demo
-`web/site` (Astro, static; served from the same Cloud Run/nginx container pattern as the console so it moves with everything else — a CDN in front is optional and must stay optional; `seyd.io` with `seydio.com` redirecting; a self-hostable captcha such as Altcha/Turnstile on the form): `/` hero with live demo embed + request-a-demo, `/how-it-works` (single encode chain, no jitter buffer, P2P, FEC — the measured numbers), `/demo`, `/request-demo` (→ `POST /api/v1/demo-requests` → Postgres + email + Slack), `/docs`, `/pricing` placeholder, `/security`. Demo on the new stack: `examples/demo-robot` (Python SDK over `libseyd`, Hikvision driver, keyframe/recovery via ISAPI), driver + observer sessions with a 90 s driver slot and queue, PTZ ignored from observers, per-IP slot limits, PTZ rate cap, auto-home on session end, RTSP-stall watchdog, `cloud/monitor` synthetic pilot every 5 min → Slack, camera DHCP reservation. `seyd-demo` has a public `observe/drive` grant; every other robot needs a token.
+**As built (2026-09-19): the landing page is `web/demo/index.html`**, served at
+`/` by seyd-signal together with the pilot page and the console. It is the
+demo page grown into a landing page: the hero carries the live robot list
+(the demo is the proof), and the sections below it are the pitch deck and the
+*Inside the Seyd Engine / Cloud* walkthroughs condensed for a visitor — the
+problem, how it works, the latency stack, loss handling, reachability and the
+relay as the shown last resort, integration (the real `seydd.toml` and
+`<seyd-video>` shapes), use cases, the measured field numbers with the span
+each covers, cloud and identity, the tiers without prices, and the ordered
+roadmap. Layout only in the page; tokens and components from `@seyd/theme`
+(docs/design.md); no request-a-demo form yet because there is no endpoint or
+mailbox for it. Every number on the page must be re-measured when the code it
+describes changes (CLAUDE.md), and the roadmap column must move with PLAN.md.
+
+Still planned, when a customer or a launch pulls it: a separate `web/site`
+(Astro, static; same container pattern as the console so it moves with
+everything else — a CDN in front is optional and must stay optional; `seyd.io`
+with `seydio.com` redirecting; a self-hostable captcha such as Altcha/Turnstile
+on the form) with `/how-it-works`, `/docs`, `/pricing`, `/security` and
+`/request-demo` (→ `POST /api/v1/demo-requests` → Postgres + email + Slack).
+Demo on the new stack: `examples/demo-robot` (Python SDK over `libseyd`, Hikvision driver, keyframe/recovery via ISAPI), driver + observer sessions with a 90 s driver slot and queue, PTZ ignored from observers, per-IP slot limits, PTZ rate cap, auto-home on session end, RTSP-stall watchdog, `cloud/monitor` synthetic pilot every 5 min → Slack, camera DHCP reservation. `seyd-demo` has a public `observe/drive` grant; every other robot needs a token.
 
 ---
 

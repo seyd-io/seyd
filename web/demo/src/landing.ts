@@ -1,4 +1,4 @@
-// Landing page: live list of robots from the signal server's console presence
+// Landing page (marketing sections are static HTML): live list of robots from the signal server's console presence
 // feed (docs/protocol/signal-v2.md), with a REST fallback. Old links of the
 // form /?robot=<id> are forwarded to the pilot page.
 import { mountThemeSwitch } from '@seyd/theme';
@@ -60,7 +60,7 @@ function esc(s: unknown): string {
 }
 
 function render(robots: Robot[]): void {
-  if (!robots.length) { listEl.innerHTML = '<div class="empty">No robots registered.</div>'; return; }
+  if (!robots.length) { listEl.innerHTML = '<div class="empty">No robot is online right now. The demo camera comes and goes; check back shortly.</div>'; return; }
   const sorted = [...robots].sort((a, b) => Number(b.online) - Number(a.online) || a.robot_id.localeCompare(b.robot_id));
   listEl.innerHTML = sorted.map((r) => {
     const sessions = r.sessions ?? [];

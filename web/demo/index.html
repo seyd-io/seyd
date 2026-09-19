@@ -4,30 +4,71 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Seyd</title>
+  <title>Seyd — remote operation that feels local</title>
+  <meta name="description" content="Seyd is the connectivity layer for robots and autonomous vehicles: video, sensors and commands go straight from the machine to the operator's browser, with nothing in between. Open-source SDKs, a signalling cloud in the EU, and a live camera you can drive now." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%2312a37a%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27white%27/%3E%3C/svg%3E">
   <style>
-    /* Page layout only; tokens, type and components come from @seyd/theme (docs/design.md). */
-    .page { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 100dvh; }
-    .left { padding: 56px 64px 48px; display: flex; flex-direction: column; gap: 40px; border-right: 1px solid var(--seyd-line); }
-    .right { padding: 56px 40px 40px; background: var(--seyd-surface); display: flex; flex-direction: column; }
-    @media (max-width: 820px) {
-      .page { grid-template-columns: 1fr; }
-      .left { border-right: none; border-bottom: 1px solid var(--seyd-line); padding: 36px 24px; gap: 28px; }
-      .right { padding: 32px 24px; }
-    }
-    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-    .hero { display: grid; gap: 18px; }
-    .hero h1 { font-size: clamp(32px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -0.022em; max-width: 14ch; }
-    .hero .lede { max-width: 48ch; }
-    .body-text { color: var(--seyd-ink-2); max-width: var(--seyd-measure); line-height: 1.65; }
-    .attrs { display: grid; gap: 10px; }
-    .attr { display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: baseline; color: var(--seyd-ink-2); }
-    .attr .eyebrow { padding-top: 2px; }
-    .foot { margin-top: auto; padding-top: 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-family: var(--seyd-font-mono); font-size: 11.5px; color: var(--seyd-muted); }
-    .foot a { color: var(--seyd-muted); }
+    /* Page layout only; tokens, type and components come from @seyd/theme (docs/design.md).
+       The page is one long column of sections separated by 1px rules; the hero carries the
+       live robot list because the demo is the proof. */
+    html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body { font-size: 15px; }
+    .wrap { width: min(1180px, 100% - 64px); margin: 0 auto; }
+    @media (max-width: 820px) { .wrap { width: min(1180px, 100% - 40px); } }
 
-    .panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+    /* masthead */
+    .masthead { position: sticky; top: 0; z-index: 5; background: var(--seyd-bg); border-bottom: 1px solid var(--seyd-line); }
+    .masthead .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+    .masthead nav { display: flex; gap: 18px; margin-left: auto; font-family: var(--seyd-font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .masthead nav a { color: var(--seyd-muted); }
+    .masthead nav a:hover { color: var(--seyd-ink); text-decoration: none; }
+    .masthead nav a.button { text-transform: none; letter-spacing: 0; font-family: var(--seyd-font-body); font-size: 13px; padding: 4px 11px; color: var(--seyd-ink); }
+    @media (max-width: 960px) { .masthead nav a:not(.button) { display: none; } }
+
+    /* sections */
+    section { padding: 72px 0; border-bottom: 1px solid var(--seyd-line); }
+    section:last-of-type { border-bottom: none; }
+    @media (max-width: 820px) { section { padding: 48px 0; } }
+    .section-head { display: grid; gap: 14px; margin-bottom: 36px; max-width: 760px; }
+    .section-head h2 { font-size: clamp(26px, 3vw, 36px); line-height: 1.12; letter-spacing: -0.018em; }
+    .section-head .lede { font-size: 16.5px; line-height: 1.55; }
+    .body-text { color: var(--seyd-ink-2); max-width: var(--seyd-measure); line-height: 1.65; }
+    .body-text + .body-text { margin-top: 14px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; align-items: start; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; align-items: start; }
+    .grid-23 { display: grid; grid-template-columns: 2fr 3fr; gap: 40px; align-items: start; }
+    .grid-32 { display: grid; grid-template-columns: 3fr 2fr; gap: 40px; align-items: start; }
+    .col { display: grid; gap: 14px; align-content: start; }
+    .grid-2 > *, .grid-3 > *, .grid-4 > *, .grid-23 > *, .grid-32 > * { min-width: 0; } /* a wide <pre> must scroll, not widen the column */
+    @media (max-width: 960px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-3 { grid-template-columns: 1fr; } }
+    @media (max-width: 820px) { .grid-2, .grid-23, .grid-32, .grid-4 { grid-template-columns: 1fr; gap: 28px; } }
+
+    .card.sunk h3 { margin-bottom: 6px; }
+    .card p { font-size: 14px; line-height: 1.5; }
+    .card .tag { margin-bottom: 10px; }
+    .card.lit { border-color: var(--seyd-accent); }
+    ul.points { margin: 0; padding-left: 18px; color: var(--seyd-ink-2); line-height: 1.55; display: grid; gap: 8px; }
+    ul.points li b { color: var(--seyd-ink); }
+
+    /* hero */
+    .hero { padding: 64px 0 56px; }
+    .hero .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 56px; align-items: start; }
+    @media (max-width: 960px) { .hero .grid { grid-template-columns: 1fr; gap: 40px; } }
+    .hero h1 { font-size: clamp(34px, 4.8vw, 58px); line-height: 1.04; letter-spacing: -0.022em; max-width: 15ch; }
+    .hero .lede { max-width: 50ch; font-size: 17px; line-height: 1.55; margin-top: 20px; }
+    .hero .cta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 28px; }
+    .hero .cta a.button { padding: 8px 16px; font-size: 14px; font-weight: 500; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--seyd-line); }
+    @media (max-width: 600px) { .stats { grid-template-columns: 1fr; gap: 18px; } }
+    .stat b { display: block; font-family: var(--seyd-font-display); font-weight: 700; font-size: clamp(26px, 2.6vw, 34px); line-height: 1.05; letter-spacing: -0.02em; color: var(--seyd-ink); font-variant-numeric: tabular-nums; }
+    .stat span { display: block; margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--seyd-muted); }
+
+    /* the live robot panel */
+    .panel { background: var(--seyd-surface); border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius); padding: 22px 24px 18px; display: flex; flex-direction: column; min-height: 320px; }
+    .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .panel-note { font-size: 13px; color: var(--seyd-muted); line-height: 1.5; margin-bottom: 8px; }
     .robot-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--seyd-line); }
     .robot-item:last-child { border-bottom: none; }
     .robot-left { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
@@ -36,45 +77,520 @@
     .robot-id { font-family: var(--seyd-font-display); font-weight: 600; font-size: 15px; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .robot-status { font-size: 12.5px; color: var(--seyd-muted); }
     .robot-status .mono { font-size: 11.5px; }
-    .signal-status { margin-top: auto; padding-top: 32px; display: flex; align-items: center; gap: 8px; font-family: var(--seyd-font-mono); font-size: 11.5px; color: var(--seyd-muted); }
+    .signal-status { margin-top: auto; padding-top: 18px; display: flex; align-items: center; gap: 8px; font-family: var(--seyd-font-mono); font-size: 11.5px; color: var(--seyd-muted); }
     .signal-status .dot { width: 6px; height: 6px; }
+
+    /* figures */
+    figure { margin: 0; display: grid; gap: 10px; }
+    figure svg { width: 100%; height: auto; display: block; color: var(--seyd-ink); font-family: var(--seyd-font-mono); }
+    figure svg .lbl { fill: var(--seyd-muted); font-size: 10.5px; }
+    figure svg .node { fill: var(--seyd-ink); font-family: var(--seyd-font-display); font-weight: 600; font-size: 13px; }
+    figure svg .sub { fill: var(--seyd-muted); font-size: 11px; }
+    figcaption { font-size: 12.5px; line-height: 1.5; color: var(--seyd-muted); max-width: 62ch; }
+    .figframe { background: var(--seyd-surface); border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius); padding: 20px 20px 16px; overflow-x: auto; }
+    /* On a phone the diagrams scroll sideways inside their frame rather than shrinking to unreadable. */
+    @media (max-width: 600px) { figure svg { min-width: 520px; } .figframe { padding: 16px 14px 12px; } }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--seyd-font-mono); font-size: 11px; color: var(--seyd-muted); }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--seyd-line); }
+    .legend .acc::before { background: var(--seyd-accent); }
+    .legend .amb::before { background: var(--seyd-amber); }
+    .legend .neu::before { background: var(--seyd-muted); }
+    .legend .bud::before { background: transparent; border: 1.5px dashed var(--seyd-accent); box-sizing: border-box; }
+
+    /* tables */
+    .tablewrap table { font-size: 14px; }
+    td .sub { display: block; font-size: 12px; color: var(--seyd-muted); }
+    td.bad { color: var(--seyd-amber); }
+    td.good { color: var(--seyd-accent); font-weight: 600; }
+    tr.us td { background: var(--seyd-surface-2); }
+    tr.us td:first-child { border-radius: var(--seyd-radius) 0 0 var(--seyd-radius); }
+    tr.us td:last-child { border-radius: 0 var(--seyd-radius) var(--seyd-radius) 0; }
+
+    /* code */
+    pre { font-size: 12.5px; line-height: 1.55; }
+    pre .k { color: var(--seyd-accent); }
+    pre .c { color: var(--seyd-muted); }
+    .snippet h3 { margin-bottom: 10px; }
+    .snippet p { margin-top: 10px; font-size: 14px; color: var(--seyd-ink-2); line-height: 1.5; }
+
+    /* roadmap */
+    .road .tag { margin-bottom: 10px; }
+    .road ul.points { font-size: 14px; }
+
+    /* footer */
+    footer { padding: 28px 0 40px; display: flex; gap: 16px 24px; align-items: center; flex-wrap: wrap; font-family: var(--seyd-font-mono); font-size: 11.5px; color: var(--seyd-muted); border-top: 1px solid var(--seyd-line); }
+    footer a { color: var(--seyd-muted); }
+    footer .theme-switch { margin-left: auto; }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="left">
-      <div class="masthead">
-        <a class="wordmark" href="./"><i></i>Seyd</a>
-        <span class="eyebrow">seyd.io · public demo</span>
+  <header class="masthead">
+    <div class="wrap">
+      <a class="wordmark" href="./"><i></i>Seyd</a>
+      <nav aria-label="Sections">
+        <a href="#how">How it works</a>
+        <a href="#reach">Reachability</a>
+        <a href="#integrate">Integrate</a>
+        <a href="#measured">Measured</a>
+        <a href="#cloud">Cloud</a>
+        <a href="#model">Pricing</a>
+        <a class="button" href="./console/">Console</a>
+        <a class="button primary" href="#robots">Live demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero: the pitch on the left, the live fleet on the right -->
+  <section class="hero" id="top">
+    <div class="wrap grid">
+      <div>
+        <p class="eyebrow accent">Connectivity for robots and autonomous vehicles</p>
+        <h1 style="margin-top:14px">Remote operation that feels local.</h1>
+        <p class="lede">Seyd puts a person at the controls of a machine anywhere on the internet. Video, sensors and commands go straight from the robot to the operator's browser, with nothing in between. Drop it into your robot and your UI. Keep everything else.</p>
+        <div class="cta">
+          <a class="button primary" href="#robots">Drive the live camera</a>
+          <a class="button" href="#integrate">How it integrates</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>17–31 ms</b><span>median robot-to-browser latency, measured over one and two cellular hops</span></div>
+          <div class="stat"><b>0 servers</b><span>in the media path. On a direct session your video never touches our cloud</span></div>
+          <div class="stat"><b>1 browser tab</b><span>Chrome or Edge, desktop or Android. Nothing to install</span></div>
+        </div>
       </div>
-      <div class="hero">
-        <h1>Drive your robot from anywhere, as if you were standing next to it.</h1>
-        <p class="lede">Remote operation infrastructure for autonomous vehicles and robots: video, sensors and commands travel straight from the machine to the operator's browser, with nothing in between.</p>
+      <aside class="panel" id="robots" aria-labelledby="robots-h">
+        <div class="panel-head"><h2 id="robots-h">Live robots</h2><span class="eyebrow">from the cloud</span></div>
+        <p class="panel-note">A real steerable camera on a real network, connected the way a customer robot would be. Take the wheel and judge the latency yourself.</p>
+        <div id="robot-list"><div class="empty">Connecting…</div></div>
+        <div class="signal-status"><span class="dot" id="signal-dot"></span><span id="signal-text">connecting</span></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- The problem -->
+  <section id="problem">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">The problem</p>
+        <h2>The internet was not built for driving things.</h2>
+        <p class="lede">Every team hits the same three walls: the picture lags, it smears the moment the robot moves, and the robot cannot be reached from outside its own network. The familiar tools were built for other jobs.</p>
       </div>
-      <p class="body-text">
-        Seyd is a connectivity layer — an agent SDK on the robot, a pilot SDK in
-        the browser, and a signaling cloud that brokers a direct, point-to-point
-        connection between them over the public internet. Low-latency video,
-        sensor data and commands. No transcoding. A relay only as the last resort,
-        and never hidden. Your stack, your UI.
-      </p>
-      <div class="attrs">
-        <div class="attr"><span class="eyebrow">Video</span><span>H.264 · single encode chain · no jitter buffer · WebCodecs</span></div>
-        <div class="attr"><span class="eyebrow">Transport</span><span>QUIC datagrams over WebTransport, peer to peer</span></div>
-        <div class="attr"><span class="eyebrow">Resilience</span><span>Reed-Solomon FEC per block · recovery in one round trip</span></div>
-        <div class="attr"><span class="eyebrow">Integration</span><span>Rust core with a C ABI · <code>seydd</code> daemon · web components</span></div>
-      </div>
-      <div class="foot">
-        <span>Seyd · remote operation for robotics and autonomous-vehicle companies</span>
-        <span id="theme-switch"></span>
+      <div class="grid-32">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th style="width:22%">Familiar tool</th><th style="width:26%">Built for</th><th>Why it breaks down for driving</th></tr></thead>
+            <tbody>
+              <tr><td><b>SSH tunnels</b></td><td>Files and terminals</td><td class="bad">"Reliable" means it stops and re-sends whenever data goes missing. Every loss becomes a freeze.</td></tr>
+              <tr><td><b>Remote desktop</b><span class="sub">VNC, RDP</span></td><td>Viewing a screen</td><td class="bad">The feed is decoded, redrawn and re-compressed before it ships. Delay and quality lost at every step.</td></tr>
+              <tr><td><b>VPNs</b><span class="sub">WireGuard, Tailscale</span></td><td>Joining two networks</td><td class="bad">A tunnel moves bytes. It cannot tell a frame from a steering command, or ask your camera to adapt.</td></tr>
+              <tr><td><b>Video-call tech</b><span class="sub">WebRTC platforms</span></td><td>Smooth conversation</td><td class="bad">Buffers on purpose to look smooth. Harmless in a meeting; undriveable in a vehicle.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="col">
+          <div class="card sunk"><h3>The pattern</h3><p>All of them treat your data as anonymous bytes on a reliable pipe. Driving needs the opposite: a system that knows a video frame from a steering command, and what to drop when the network has a bad second.</p></div>
+          <div class="card sunk"><h3>The honest version</h3><p>On a perfect wired LAN a VPN gets close. Robots live behind 4G routers, satellite dishes and factory firewalls.</p></div>
+        </div>
       </div>
     </div>
-    <div class="right">
-      <div class="panel-head"><h2>Robots</h2><span class="eyebrow">live from the cloud</span></div>
-      <div id="robot-list"><div class="empty">Connecting…</div></div>
-      <div class="signal-status"><span class="dot" id="signal-dot"></span><span id="signal-text">connecting</span></div>
+  </section>
+
+  <!-- What Seyd is -->
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">How it works</p>
+        <h2>Our cloud makes the introduction. Then it gets out of the way.</h2>
+        <p class="lede">A small program on the robot, one element in the operator's web page, and a signalling cloud that brokers a direct, encrypted connection between them. Video, sensors and commands never pass through our servers.</p>
+      </div>
+      <div class="grid-32">
+        <figure>
+          <div class="figframe">
+            <svg viewBox="0 0 660 300" role="img" aria-label="The robot and the operator each announce themselves to the Seyd cloud; video, sensors and commands then travel directly between the two, encrypted, never passing through the cloud.">
+              <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+              <rect x="210" y="8" width="240" height="74" rx="6" fill="var(--seyd-surface-2)" stroke="var(--seyd-line)"/>
+              <text class="node" x="330" y="34" text-anchor="middle">Seyd cloud · EU</text>
+              <text class="sub" x="330" y="54" text-anchor="middle">who is online, who may connect</text>
+              <text class="sub" x="330" y="70" text-anchor="middle">a few kilobytes per session</text>
+
+              <rect x="0" y="140" width="180" height="140" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+              <text class="node" x="90" y="168" text-anchor="middle">Your robot</text>
+              <rect x="14" y="182" width="152" height="26" rx="3" fill="var(--seyd-accent-bg)"/>
+              <text x="90" y="200" text-anchor="middle" font-size="11" fill="var(--seyd-accent)">seydd or the SDK</text>
+              <text class="sub" x="90" y="230" text-anchor="middle">cameras &amp; sensors</text>
+              <text class="sub" x="90" y="250" text-anchor="middle">your control software</text>
+
+              <rect x="480" y="140" width="180" height="140" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+              <text class="node" x="570" y="168" text-anchor="middle">Your operator</text>
+              <rect x="494" y="182" width="152" height="26" rx="3" fill="var(--seyd-accent-bg)"/>
+              <text x="570" y="200" text-anchor="middle" font-size="11" fill="var(--seyd-accent)">&lt;seyd-video&gt; element</text>
+              <text class="sub" x="570" y="230" text-anchor="middle">live video &amp; gauges</text>
+              <text class="sub" x="570" y="250" text-anchor="middle">wheel or joystick</text>
+
+              <line x1="128" y1="140" x2="216" y2="86" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+              <text class="lbl" x="140" y="106" text-anchor="end">I'm online</text>
+              <line x1="532" y1="140" x2="444" y2="86" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+              <text class="lbl" x="520" y="106" text-anchor="start">let me drive robot X</text>
+
+              <line x1="186" y1="205" x2="474" y2="205" stroke="var(--seyd-accent)" stroke-width="3" marker-end="url(#ar)" marker-start="url(#ar)" style="color: var(--seyd-accent)"/>
+              <text x="330" y="192" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--seyd-accent)">video · sensors · commands</text>
+              <text class="lbl" x="330" y="228" text-anchor="middle">direct · encrypted · QUIC</text>
+            </svg>
+          </div>
+          <figcaption>The two thin lines are coordination and carry a few kilobytes. The thick line carries everything that matters, and our servers never see it.</figcaption>
+        </figure>
+        <div class="col">
+          <div class="card sunk"><h3>Your video, untouched</h3><p>We forward your camera's own encoded bytes. Never decoded, re-compressed or stored. Quality is whatever your camera produces; privacy is structural, not a policy.</p></div>
+          <div class="card sunk"><h3>One driver, many watchers</h3><p>One click takes the wheel; colleagues watch the same feed read-only. The robot itself enforces a single driver, and the console shows who has it.</p></div>
+          <div class="card sunk"><h3>Honest when it cannot connect</h3><p>If a network blocks direct connections, Seyd names what it found and the setting to change. If you allow it, our relay carries the session as a last resort, and every screen says so.</p></div>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <!-- Latency -->
+  <section id="latency">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Latency</p>
+        <h2>Delay is a stack of small numbers. We removed the two biggest.</h2>
+        <p class="lede">Video-call technology re-compresses your video on a server and holds frames in a buffer that grows so playback looks smooth. Both exist for someone else's problem. Seyd does neither.</p>
+      </div>
+      <div class="grid-23">
+        <div class="col">
+          <p class="body-text">What remains is your camera's encoder, the browser's decoder, the speed of light, and a presentation budget you set. Frames are paced on the camera's clock inside that budget, so the picture is steady and never drifts further behind.</p>
+          <div class="card sunk"><h3>A growing buffer is the enemy</h3><p>A jitter buffer trades time for smoothness. Fine for a film. For a human steering two tonnes, it means acting on a world that has moved on. Seyd's budget is fixed, 50 to 150 ms by profile, and never grows to hide a bad second.</p></div>
+          <div class="card sunk"><h3>Off the main thread</h3><p>Decoding and pacing run in a worker. Your web app cannot stutter the video by being busy.</p></div>
+        </div>
+        <figure>
+          <div class="figframe">
+            <div class="legend" style="margin-bottom:12px"><span class="neu">shared by both: encode, decode</span><span class="amb">steps Seyd removes</span><span class="bud">Seyd's fixed presentation budget</span></div>
+            <svg viewBox="0 0 660 156" role="img" aria-label="Software delay before video reaches the screen. Video-call technology: encode 10 ms, server re-compression 20 ms, a jitter buffer of 50 to 200 milliseconds, decode 5 ms; 85 to 235 milliseconds in total. Seyd: encode 10 ms, decode 5 ms, and a fixed presentation budget the operator chooses, 50 to 150 milliseconds by profile.">
+              <g stroke="currentColor" stroke-opacity=".12">
+                <line x1="132" y1="40" x2="132" y2="150"/><line x1="232.8" y1="40" x2="232.8" y2="150"/>
+                <line x1="333.6" y1="40" x2="333.6" y2="150"/><line x1="434.4" y1="40" x2="434.4" y2="150"/>
+                <line x1="535.2" y1="40" x2="535.2" y2="150"/><line x1="636" y1="40" x2="636" y2="150"/>
+              </g>
+              <g class="lbl" text-anchor="middle">
+                <text x="132" y="30">0</text><text x="232.8" y="30">50</text><text x="333.6" y="30">100</text>
+                <text x="434.4" y="30">150</text><text x="535.2" y="30">200</text><text x="636" y="30">250 ms</text>
+              </g>
+
+              <text x="120" y="66" text-anchor="end" font-size="11.5" fill="currentColor">Video-call tech</text>
+              <text x="120" y="83" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--seyd-amber)">85–235 ms</text>
+              <rect x="132" y="54" width="18.2" height="30" fill="var(--seyd-muted)"><title>encode on the camera — 10 ms</title></rect>
+              <rect x="152.2" y="54" width="38.3" height="30" fill="var(--seyd-amber)"><title>re-compression on a server — 20 ms</title></rect>
+              <rect x="192.5" y="54" width="98.8" height="30" rx="0" fill="var(--seyd-amber)" opacity=".7"><title>jitter buffer — 50 ms at best, up to 200 ms</title></rect>
+              <rect x="293.3" y="54" width="10.1" height="30" fill="var(--seyd-muted)"><title>decode in the browser — 5 ms</title></rect>
+              <line x1="305.4" y1="69" x2="605.8" y2="69" stroke="var(--seyd-amber)" stroke-dasharray="5 4" stroke-opacity=".85"/>
+              <line x1="605.8" y1="57" x2="605.8" y2="81" stroke="var(--seyd-amber)" stroke-width="1.5"/>
+              <text class="lbl" x="601" y="50" text-anchor="end" fill="var(--seyd-amber)">235 ms when the buffer is full</text>
+
+              <text x="120" y="124" text-anchor="end" font-size="11.5" fill="currentColor">Seyd</text>
+              <text x="120" y="141" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--seyd-accent)">15 ms + budget</text>
+              <rect x="132" y="112" width="18.2" height="30" fill="var(--seyd-muted)"><title>encode on the camera — 10 ms</title></rect>
+              <rect x="152.2" y="112" width="8.1" height="30" fill="var(--seyd-muted)"><title>decode in the browser — 5 ms</title></rect>
+              <rect x="162.3" y="112" width="100.8" height="30" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)" stroke-dasharray="4 3"><title>presentation budget — fixed, 50 to 150 ms by profile; the operator's choice</title></rect>
+              <text class="lbl" x="268" y="131" fill="var(--seyd-accent)">fixed budget, yours to set</text>
+            </svg>
+          </div>
+          <figcaption>Software stages only; flight time across the internet is the same for both and set by distance. The two amber steps are the ones Seyd removes by design, not by tuning. The dashed box is a budget the operator sets once, not a buffer that grows.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bad seconds -->
+  <section id="loss">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Loss</p>
+        <h2>Mobile networks have a bad second every minute. We plan for it.</h2>
+        <p class="lede">You cannot stop a network from losing packets. You can decide what happens when it does.</p>
+      </div>
+      <div class="grid-2">
+        <div class="col">
+          <ul class="points">
+            <li><b>Never fall behind.</b> On a hiccup Seyd skips a frame instead of adding delay. The operator always sees now.</li>
+            <li><b>Repair without a round trip.</b> Every frame carries spare Reed-Solomon material, so most losses are rebuilt on arrival.</li>
+            <li><b>Whole frame or nothing.</b> A frame is admitted before its first byte leaves. A torn frame costs a second of smear; a skipped one costs a fortieth.</li>
+            <li><b>Adapt at the source.</b> Seyd measures the link and asks the camera for less when it narrows, more when it recovers. Where the camera offers several streams, Seyd switches instead of re-encoding. Resolution first, frame rate last: frame interval is latency.</li>
+            <li><b>Never lie to the operator.</b> If the picture cannot be trusted, the screen says so and a clean frame is requested at once.</li>
+          </ul>
+          <div class="card sunk"><h3>What the repair is worth</h3><p>At 5% packet loss, <b style="color:var(--seyd-accent)">99.3%</b> of frames still arrive complete. Without repair material, 71.9% do, and every damaged frame smears the ones after it.</p></div>
+        </div>
+        <figure>
+          <div class="figframe">
+            <div class="legend" style="margin-bottom:12px"><span class="amb">video-call tech</span><span class="acc">Seyd</span></div>
+            <svg viewBox="0 0 480 200" role="img" aria-label="During a one-second network dip, a buffering system's delay rises and stays high, while Seyd skips a single frame and returns immediately to its normal delay.">
+              <rect x="180" y="36" width="70" height="128" fill="var(--seyd-amber-bg)"/>
+              <text class="lbl" x="215" y="30" text-anchor="middle" fill="var(--seyd-amber)">bad second</text>
+              <line x1="60" y1="36" x2="60" y2="160" stroke="currentColor" stroke-opacity=".25"/>
+              <line x1="60" y1="160" x2="462" y2="160" stroke="currentColor" stroke-opacity=".25"/>
+              <text class="lbl" x="56" y="44" text-anchor="end">delay</text>
+              <text class="lbl" x="460" y="176" text-anchor="end">time</text>
+
+              <polyline points="60,140 180,140 215,100 250,70 460,70" fill="none" stroke="var(--seyd-amber)" stroke-width="2"><title>video-call tech: delay rises during the dip and stays high</title></polyline>
+              <text class="lbl" x="456" y="62" text-anchor="end" fill="var(--seyd-amber)">delay stays</text>
+
+              <polyline points="60,150 190,150 205,132 218,150 460,150" fill="none" stroke="var(--seyd-accent)" stroke-width="2"><title>Seyd: one frame skipped, delay returns at once</title></polyline>
+              <text class="lbl" x="205" y="124" text-anchor="middle">one frame skipped</text>
+              <text class="lbl" x="456" y="144" text-anchor="end" fill="var(--seyd-accent)">stays current</text>
+            </svg>
+          </div>
+          <figcaption>A buffering system absorbs a dip by adding delay that never comes back. Seyd drops one frame and stays in the present. Tuned on real cellular links, not a lab network.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Reachability -->
+  <section id="reach">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Reachability</p>
+        <h2>The hard part is not the video. It is reaching the robot.</h2>
+        <p class="lede">Robots sit behind 4G routers, satellite dishes and factory firewalls, networks built to keep connections out. Seyd works the problem before anyone tries to connect.</p>
+      </div>
+      <div class="grid-32">
+        <figure>
+          <div class="figframe">
+            <svg viewBox="0 0 660 250" role="img" aria-label="The robot offers several possible routes to itself. Our prober tests each from the outside and marks which are reachable. The browser races the reachable ones and keeps the fastest. Only if none work, and the robot allows it, does the session fall back to the relay.">
+              <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+              <rect x="4" y="88" width="104" height="66" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+              <text class="node" x="56" y="116" text-anchor="middle">Robot</text>
+              <text class="sub" x="56" y="136" text-anchor="middle">lists routes</text>
+
+              <g stroke="currentColor" stroke-opacity=".45" style="color: var(--seyd-ink)">
+                <line x1="108" y1="112" x2="184" y2="52"  stroke-width="1.2" marker-end="url(#ar2)"/>
+                <line x1="108" y1="118" x2="184" y2="106" stroke-width="1.2" marker-end="url(#ar2)"/>
+                <line x1="108" y1="126" x2="184" y2="160" stroke-width="1.2" marker-end="url(#ar2)"/>
+                <line x1="108" y1="134" x2="184" y2="212" stroke-width="1.2" marker-end="url(#ar2)"/>
+              </g>
+              <g>
+                <rect x="190" y="34" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="57" text-anchor="middle">same network</text>
+                <rect x="190" y="88" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="111" text-anchor="middle">router port mapping</text>
+                <rect x="190" y="142" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="165" text-anchor="middle">IPv6 address</text>
+                <rect x="190" y="194" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="217" text-anchor="middle">public address</text>
+              </g>
+
+              <rect x="384" y="88" width="136" height="66" rx="6" fill="var(--seyd-surface)" stroke="var(--seyd-accent)" stroke-width="1.6"/>
+              <text class="node" x="452" y="112" text-anchor="middle" fill="var(--seyd-accent)">Prober</text>
+              <text class="sub" x="452" y="130" text-anchor="middle">tests every route</text>
+              <text class="sub" x="452" y="144" text-anchor="middle">from outside</text>
+              <g stroke="currentColor" stroke-opacity=".35">
+                <line x1="350" y1="52"  x2="382" y2="104"/><line x1="350" y1="106" x2="382" y2="114"/>
+                <line x1="350" y1="160" x2="382" y2="126"/><line x1="350" y1="212" x2="382" y2="138"/>
+              </g>
+
+              <line x1="520" y1="118" x2="548" y2="118" stroke="var(--seyd-accent)" stroke-width="2.5" marker-end="url(#ar2)" style="color: var(--seyd-accent)"/>
+              <rect x="554" y="88" width="102" height="66" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+              <text class="node" x="605" y="112" text-anchor="middle">Browser</text>
+              <text class="sub" x="605" y="130" text-anchor="middle">races them,</text>
+              <text class="sub" x="605" y="144" text-anchor="middle">keeps fastest</text>
+
+              <line x1="452" y1="154" x2="452" y2="222" stroke="var(--seyd-amber)" stroke-dasharray="4 3"/>
+              <rect x="282" y="222" width="374" height="22" rx="4" fill="var(--seyd-amber-bg)"/>
+              <text x="469" y="237" text-anchor="middle" font-size="10.5" fill="var(--seyd-amber)">none reachable → relay, robot permitting, always shown</text>
+            </svg>
+          </div>
+          <figcaption>Routes are tested before a session starts, so a misconfigured network shows up at setup, not during a demo.</figcaption>
+        </figure>
+        <div class="col">
+          <div class="card sunk"><h3>Known before anyone connects</h3><p>The console shows each robot's reachability up front: direct connection likely, or this site needs a change, with the change named.</p></div>
+          <div class="card sunk"><h3>Typical deployments</h3><p><b>Office or depot Wi-Fi:</b> works out of the box. <b>4G/5G routers:</b> enable UPnP or NAT-PMP and Seyd opens the pinhole itself, or forward one UDP port once. <b>Starlink:</b> a documented configuration.</p></div>
+          <div class="card sunk"><span class="tag warn">relayed</span><h3>When direct is impossible</h3><p>The direct race always runs first. Only when it fails, and the robot permits it, does the session go through our relay. The HUD, the status line and the guidance box all say so, and why. Metered, priced separately, never hidden.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Integration -->
+  <section id="integrate">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Integration</p>
+        <h2>Point Seyd at what you already have.</h2>
+        <p class="lede">Seyd does not replace your cameras, your autonomy stack or your safety logic. It states its needs; your systems decide how to meet them. A first integration is an afternoon.</p>
+      </div>
+      <div class="grid-2">
+        <div class="snippet">
+          <h3>On the robot: a short configuration file</h3>
+<pre><span class="c"># /etc/seyd/seydd.toml — the daemon needs no code</span>
+[[channel]]
+kind  = <span class="k">"video"</span>
+name  = <span class="k">"main"</span>
+input = <span class="k">"rtsp://192.168.1.20:554/Streaming/Channels/101"</span>
+codec = <span class="k">"avc1.42001f"</span>          <span class="c"># or rtp://0.0.0.0:5000</span>
+
+[[channel]]
+kind  = <span class="k">"sensor"</span>
+name  = <span class="k">"telemetry"</span>
+input = <span class="k">"udp://127.0.0.1:5002"</span>
+
+[[channel]]
+kind   = <span class="k">"command"</span>
+name   = <span class="k">"drive"</span>
+output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
+          <p>The daemon runs on the robot's own Linux computer, reads the stream the camera already produces and hands commands to your control software as UDP datagrams. It tells your systems when the camera should adjust and when an operator connects or leaves.</p>
+        </div>
+        <div class="snippet">
+          <h3>On the operator side: one element on a web page</h3>
+<pre>&lt;script type="module"&gt;import <span class="k">'@seyd/web'</span>;&lt;/script&gt;
+
+&lt;<span class="k">seyd-video</span> robot-id="lift-truck-07"&gt;&lt;/seyd-video&gt;
+&lt;<span class="k">seyd-hud</span>&gt;&lt;/seyd-hud&gt;</pre>
+          <p>A live, drivable feed inside your own web app: your branding, your workflow. Connection health, a "someone else is driving" indicator and the relayed-session notice come with it. A React wrapper is included.</p>
+          <h3 style="margin-top:22px">Or the engine directly</h3>
+<pre><span class="k">seyd_agent_create</span>(&amp;cfg, &amp;callbacks, &amp;agent);
+<span class="k">seyd_push_frame</span>(agent, video, au, len, keyframe, capture_ts_us);</pre>
+          <p>One Rust core with a C ABI. The daemon, Python, C++ and ROS 2 are thin wrappers with no protocol logic, so nothing drifts.</p>
+        </div>
+      </div>
+      <div class="tablewrap" style="margin-top:40px">
+        <table>
+          <thead><tr><th>Piece</th><th>Who uses it</th><th style="width:16%">State</th></tr></thead>
+          <tbody>
+            <tr><td><b>seydd</b> daemon</td><td>Anyone who wants it running: a config file, no code. RTSP, RTP and UDP inputs</td><td><span class="tag on">shipping</span></td></tr>
+            <tr><td><b>@seyd/web</b> and <b>@seyd/react</b></td><td>The web app an operator drives from</td><td><span class="tag on">shipping</span></td></tr>
+            <tr><td><b>libseyd</b> C ABI</td><td>The foundation every wrapper attaches to</td><td><span class="tag on">shipping</span></td></tr>
+            <tr><td><b>Python</b> SDK</td><td>Research robots, prototypes, our own demo</td><td><span class="tag on">shipping</span></td></tr>
+            <tr><td><b>C++</b> wrapper, <b>ROS 2</b> node</td><td>Industrial controllers; the standard robotics framework</td><td><span class="tag">planned</span></td></tr>
+            <tr><td><b>Headless pilot</b></td><td>Hands an existing operator application the same streams on localhost, unchanged</td><td><span class="tag">planned</span></td></tr>
+            <tr><td><b>Mobile</b> SDKs</td><td>Driving from a phone or tablet, and the route to iPhone and iPad</td><td><span class="tag">on demand</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use cases -->
+  <section id="uses">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Use cases</p>
+        <h2>For machines that usually drive themselves.</h2>
+        <p class="lede">The hardest version of this problem: a vehicle that is autonomous most of the time, on networks nobody controls, where a human must be able to take over convincingly.</p>
+      </div>
+      <div class="grid-4">
+        <div class="card sunk"><span class="tag on">take over</span><h3>Operator takeover for autonomous vehicles</h3><p>A prototype leaves its comfort zone on a test route. A safety operator takes the wheel from the control room, then hands back. The takeover path is bought before the autonomy is trusted.</p></div>
+        <div class="card sunk"><span class="tag on">supervise</span><h3>Watch many, drive one</h3><p>A dispatcher watches a whole fleet from one dashboard and drops into the driver's seat of any vehicle on demand, while colleagues follow the same feed read-only.</p></div>
+        <div class="card sunk"><span class="tag on">operate</span><h3>ROVs and remote machinery</h3><p>Subsea and industrial ROVs piloted over a vessel's satellite uplink; steerable cameras on sites and towers. Our public demo is exactly this.</p></div>
+        <div class="card sunk"><span class="tag on">connect</span><h3>Extend your command and control system</h3><p>Your C2 stack already works on the vehicle's own network. Seyd carries its real-time topics across the internet unchanged, video on its own fast lane, and hands them to your software as if it were local.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Measured -->
+  <section id="measured">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Measured</p>
+        <h2>Real links, real numbers, span stated.</h2>
+        <p class="lede">The demo above runs on the same stack as a customer robot. These figures are from field runs on it, and each says what it covers.</p>
+      </div>
+      <div class="grid-32">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Path</th><th style="width:16%">Round trip</th><th style="width:24%">Robot → browser<br>p50 / p95</th><th style="width:12%">Loss</th></tr></thead>
+            <tbody>
+              <tr><td>Wired LAN</td><td class="num">~1 ms</td><td class="num good">&lt;1 / 3 ms</td><td class="num">0%</td></tr>
+              <tr><td>Operator on a 4G hotspot,<br>robot on an office LAN</td><td class="num">21–44 ms</td><td class="num good">17 / 50 ms</td><td class="num">0–0.4%</td></tr>
+              <tr><td>Operator on a 4G hotspot,<br>robot behind a 4G router<span class="sub">two cellular hops, port mapped by UPnP</span></td><td class="num">51 ms</td><td class="num good">31 / 59 ms</td><td class="num">0%</td></tr>
+              <tr><td>Injected 5% packet loss</td><td class="num">—</td><td class="num good">99.3% frames complete</td><td class="num">5%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="col">
+          <div class="card sunk"><h3>What the span covers</h3><p>"Robot → browser" runs from the first byte leaving the robot's agent to the whole frame reassembled in the browser, measured on one clock. It excludes the camera's encoder and the presentation budget you set. Every number we quote says which span it covers.</p></div>
+          <div class="card sunk"><h3>How to judge it yourself</h3><p>Pick <code>seyd-demo</code> at the top. Drag the picture or use the arrow keys to look around, scroll to zoom, press <kbd>S</kbd> for live statistics. If someone else is driving, you watch until the seat is free.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cloud & trust -->
+  <section id="cloud">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Cloud and identity</p>
+        <h2>Three parties in every session. Only one is ours.</h2>
+        <p class="lede">Our cloud introduces robot and browser, decides who may connect to what, hands out short-lived passes, and records who had control when. Then it steps aside.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card sunk"><h3>Robots keep working when sign-in is down</h3><p>A robot proves itself with a key it generated and never shares. A driving session is a five-minute pass signed by our key. Only a human sign-in touches an identity provider, so a fleet keeps running while that provider is out.</p></div>
+        <div class="card sunk"><h3>Permissions are the product</h3><p>No identity provider can say "Anna may drive robot 42 but only watch robot 7", so organisations, roles, grants and the audit log are ours, in Postgres. After any incident the first question is who had control at 14:32. We record it as a matter of course.</p></div>
+        <div class="card sunk"><h3>Portable by construction, in the EU today</h3><p>Plain containers on Postgres. The whole cloud runs from one <code>docker compose up</code> on a laptop or inside your own building, with no hyperscaler dependency in application code. The public service runs in Belgium, its database in Frankfurt. Console access is by invitation.</p></div>
+      </div>
+      <div class="grid-2" style="margin-top:40px">
+        <div class="card sunk"><h3>Software you can read</h3><p>Everything that runs on your hardware is open source: the engine, the daemon, every wrapper, the browser components. No held-back "smart part"; the value is the field-tuned system, not a withheld algorithm. Your engineers and auditors read every line inside your vehicle, and the protocol is public.</p></div>
+        <div class="card sunk"><h3>Why the model works</h3><p>Your video never crosses our servers on a direct session, so our cost does not grow with your usage. Per robot we see a 100-byte heartbeat every five seconds. The one thing with real marginal cost, the relay, is metered and priced separately, never a silent fallback.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Model -->
+  <section id="model">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Pricing</p>
+        <h2>Open-source SDKs. A service that costs almost nothing to run.</h2>
+      </div>
+      <div class="grid-4">
+        <div class="card sunk"><span class="tag on">free</span><h3>Start on your own robot</h3><p>Open-source SDKs and our hosted service, free for your first robots. Evaluate on your hardware, on your network.</p></div>
+        <div class="card sunk"><span class="tag">fleet</span><h3>Per-robot subscription</h3><p>Fleet console, accounts and access control, reachability before you connect, audit history, priority support.</p></div>
+        <div class="card sunk"><span class="tag">enterprise</span><h3>Run it on your own infrastructure</h3><p>The service as a self-hosted product for on-premise and classified environments, with single sign-on, audit trails and integration support.</p></div>
+        <div class="card sunk"><span class="tag warn">relay add-on</span><h3>Metered, for locked-down networks</h3><p>For sites that permit nothing in. Priced separately because it is the one thing with real marginal cost. Shown on every screen, taken only after the direct race fails.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Roadmap -->
+  <section id="roadmap">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow accent">Roadmap</p>
+        <h2>Built and field-proven. Ordered by what a first customer needs.</h2>
+      </div>
+      <div class="grid-3 road">
+        <div>
+          <span class="tag on">working today</span>
+          <ul class="points">
+            <li>Rust engine: framing, Reed-Solomon repair, closed-loop rate control, simulcast stream selection, keyframes on demand</li>
+            <li>Direct QUIC to the browser, verified against real Chrome; reachability probed from the cloud before anyone connects</li>
+            <li>The daemon, the C ABI, the Python SDK, the web components and the React wrapper</li>
+            <li>Accounts, organisations, roles, robot grants and the audit log; the console, invite-only, on the deployed cloud in the EU</li>
+            <li>The relay as a shown, metered last resort</li>
+            <li>An always-on demo camera anyone can drive</li>
+          </ul>
+        </div>
+        <div>
+          <span class="tag">next</span>
+          <ul class="points">
+            <li>C++ and ROS 2 wrappers over the same engine</li>
+            <li>ARM builds for Jetson and Raspberry Pi, and Python wheels that bundle the engine</li>
+            <li>Presence in Redis so the cloud scales past one instance and survives a deploy without robots blinking offline</li>
+            <li>A headless pilot that hands an existing operator application the same streams on localhost</li>
+          </ul>
+        </div>
+        <div>
+          <span class="tag">then</span>
+          <ul class="points">
+            <li>A fast relay tier that forwards QUIC from its own address, for sites that will never allow a direct path</li>
+            <li>Sub-frame pipelining and cellular-tuned defaults measured on real 5G</li>
+            <li>The self-hosted build packaged for on-premise and classified sites</li>
+            <li>Native iOS, Android and Flutter SDKs when a customer needs them. Apple's browsers cannot open the direct path, so iPhone and iPad need an app</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <span>Seyd · seyd.io · remote operation for robots and autonomous vehicles</span>
+    <a href="./console/">Console</a>
+    <span>Early access: the cloud is invite-only, and the demo robot is deliberately public.</span>
+    <span id="theme-switch"></span>
+  </footer>
   <script type="module" src="./src/landing.ts"></script>
 </body>
 </html>

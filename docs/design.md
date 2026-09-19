@@ -172,7 +172,7 @@ do not restyle these.
 
 | Surface | Where | Notes |
 |---|---|---|
-| Demo landing | `web/demo/index.html` | Two columns: the pitch on the ground, the live robot list on a surface. |
+| Landing page | `web/demo/index.html` | The public landing page: a sticky masthead with section links, a hero with the live robot list in a surface card, then long-form sections (each an eyebrow, a display heading and a lede) separated by 1px rules, with figures in a bordered surface frame and sunken cards for asides. The two charts use only the meaning colours: accent for Seyd, amber for what Seyd removes or relays, muted for shared steps. |
 | Pilot page | `web/demo/pilot/index.html` | Header and footer follow the theme; `main` is black and everything on it uses the scrim. |
 | Console | `web/console` | Surface nav with accent-tinted active item; ground content area; mono section headings. |
 | SDK overlays | `sdks/js/web` | `<seyd-video>`, `<seyd-hud>`, `<seyd-connect-error>` read `--seyd-*` from the host page with fallbacks equal to the dark values, so they look the same inside a customer page that never heard of the theme. |
