@@ -47,6 +47,10 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   (`@seyd/theme`) is the same system as code; every web surface imports it,
   and presentations copy its palettes. Read before touching anything a person
   sees.
+- **web/docs** — the developer documentation site (PLAN.md §2.8): Starlight,
+  served at `/docs/`. The API references are *generated from the code* by
+  `tools/docs/` and starlight-typedoc; the guides import real example files.
+  See "Developer documentation" below before changing any public surface.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
@@ -99,6 +103,34 @@ future developer reading only PLAN.md, the ADRs and SPEC.md would be surprised
 by the code, the docs are out of date.** Every measured number quoted in a doc
 must be re-measured when the code it describes changes.
 
+## Developer documentation — keep it generated, keep it current
+
+`web/docs` is the public developer documentation (PLAN.md §2.8). Its
+references are produced from the code on every build and its guides render
+real example files, so the rule is mechanical:
+
+- **A public surface is not changed until the docs build passes and the guide
+  says the new thing.** The surfaces: `sdks/c/include/seyd.h` (regenerated from
+  `seyd-ffi`'s `///` comments, which *are* the C reference), the `seyd` Python
+  package's docstrings, the exports of `@seyd/core` and `@seyd/web` (TSDoc →
+  TypeDoc), `packages/seydd/src/config.rs` (the `seydd.toml` reference), the
+  QoS constants in `seyd-qos`, and the `FailureClass` union in
+  `<seyd-connect-error>` (one page per class under
+  `web/docs/src/content/docs/networking/classes/`, enforced by
+  `tools/docs/check-networking.py`).
+- **Doc comments are the documentation.** A new field, function or event
+  without a `///`, a docstring or a TSDoc comment renders as a blank row on
+  the site; write the comment where the code is.
+- **Examples are files, never code blocks in a page.** Put them under an SDK's
+  `examples/` (C examples are built by `make -C sdks/c`; the TypeScript ones
+  are type-checked by the docs build; `seyd-core` examples by `cargo build
+  --examples`) and import them into MDX with `@repo/…?raw`.
+- **A guide that explains a changed surface changes with it**, in the same
+  commit. The guides live under `web/docs/src/content/docs/`.
+- `pnpm --filter docs build` is part of verification (`pnpm -r build` runs
+  it). `SEYD_DOCS_SKIP_RUSTDOC=1` skips the slow `cargo doc` step locally; the
+  deploy must not skip it.
+
 ## Monorepo structure
 
 ```
@@ -118,12 +150,14 @@ seyd/
 ├── sdks/                      # thin wrappers — NO protocol logic here, ever
 │   ├── c/       # generated seyd.h, Makefile, abi-smoke + sensor-robot examples
 │   ├── python/  # cffi ABI mode over libseyd; cpp/ and ros2/ not built yet
-│   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
+│   └── js/core  js/web                # @seyd/core (session API), @seyd/web (<seyd-video>, <seyd-hud>, <seyd-connect-error>); examples/ in each
 ├── cloud/api      # signal v2 + console API; authn/ (pluggable) + accounts/ (ours)
 │   └── db/migrations/         # the schema, applied at boot
 ├── cloud/prober  cloud/monitor
 ├── web/theme      # @seyd/theme: design tokens, base styles, self-hosted fonts, theme switch (docs/design.md)
-├── web/site  web/console  web/demo   # every surface imports @seyd/theme; page files hold layout only
+├── web/demo       # the landing page (/) and the pilot page (/pilot/)
+├── web/console    # the fleet console (/console/)
+├── web/docs       # developer docs (/docs/): Starlight; references generated from the code (PLAN.md §2.8)
 ├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
@@ -133,6 +167,7 @@ seyd/
 ├── demo-start.sh              # find the camera, then start the camera demo robot and wait for it online
 ├── demo-seyd.sh               # start the camera demo robot
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
+    └── docs/                  # the docs generators: gen-c-reference.py, gen-python-reference.py, gen-seydd-config.py, gen-qos-profiles.py, check-networking.py
 ```
 
 **Import direction:** `tools/` may reach into `packages/`. `packages/` and
@@ -268,9 +303,9 @@ Field procedures: docs/field-test.md.
 Three Cloud Run services, project `seydio`, region `europe-west1` (memory +
 docs/eu-hosting.md carry the context):
 
-- **seyd-signal** (signal server + static demo pages + the console at `/console/`):
+- **seyd-signal** (signal server + landing and pilot pages + the console at `/console/` + the developer docs at `/docs/`):
   `pnpm -r build && GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`.
-  The script bundles `web/demo/dist` and `web/console/dist` into the image
+  The script bundles `web/demo/dist`, `web/console/dist` and `web/docs/dist` into the image
   (`.gcloudignore` keeps them in the upload), passes the OIDC, Logto and
   console settings from `.env.local`, and re-applies the prober env after
   deploy (plain `--set-env-vars` would wipe it). URL:
@@ -307,7 +342,7 @@ cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check   # Rust ↔ Python FEC interop
 make -C sdks/c check                                                    # C ABI conformance (abi-smoke)
 tools/.venv/bin/python3 -m pytest sdks/python/tests                     # Python SDK over libseyd
-pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo
+pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo, web/console, web/docs (generates the references; SEYD_DOCS_SKIP_RUSTDOC=1 to skip cargo doc locally)
 (cd cloud/api && npm test)
 
 # End to end on this machine (sim source, no camera):

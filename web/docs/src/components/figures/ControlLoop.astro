@@ -1,0 +1,61 @@
+---
+// The publisher-control loop (PLAN.md §2.8 "Figures"). Inline SVG on the
+// design tokens (docs/design.md §6), rendered inside <Figure>. Facts:
+// docs/protocol/seydd.md "Publisher control" (video-config fields, the
+// recovery ladder ltr → intra_refresh → idr), docs/adr/0009, PLAN.md §1.3
+// (AIMD −25 % / +10 %, FEC paid from the video rate, 1 Hz samples).
+---
+<svg viewBox="0 0 660 266" role="img" aria-label="The publisher-control loop. Frames flow from the publisher through the agent to the pilot. The pilot measures loss and round-trip time every second; the agent's closed-loop controller in seyd-qos turns them into video-config (maxBitrateKbps, maxGopMs, preferIntraRefresh, suggestedFps) and recovery-request (the ladder ltr, intra_refresh, idr) messages; the publisher's encoder adjusts. Seyd states intent; the publisher decides how to meet it.">
+  <defs><marker id="fig-loop-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="8" y="44" width="150" height="80" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="83" y="72" text-anchor="middle">Publisher</text>
+  <text class="sub" x="83" y="90" text-anchor="middle">camera, x264, NVENC…</text>
+  <text class="sub" x="83" y="106" text-anchor="middle">decides how</text>
+
+  <rect x="255" y="44" width="150" height="80" rx="6" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)"/>
+  <text class="node" x="330" y="72" text-anchor="middle" style="fill: var(--seyd-accent)">Agent</text>
+  <text class="sub" x="330" y="90" text-anchor="middle">seyd-qos controller</text>
+  <text class="sub" x="330" y="106" text-anchor="middle">states intent</text>
+
+  <rect x="502" y="44" width="150" height="80" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="577" y="72" text-anchor="middle">Pilot</text>
+  <text class="sub" x="577" y="90" text-anchor="middle">browser, @seyd/core</text>
+  <text class="sub" x="577" y="106" text-anchor="middle">measures</text>
+
+  <g stroke="var(--seyd-accent)" stroke-width="2.5" style="color: var(--seyd-accent)">
+    <line x1="159" y1="66" x2="253" y2="66" marker-end="url(#fig-loop-ar)"/>
+    <line x1="406" y1="66" x2="500" y2="66" marker-end="url(#fig-loop-ar)"/>
+  </g>
+  <text x="206" y="58" text-anchor="middle" font-size="11" font-weight="600" fill="var(--seyd-accent)">frames</text>
+  <text x="453" y="58" text-anchor="middle" font-size="11" font-weight="600" fill="var(--seyd-accent)">frames</text>
+
+  <g stroke="currentColor" stroke-opacity=".6" stroke-dasharray="4 3">
+    <line x1="254" y1="104" x2="160" y2="104" marker-end="url(#fig-loop-ar)"/>
+    <line x1="501" y1="104" x2="407" y2="104" marker-end="url(#fig-loop-ar)"/>
+  </g>
+  <text class="lbl" x="206" y="118" text-anchor="middle">video-config</text>
+  <text class="lbl" x="206" y="131" text-anchor="middle">recovery-request</text>
+  <text class="lbl" x="453" y="118" text-anchor="middle">loss · rtt</text>
+  <text class="lbl" x="453" y="131" text-anchor="middle">every second</text>
+
+  <rect x="8" y="150" width="200" height="86" rx="6" fill="var(--seyd-surface-2)"/>
+  <text x="20" y="170" font-size="11" fill="currentColor">video-config</text>
+  <text class="lbl" x="20" y="188">maxBitrateKbps · maxGopMs</text>
+  <text class="lbl" x="20" y="202">preferIntraRefresh</text>
+  <text class="lbl" x="20" y="216">suggestedFps · reason</text>
+
+  <rect x="224" y="150" width="212" height="86" rx="6" fill="var(--seyd-surface-2)"/>
+  <text x="236" y="170" font-size="11" fill="currentColor">recovery-request</text>
+  <text class="lbl" x="236" y="188">ltr → intra_refresh → idr</text>
+  <text class="lbl" x="236" y="202">cheapest rung first, climbs</text>
+  <text class="lbl" x="236" y="216">while loss continues</text>
+
+  <rect x="452" y="150" width="200" height="86" rx="6" fill="var(--seyd-surface-2)"/>
+  <text x="464" y="170" font-size="11" fill="currentColor">closed loop · seyd-qos::abr</text>
+  <text class="lbl" x="464" y="188">−25 % on backlog or loss</text>
+  <text class="lbl" x="464" y="202">+10 % after clean seconds</text>
+  <text class="lbl" x="464" y="216">FEC paid from the bitrate</text>
+
+  <text x="330" y="258" text-anchor="middle" font-size="11" fill="var(--seyd-accent)">Seyd states intent; the publisher decides how to meet it.</text>
+</svg>

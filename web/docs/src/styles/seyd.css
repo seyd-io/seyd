@@ -1,0 +1,119 @@
+/*
+ * The Seyd design system applied to Starlight (docs/design.md).
+ *
+ * Starlight paints from its own --sl-* variables; this file points every one
+ * of them at a --seyd-* token, so the docs share the landing page's and the
+ * console's palette, faces and rules, in both modes. Starlight always stamps
+ * data-theme="light" or "dark" on <html> (it resolves "auto" itself), which
+ * is exactly the mechanism tokens.css honours. Fonts are the theme package's
+ * bundled files: nothing is fetched from a CDN.
+ */
+@import '@seyd/theme/tokens.css';
+@import '@seyd/theme/fonts.css';
+
+:root,
+:root[data-theme='light'],
+:root[data-theme='dark'] {
+  --sl-font: var(--seyd-font-body);
+  --sl-font-mono: var(--seyd-font-mono);
+
+  --sl-color-accent-low: var(--seyd-accent-bg);
+  --sl-color-accent: var(--seyd-accent);
+  --sl-color-accent-high: var(--seyd-accent);
+  --sl-color-white: var(--seyd-ink);
+  --sl-color-gray-1: var(--seyd-ink);
+  --sl-color-gray-2: var(--seyd-ink-2);
+  --sl-color-gray-3: var(--seyd-muted);
+  --sl-color-gray-4: var(--seyd-muted);
+  --sl-color-gray-5: var(--seyd-line);
+  --sl-color-gray-6: var(--seyd-surface-2);
+  --sl-color-gray-7: var(--seyd-surface);
+  --sl-color-black: var(--seyd-bg);
+
+  --sl-color-bg: var(--seyd-bg);
+  --sl-color-bg-nav: var(--seyd-surface);
+  --sl-color-bg-sidebar: var(--seyd-bg);
+  --sl-color-bg-inline-code: var(--seyd-surface-2);
+  --sl-color-hairline: var(--seyd-line);
+  --sl-color-hairline-light: var(--seyd-line);
+  --sl-color-hairline-shade: var(--seyd-line);
+  --sl-color-text: var(--seyd-ink-2);
+  --sl-color-text-accent: var(--seyd-accent);
+  --sl-color-text-invert: var(--seyd-accent-ink);
+
+  /* Asides: the four meanings of colour, unchanged (design.md §3). */
+  --sl-color-orange-low: var(--seyd-amber-bg);
+  --sl-color-orange: var(--seyd-amber);
+  --sl-color-orange-high: var(--seyd-amber);
+  --sl-color-red-low: var(--seyd-danger-bg);
+  --sl-color-red: var(--seyd-danger);
+  --sl-color-red-high: var(--seyd-danger);
+  --sl-color-green-low: var(--seyd-accent-bg);
+  --sl-color-green: var(--seyd-accent);
+  --sl-color-green-high: var(--seyd-accent);
+  --sl-color-blue-low: var(--seyd-surface-2);
+  --sl-color-blue: var(--seyd-ink-2);
+  --sl-color-blue-high: var(--seyd-ink);
+  --sl-color-purple-low: var(--seyd-surface-2);
+  --sl-color-purple: var(--seyd-ink-2);
+  --sl-color-purple-high: var(--seyd-ink);
+
+  --sl-text-body: 15px;
+  --sl-line-height: 1.6;
+  --sl-shadow-sm: none;
+  --sl-shadow-md: none;
+  --sl-shadow-lg: none;
+}
+
+/* Grotesk for people, mono for machines (design.md §1). */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+h1#_top,
+.site-title,
+.hero h1,
+.hero .tagline {
+  font-family: var(--seyd-font-display);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.sl-markdown-content h2 { font-size: 1.55rem; }
+.sl-markdown-content h3 { font-size: 1.15rem; }
+.sl-markdown-content :is(h1, h2, h3, h4) { color: var(--seyd-ink); }
+
+/* Rules, not boxes; no shadows anywhere. */
+.sl-markdown-content table { border-collapse: collapse; font-size: 14px; }
+.sl-markdown-content th {
+  font-family: var(--seyd-font-mono); font-weight: 500; font-size: 10.5px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--seyd-muted);
+  border: 0; border-bottom: 1px solid var(--seyd-line); background: transparent; padding: 6px 10px; text-align: left;
+}
+.sl-markdown-content td { border: 0; border-bottom: 1px solid var(--seyd-line); background: transparent; padding: 9px 10px; vertical-align: top; }
+.sl-markdown-content tr:nth-child(2n) td { background: transparent; }
+.sl-markdown-content code:not(pre code) { border-radius: 3px; font-size: 0.9em; }
+.sl-markdown-content .starlight-aside { border-radius: 0 6px 6px 0; border-inline-start-width: 3px; }
+.sl-markdown-content hr { border-color: var(--seyd-line); }
+
+/* Sidebar: the console's nav idiom, accent tint for the current page. */
+.sidebar-content { font-size: 13.5px; }
+.sidebar-content summary .group-label span,
+.sidebar-content .large { font-family: var(--seyd-font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--seyd-muted); font-weight: 500; }
+.sidebar-content a[aria-current='page'] { background: var(--seyd-accent-bg); color: var(--seyd-accent); font-weight: 500; }
+.right-sidebar { border-inline-start: 1px solid var(--seyd-line); }
+header.header { border-bottom: 1px solid var(--seyd-line); background: var(--seyd-surface); }
+
+/* Figures: inline SVG on the tokens, in a bordered surface frame. */
+.seyd-figure { margin: 1.5rem 0; display: grid; gap: 0.6rem; }
+.seyd-figure .frame { background: var(--seyd-surface); border: 1px solid var(--seyd-line); border-radius: 6px; padding: 18px 18px 14px; overflow-x: auto; }
+.seyd-figure svg { display: block; width: 100%; height: auto; min-width: 520px; color: var(--seyd-ink); font-family: var(--seyd-font-mono); }
+.seyd-figure svg .lbl { fill: var(--seyd-muted); font-size: 10.5px; }
+.seyd-figure svg .node { fill: var(--seyd-ink); font-family: var(--seyd-font-display); font-weight: 600; font-size: 13px; }
+.seyd-figure svg .sub { fill: var(--seyd-muted); font-size: 11px; }
+.seyd-figure figcaption { font-size: 12.5px; line-height: 1.5; color: var(--seyd-muted); max-width: 62ch; }
+
+/* The wordmark in the site title (SiteTitle.astro). */
+.seyd-wordmark { display: inline-flex; align-items: center; gap: 9px; font-family: var(--seyd-font-display); font-weight: 700; font-size: 19px; letter-spacing: -0.02em; color: var(--seyd-ink); text-decoration: none; }
+.seyd-wordmark i { width: 18px; height: 18px; border-radius: 50%; background: var(--seyd-accent); position: relative; display: inline-block; flex: none; }
+.seyd-wordmark i::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--seyd-surface); }
+.seyd-wordmark span { font-family: var(--seyd-font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--seyd-muted); margin-left: 6px; font-weight: 500; }

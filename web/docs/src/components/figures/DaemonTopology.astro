@@ -1,0 +1,60 @@
+---
+// seydd's place on the robot (PLAN.md §2.8 "Figures"). Inline SVG on the
+// design tokens (docs/design.md §6), rendered inside <Figure>. Facts:
+// docs/protocol/seydd.md (the config file, the robot-side UDP interfaces,
+// publisher control), docs/adr/0010 (relay = true is the only cloud media path).
+---
+<svg viewBox="0 0 660 310" role="img" aria-label="seydd on the robot. The camera feeds a video channel over RTSP or RTP; a sensor process feeds a sensor channel over UDP; a command channel writes UDP datagrams to the control software; seydd sends publisher-control messages (video-config, recovery-request, layer, session) back to the publisher over UDP. seydd signals with the Seyd cloud over WSS and streams to the browser directly over QUIC.">
+  <defs><marker id="fig-daemon-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="4" y="12" width="432" height="290" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4"/>
+  <text class="lbl" x="16" y="28">ROBOT</text>
+
+  <g fill="none" stroke="currentColor" stroke-opacity=".6">
+    <rect x="12" y="40" width="118" height="52" rx="6"/>
+    <rect x="12" y="150" width="118" height="52" rx="6"/>
+    <rect x="12" y="236" width="118" height="52" rx="6"/>
+  </g>
+  <text class="node" x="71" y="62" text-anchor="middle">Camera</text>
+  <text class="sub" x="71" y="80" text-anchor="middle">the publisher</text>
+  <text class="node" x="71" y="172" text-anchor="middle">Sensor process</text>
+  <text class="sub" x="71" y="190" text-anchor="middle">any language</text>
+  <text class="node" x="71" y="258" text-anchor="middle">Control software</text>
+  <text class="sub" x="71" y="276" text-anchor="middle">actuators · PTZ</text>
+
+  <rect x="300" y="40" width="120" height="248" rx="6" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)"/>
+  <text class="node" x="360" y="156" text-anchor="middle" style="fill: var(--seyd-accent)">seydd</text>
+  <text class="sub" x="360" y="174" text-anchor="middle">the agent</text>
+  <text class="sub" x="360" y="190" text-anchor="middle">seydd.toml</text>
+
+  <line x1="131" y1="58" x2="298" y2="58" stroke="currentColor" stroke-opacity=".7" stroke-width="1.6" marker-end="url(#fig-daemon-ar)"/>
+  <text class="lbl" x="215" y="52" text-anchor="middle">kind = video</text>
+  <text class="lbl" x="215" y="74" text-anchor="middle">rtsp:// or rtp://</text>
+  <line x1="299" y1="84" x2="132" y2="84" stroke="currentColor" stroke-opacity=".6" stroke-dasharray="4 3" marker-end="url(#fig-daemon-ar)"/>
+  <text class="lbl" x="215" y="100" text-anchor="middle">[publisher_control] udp=</text>
+  <text class="lbl" x="215" y="113" text-anchor="middle">video-config · layer</text>
+  <text class="lbl" x="215" y="126" text-anchor="middle">recovery-request</text>
+  <text class="lbl" x="215" y="139" text-anchor="middle">session</text>
+
+  <line x1="131" y1="176" x2="298" y2="176" stroke="currentColor" stroke-opacity=".7" stroke-width="1.6" marker-end="url(#fig-daemon-ar)"/>
+  <text class="lbl" x="215" y="170" text-anchor="middle">kind = sensor</text>
+  <text class="lbl" x="215" y="190" text-anchor="middle">input = udp://</text>
+
+  <line x1="299" y1="262" x2="132" y2="262" stroke="currentColor" stroke-opacity=".7" stroke-width="1.6" marker-end="url(#fig-daemon-ar)"/>
+  <text class="lbl" x="215" y="256" text-anchor="middle">kind = command</text>
+  <text class="lbl" x="215" y="276" text-anchor="middle">output = udp://</text>
+
+  <rect x="506" y="52" width="148" height="56" rx="6" fill="var(--seyd-surface-2)" stroke="var(--seyd-line)"/>
+  <text class="node" x="580" y="76" text-anchor="middle">Seyd cloud</text>
+  <text class="sub" x="580" y="94" text-anchor="middle">introductions</text>
+  <line x1="422" y1="80" x2="504" y2="80" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4" marker-start="url(#fig-daemon-ar)" marker-end="url(#fig-daemon-ar)"/>
+  <text class="lbl" x="463" y="72" text-anchor="middle">WSS</text>
+  <text class="lbl" x="463" y="96" text-anchor="middle">signalling</text>
+
+  <rect x="506" y="220" width="148" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="580" y="244" text-anchor="middle">Browser</text>
+  <text class="sub" x="580" y="262" text-anchor="middle">&lt;seyd-video&gt;</text>
+  <line x1="422" y1="248" x2="504" y2="248" stroke="var(--seyd-accent)" stroke-width="3" marker-start="url(#fig-daemon-ar)" marker-end="url(#fig-daemon-ar)" style="color: var(--seyd-accent)"/>
+  <text x="463" y="240" text-anchor="middle" font-size="11" font-weight="600" fill="var(--seyd-accent)">QUIC</text>
+  <text class="lbl" x="463" y="264" text-anchor="middle">direct</text>
+</svg>

@@ -1,0 +1,36 @@
+---
+// The three parties (PLAN.md §2.8 "Figures"). Inline SVG on the design tokens
+// (docs/design.md §6), rendered inside <Figure>. Facts: web/demo/index.html
+// section "how", SPEC.md.
+---
+<svg viewBox="0 0 660 300" role="img" aria-label="The robot and the operator each announce themselves to the Seyd cloud, which only introduces them; video, sensors and commands then travel directly between the two over QUIC, encrypted, never through the cloud.">
+  <defs><marker id="fig-parties-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="210" y="8" width="240" height="74" rx="6" fill="var(--seyd-surface-2)" stroke="var(--seyd-line)"/>
+  <text class="node" x="330" y="34" text-anchor="middle">Seyd cloud</text>
+  <text class="sub" x="330" y="54" text-anchor="middle">introductions: who may connect</text>
+  <text class="sub" x="330" y="70" text-anchor="middle">a few kilobytes per session</text>
+
+  <rect x="0" y="140" width="180" height="140" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="90" y="168" text-anchor="middle">Robot</text>
+  <rect x="14" y="182" width="152" height="26" rx="3" fill="var(--seyd-accent-bg)"/>
+  <text x="90" y="200" text-anchor="middle" font-size="11" fill="var(--seyd-accent)">seydd or the SDK</text>
+  <text class="sub" x="90" y="230" text-anchor="middle">cameras &amp; sensors</text>
+  <text class="sub" x="90" y="250" text-anchor="middle">your control software</text>
+
+  <rect x="480" y="140" width="180" height="140" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="570" y="168" text-anchor="middle">Operator</text>
+  <rect x="494" y="182" width="152" height="26" rx="3" fill="var(--seyd-accent-bg)"/>
+  <text x="570" y="200" text-anchor="middle" font-size="11" fill="var(--seyd-accent)">&lt;seyd-video&gt; element</text>
+  <text class="sub" x="570" y="230" text-anchor="middle">live video &amp; gauges</text>
+  <text class="sub" x="570" y="250" text-anchor="middle">wheel or joystick</text>
+
+  <line x1="128" y1="140" x2="216" y2="86" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4" marker-end="url(#fig-parties-ar)"/>
+  <text class="lbl" x="140" y="106" text-anchor="end">I'm online</text>
+  <line x1="532" y1="140" x2="444" y2="86" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4" marker-end="url(#fig-parties-ar)"/>
+  <text class="lbl" x="520" y="106" text-anchor="start">let me drive robot X</text>
+
+  <line x1="186" y1="205" x2="474" y2="205" stroke="var(--seyd-accent)" stroke-width="3" marker-end="url(#fig-parties-ar)" marker-start="url(#fig-parties-ar)" style="color: var(--seyd-accent)"/>
+  <text x="330" y="192" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--seyd-accent)">video · sensors · commands</text>
+  <text class="lbl" x="330" y="228" text-anchor="middle">direct · encrypted · QUIC</text>
+</svg>

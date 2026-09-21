@@ -1,0 +1,128 @@
+---
+title: "Your own UI on SeydSession"
+description: "Build a pilot page of your own on @seyd/core: every option, the state machine, every event, commands, the worker host, multi-view and session tokens."
+---
+
+import { Code } from '@astrojs/starlight/components';
+import headless from '@repo/sdks/js/core/examples/headless-session.ts?raw';
+
+`SeydSession` is the whole pilot with no UI: signaling, the candidate race, wire reassembly with FEC recovery, WebCodecs decode, paced presentation, the control stream and stats. [`<seyd-video>`](/docs/pilot/web-components/) is a thin element over it. When you want your own layout, your own controls or more than one picture, use the session directly. `@seyd/core` has no dependencies.
+
+## Create it
+
+`new SeydSession(options)`, then `await session.connect(robotId)`. Every option, from `SeydSessionOptions` in `sdks/js/core/src/session.ts`:
+
+| Option | Type | What it does |
+|---|---|---|
+| `signalUrl` | `string` | The signal server's WebSocket. Required. |
+| `token` | `string` | A session token ([below](#session-tokens)). Omit only for a robot with a public grant. |
+| `canvas` | `HTMLCanvasElement` | Where the video channel is painted. With the worker host its control is transferred to the worker, so nothing else may draw on it. |
+| `emitFrames` | `boolean` | Also emit `frame` events carrying each `VideoFrame`. Set it when you render yourself. |
+| `host` | `'auto'`, `'worker'`, `'inline'` | Where the engine runs. `auto` (the default) picks the worker when the browser has `Worker`, `OffscreenCanvas` and `transferControlToOffscreen`. |
+| `worker` | `Worker` | Your own worker, built from the `@seyd/core/worker` entry, when your bundler cannot discover the built-in one. |
+| `qos` | `string` | The profile to ask for: `latency`, `balanced` or `quality` ([reference](/docs/reference/qos-profiles/)). |
+| `loss` | `{ rate, burst }` | Inject chunk loss at the pilot, for tests. |
+| `trace` | `boolean` | Collect a per-frame pipeline trace in `lastStats.trace`. |
+| `paths` | `string[]` | Race only the candidates with these labels. Debugging. |
+| `clientName` | `string` | How your pilot names itself to the cloud. |
+| `presentationDelayMs` | `number` | Hold each decoded frame this far behind the capture timeline ([ADR 0005](/docs/reference/adr/0005-presentation-pacing/)). Unset takes the profile's value (50, 100 or 150 ms); `0` is decode on arrival. |
+| `retryMs` | `number` | How long after a failure to ask the cloud for a fresh offer. Default 15000. |
+| `relay` | `boolean` | Fall back to the cloud relay when the race fails and the robot allows it ([ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/)). Default `true`. |
+| `allowMultiple` | `boolean` | Allow more than one live session to the same robot from this document. Default: a new session closes the previous one. |
+
+Properties you can read at any time: `state`, `role` (`driver` or `observer`), `channels`, `qos`, `sessionId`, `robotId`, `pathLabel` (the candidate that won), `transport` (`'p2p'` or `'relay'` once connected, `null` before), `candidates` (what the robot advertised in the last offer), `lastStats` and `lastFailure`.
+
+## The state machine
+
+`SessionState` has seven values. A session that connects passes through the first five in order:
+
+| State | Meaning | `detail` |
+|---|---|---|
+| `idle` | Created, `connect()` not yet called. | |
+| `signaling` | Connecting to the signal server. | `reconnecting` when the WebSocket dropped and is being reopened. |
+| `waiting-robot` | Authenticated; the cloud is asked for an offer for the robot. | `retrying` when this is a retry after a failure. |
+| `connecting` | The offer arrived; the candidates are being raced. | `trying N path(s)`, or `relay` when the race failed and the relay is being attached. |
+| `connected` | A transport is up and the robot's control stream answered. | |
+| `p2p-failed` | No path, and no relay. A retry is scheduled after `retryMs`. | The failure's detail, or its reason. |
+| `closed` | `close()` was called. Final. | |
+
+A signaling reconnect while the session is `connecting` or `connected` does not ask for a second offer: the QUIC session survives signaling drops. A duplicate offer while racing is aborted, so `sessionId` and `role` cannot be replaced mid-session.
+
+## Events
+
+`session.on(type, handler)` returns a function that unsubscribes. The events, from `SessionEvents` in `sdks/js/core/src/types.ts`:
+
+| Event | Payload | When it fires |
+|---|---|---|
+| `state` | `{ state, detail? }` | Every transition above. |
+| `welcome` | `{ sessionId, role, channels, qos, pathLabel, transport }` | The robot's control stream answered. This is the moment you know your role, the channels and the QoS profile in force. Fires for direct and relayed sessions alike, with `transport` saying which. |
+| `relay` | `{ failure: P2pFailure }` | The race failed and the session is attaching to the cloud relay. `failure` is the direct-path diagnosis; show it, because the relay is a symptom, not a fix. `p2p-failed` is not emitted for this attempt. |
+| `p2p-failed` | `P2pFailure` = `{ reason, natReport, candidates, detail? }` | No path and no relay: the race failed with no relay offered or with `relay: false`, the relay itself failed (`relay-unavailable`), the cloud said `robot-offline` or `denied`, or a live session dropped. `lastFailure` keeps it. |
+| `frame` | `{ channel, frame: VideoFrame }` | Only with `emitFrames`. One per painted frame, at its paced presentation moment. You own the frame and must `close()` it. |
+| `sensor` | `{ channel, seq, data, raw, sendTs }` | Every message on a sensor channel. `data` is the parsed JSON for codec `json` (`null` if it does not parse); `raw` is always the bytes. |
+| `link` | `{ state, rttMs, offsetUs, lossPct, degradedPicture }` | After every stats snapshot. `state` is `good`, `degraded` (loss at or above 1 %, or the picture is degraded), `poor` (loss at or above 5 %, or a keyframe lost while degraded) or `lost` (no transport). `degradedPicture` is set by a loss and cleared by the next keyframe. |
+| `stats` | `PilotStats` | Every 500 ms while a transport is up. The fields are explained in [Latency and the HUD](/docs/pilot/latency/). |
+| `error` | `{ message, fatal }` | A decoder error (`fatal: false`), or the control stream failing to open, the agent denying the session, the decoder failing to configure, or signaling refusing the token (`fatal: true`). |
+| `video-size` | `{ width, height }` | The canvas was resized to a new decoded picture size. Only with a `canvas`. |
+
+The `FailureReason` values are `no-candidates`, `all-candidates-timeout`, `cert-mismatch`, `token-rejected`, `pilot-udp-blocked`, `robot-offline`, `handshake-timeout` and `relay-unavailable`. [Reachability](/docs/networking/reachability/) explains where each comes from.
+
+## Commands and control
+
+- `send(channel, payload)` writes to a command channel by name. An object is JSON-encoded, a string is UTF-8, a `Uint8Array` goes as is. It returns `false`, and sends nothing, when the session is not `connected` or the robot declared no command channel of that name. The robot drops commands from an observer. The third argument, `{ reliable }`, is accepted but not yet acted on.
+- `hasCommandChannel(name)` says whether the robot declared that command channel, so a UI can hide controls that would do nothing.
+- `setQos(profile)` asks for another profile on a live session; the robot answers with the profile in force, and the presenter re-paces to it.
+- `requestKeyframe()` asks the robot for a recovery point. The engine does this itself when a frame cannot be repaired, so you rarely need it.
+- `close()` aborts the signaling session, lets the engine close the transport before the worker is terminated (300 ms backstop, so the robot does not keep a zombie session until its idle timeout), and moves to `closed`. No event fires afterwards.
+
+## Worker or inline
+
+Transport, FEC, decode and paint run on a Web Worker with an `OffscreenCanvas` when the browser supports it, so jank on your page cannot delay video. The same engine runs inline on the main thread where it cannot (`host: 'inline'`, or `auto` in a browser without module workers). `workerSupported()` is exported if you want to know in advance.
+
+The worker is created with a literal `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`, which Vite and webpack discover and bundle on their own. A bundler that does not can build the `@seyd/core/worker` entry itself and pass the result as the `worker` option.
+
+## Rendering yourself
+
+Set `emitFrames: true` and draw each `frame` event where you like: a WebGL texture, a second canvas, a picture-in-picture. Frames arrive already paced by the presenter (the same timing the canvas gets), so painting them as they come keeps the cadence. If you also pass a `canvas`, the event carries a clone and the engine paints the original. Either way the `VideoFrame` in the event is yours: call `close()` on it when you are done, or the decoder runs out of buffers.
+
+## Multi-view
+
+By default one live session per (signal URL, robot) per document: a second `connect()` to the same robot closes the first, because two sessions from one page meant two decoders on one canvas and a second signaling subject that the cloud made an observer, which is the "picture replays, controls dead" failure seen in the field. Pass `allowMultiple: true` to lift that and open several sessions from one page. Each session is its own worker, decoder and canvas. Sessions to different robots are independent; two sessions to one robot get one driver and one observer, because a robot has one driver slot.
+
+## Session tokens
+
+Every pilot needs a session token; the signal server admits none without one, except for a robot with a public grant. Your backend mints it with `POST /api/v1/session-tokens` on the signal server and hands it to the page.
+
+| Field | Meaning |
+|---|---|
+| `robot_id` | Required. The robot the token is for. |
+| `scope` | `drive` or `observe`. Anything other than `observe` is treated as `drive`. |
+| `ttl_sec` | Lifetime, capped at 300 seconds; default 300. |
+| `for` | With an API key only: the end user on whose behalf the key acts, recorded in the audit trail as who was driving. |
+
+Who may call it: an API key of the robot's org with the `session.create` scope (the OEM integration path), a signed-in console user with a matching grant, or nobody at all when the robot carries a public grant for that scope, which is how the demo works without an account. The response is `{ token, subject, scope, expires_in, issuer }`. The token is an ES256 JWT signed with Seyd's own key, whose `aud` is the robot id, so a token for one robot is useless at another. The public key is at `/.well-known/seyd-session-jwks.json`. It does not depend on the identity provider, so a fleet keeps working while the provider is down ([ADR 0007](/docs/reference/adr/0007-identity/)). Enrolment, grants and API keys are in [Enrolment and access](/docs/cloud/access/).
+
+## The example
+
+A pilot with no UI, from `sdks/js/core/examples/headless-session.ts`. It is type-checked by the docs build, so it cannot drift from the SDK:
+
+<Code code={headless} lang="ts" title="sdks/js/core/examples/headless-session.ts" />
+
+:::note
+The comment in the example names `POST /api/v1/sessions`; the route on the signal server is `POST /api/v1/session-tokens`, as above.
+:::
+
+Walking through it:
+
+1. **Construction** takes the signal URL, the canvas and a client name. `token` is left undefined, which only works for a robot with a public grant.
+2. **`sensor`** is the robot-to-pilot data path: `data` is the parsed message for JSON channels, `raw` the bytes for the rest.
+3. **`state`** is where a status line comes from. The comment lists the happy path.
+4. **`relay`** and **`p2p-failed`** are the two endings of a failed race. The first means you are driving through the cloud and should say so; the second means you are not driving at all and the diagnosis says what to change.
+5. **`link`** and **`stats`** feed your own indicator and HUD. `s.transport` on stats says `'relay'` for a relayed session, which the demo HUD prints in amber.
+6. **`steer()`** checks `hasCommandChannel('drive')` before sending, because only a channel the robot declared can be written.
+7. **`connect()`** returns once signaling has started; the events carry the rest.
+8. **`pagehide`** closes the session, so the robot's driver slot is released when the tab goes.
+
+## Reference
+
+The generated API is the [JavaScript reference](/docs/reference/js/): [`SeydSession`](/docs/reference/js/seyd/core/classes/seydsession/), [`SeydSessionOptions`](/docs/reference/js/seyd/core/interfaces/seydsessionoptions/), [`SessionEvents`](/docs/reference/js/seyd/core/interfaces/sessionevents/), [`PilotStats`](/docs/reference/js/seyd/core/interfaces/pilotstats/) and [`P2pFailure`](/docs/reference/js/seyd/core/interfaces/p2pfailure/).

@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- minimal.html — the smallest pilot page: one element, one robot.
+     Serve it from a bundler that resolves @seyd/web (Vite, esbuild, webpack)
+     or replace the import with the path to your built bundle. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>My robot</title>
+  <style>
+    body { margin: 0; background: #000; }
+    seyd-video { display: block; width: 100vw; height: 100vh; }
+    seyd-hud { position: fixed; top: 10px; left: 10px; }
+    seyd-connect-error { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); }
+  </style>
+</head>
+<body>
+  <seyd-video id="video" robot-id="my-robot" signal-url="wss://signal.seyd.io/ws"></seyd-video>
+  <seyd-hud id="hud"></seyd-hud>
+  <seyd-connect-error id="err"></seyd-connect-error>
+  <script type="module">
+    import '@seyd/web';
+    const video = document.getElementById('video');
+    // The element creates a SeydSession and hands it out once; wire the HUD
+    // and the guidance box to it, and send commands through it.
+    video.addEventListener('seyd-session', (e) => {
+      const session = e.detail;
+      document.getElementById('hud').session = session;
+      document.getElementById('err').session = session;
+      session.on('sensor', ({ channel, data }) => console.log(channel.name, data));
+      window.addEventListener('keydown', (k) => {
+        if (k.key === 'ArrowUp') session.send('drive', { throttle: 1 });
+      });
+    });
+  </script>
+</body>
+</html>

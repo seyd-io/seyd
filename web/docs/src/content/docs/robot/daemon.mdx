@@ -1,0 +1,200 @@
+---
+title: "Integrate the daemon (seydd)"
+description: Run seydd next to a camera that already publishes RTSP or RTP, wire its UDP interfaces into your robot software, and answer its publisher control.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import Figure from '@components/Figure.astro';
+import DaemonTopology from '@components/figures/DaemonTopology.astro';
+import demoToml from '@repo/examples/demo-robot/seydd.toml?raw';
+import bridge from '@repo/examples/demo-robot/bridge.py?raw';
+
+`seydd` is the Seyd robot agent as a daemon. It is the right form factor when the camera already publishes video on a socket and the robot's own software talks over UDP. You write a TOML file, not code. If your process already holds encoded frames, use the [Python](/docs/robot/python/), [C](/docs/robot/c/) or [Rust](/docs/robot/rust/) SDK instead; see [Choose a form factor](/docs/start/form-factor/).
+
+## What the daemon does
+
+`seydd` is a host of `seyd_core::Agent`. The agent owns discovery, the certificate, the QUIC endpoint, sessions, signaling and everything that keeps them alive. The daemon adds what a daemon needs and nothing else:
+
+- **Video in** over `rtsp://` or `rtp://`. It depacketizes RTP and splits access units into chunks. It never decodes, re-encodes or inspects the picture.
+- **Sensor in** over `udp://`: each datagram becomes one message to every connected pilot.
+- **Commands out** as UDP datagrams: each driver message on a command channel is written to the channel's `output` address, one datagram per message, with nothing prepended. Commands from observers are dropped.
+- **Publisher control out** as JSON datagrams: what Seyd asks of your encoder, and when sessions start and end.
+
+<Figure caption="The daemon on the robot: camera streams in, generic UDP interfaces to your own code, publisher control out to whatever configures the encoder.">
+  <DaemonTopology />
+</Figure>
+
+Nothing in the daemon knows any vendor. The Hikvision code for the demo robot lives in `examples/demo-robot/`, outside Seyd, and consumes these interfaces like any customer program would.
+
+## Install or build
+
+No packages are published yet. Build from the repository with the Rust toolchain:
+
+```bash
+cargo build -p seydd --release
+./target/release/seydd --help
+```
+
+The binary is `target/release/seydd`. Every crate is pure Rust, which is what keeps cross-builds for ARM boards simple.
+
+```
+seydd [--config /etc/seyd/seydd.toml] [--probe-input SECONDS] [enrol --token TOKEN [--signal-url URL]]
+```
+
+`--config` defaults to `/etc/seyd/seydd.toml`. `--probe-input N` opens the video inputs, logs frame statistics for N seconds and exits; it is the fastest way to check a camera URL before involving the cloud.
+
+## The configuration file
+
+This is the demo robot's real configuration, rendered from the repository. Every key is documented in the [seydd.toml reference](/docs/reference/seydd-config/).
+
+<Code code={demoToml} lang="toml" title="examples/demo-robot/seydd.toml" />
+
+Section by section:
+
+- [`[agent]`](/docs/reference/seydd-config/#agent): the robot's identity and policy. `robot_id` and `signal_url` are required. `credential_path` holds the Ed25519 seed, created on first run, and defaults to `/var/lib/seyd/robot.key`. `qos_profile` is the ceiling (`latency`, `balanced` or `quality`; see [QoS profiles](/docs/reference/qos-profiles/)). `quic_port` (4433) is the UDP port a router forward or pinhole must open.
+- [`[[channel]]`](/docs/reference/seydd-config/#channel): one per channel, numbered from 1 in file order. That numbering is what the pilot sees. A `video` channel names its stream with `input`, or with [`[[channel.layer]]`](/docs/reference/seydd-config/#channellayer) entries for [simulcast](/docs/robot/simulcast/) as the demo does. A `sensor` channel names a `udp://` input. A `command` channel names a `udp://` output.
+- [`[publisher_control]`](/docs/reference/seydd-config/#publisher_control): where the daemon posts its JSON control messages.
+
+The section is spelled `[[channel]]`, not `[[channels]]`. The typo parses as an empty list, and the daemon then warns that the robot will announce nothing.
+
+Credentials in an RTSP URL can come from the environment instead of the file: `SEYD_RTSP_USER` and `SEYD_RTSP_PASSWORD` are substituted into an `rtsp://` URL that has no userinfo. URLs are redacted in every log line.
+
+## Enrolment
+
+A robot must be enrolled before the cloud lets it connect. Enrolment redeems a one-time token, created in the console (Fleet, then *Create enrolment token*), and registers the public half of the robot's key. The private seed never leaves the robot, and no user credential is involved: a fleet keeps working while the identity provider is down. See [Enrolment and access](/docs/cloud/access/).
+
+Two ways to redeem it. As a separate step, for an interactive install:
+
+```bash
+seydd --config /etc/seyd/seydd.toml enrol --token seyd_enr_…
+```
+
+`--signal-url` overrides the server from the config file. Or hand the token to the daemon and let it enrol on first start, which is the shape a provisioning script wants:
+
+```bash
+SEYD_ENROLMENT_TOKEN=seyd_enr_… seydd --config /etc/seyd/seydd.toml
+```
+
+The same token can sit in the file as `enrolment_token` under `[agent]`; the environment wins when both are set. Prefer the environment, so the secret is never written to disk.
+
+What to expect:
+
+- Either form creates `credential_path` if it does not exist, then posts the public key and the token to `POST /api/v1/enrol` at the address derived from `signal_url` (`wss://host/ws` becomes `https://host`).
+- A token is single-use. A second robot presenting it gets `410` and needs a new one.
+- On a first run, a failed enrolment is fatal. With a credential already present it is only a warning, and the daemon carries on: a spent token left in the environment must not stop an enrolled robot from starting.
+- Enrolment registers whatever key the robot already holds, so a robot that predates enrolment keeps its identity and simply becomes known.
+
+## Running it as a service
+
+The repository ships no unit file yet. This is a template; adjust the binary path and the user.
+
+```ini
+# /etc/systemd/system/seydd.service  (template)
+[Unit]
+Description=Seyd robot daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/seydd --config /etc/seyd/seydd.toml
+Restart=always
+RestartSec=2
+Environment=RUST_LOG=info
+# SEYD_RTSP_USER, SEYD_RTSP_PASSWORD and, for the first start, SEYD_ENROLMENT_TOKEN
+EnvironmentFile=-/etc/seyd/seydd.env
+# /var/lib/seyd, the default parent of credential_path = /var/lib/seyd/robot.key
+StateDirectory=seyd
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The credential at `/var/lib/seyd/robot.key` is what stays enrolled. Back it up with the machine; lose it and you need a new token. `RUST_LOG` is the log filter (`info`, or `seyd_core=debug`).
+
+## The robot-side interfaces
+
+Three generic UDP interfaces connect the daemon to your own code. None of them knows a vendor.
+
+**Command output** (`kind = "command"`, `output = "udp://…"`). Each command the driver sends is one datagram with the raw payload; for `codec = "json"` that is the JSON text. Your program binds the port and acts on it. The demo's PTZ bridge below is one such program.
+
+**Sensor input** (`kind = "sensor"`, `input = "udp://…"`). Bind nothing; send datagrams to the address and each one reaches every connected pilot as one sensor message.
+
+**Publisher control** (`[publisher_control] udp = "host:port"`). Best-effort JSON, one object per datagram, fire-and-forget. Four message types, quoted from the [protocol contract](/docs/reference/protocol/seydd/):
+
+```json
+{"type": "video-config", "channel": 1, "profile": "balanced",
+ "maxBitrateKbps": 3000, "latencyBudgetMs": 100, "maxGopMs": 10000,
+ "preferIntraRefresh": true, "suggestedFps": 0, "reason": "profile"}
+{"type": "video-config", "channel": 1, "profile": "balanced",
+ "maxBitrateKbps": 2250, "latencyBudgetMs": 100, "maxGopMs": 10000,
+ "preferIntraRefresh": true, "suggestedFps": 0, "reason": "abr-down"}
+{"type": "recovery-request", "channel": 1, "kind": "idr", "reason": "pilot-loss"}
+{"type": "layer", "channel": 1, "layer": 0, "name": "low", "reason": "down"}
+{"type": "session", "state": "started"|"ended", "session_id": "…", "role": "driver"|"observer", "sessions": 1}
+```
+
+- `video-config` is Seyd's targets for the encoder. It is sent once at start (`reason: "profile"`), when the profile changes (`"pilot-request"`), and whenever the closed-loop controller moves the request inside the ceiling (`"abr-down"`, `"abr-up"`). The publisher decides resolution, preset and VBV; Seyd states only what the transport can observe.
+- `recovery-request` means a pilot needs a recovery point now. Answer it. Keyframes are on demand ([ADR 0009](/docs/reference/adr/0009-keyframes-on-demand/)): with nobody answering, a joining pilot waits up to `maxGopMs` for a first picture.
+- `layer` says the relayed simulcast layer changed. Force a keyframe on the named stream if you can; Seyd switches on that layer's next keyframe either way.
+- `session` lets robot-side code park actuators when the last driver leaves.
+
+The full semantics, including the recovery ladder and the rate limit, are on [The publisher contract](/docs/robot/publisher-contract/).
+
+## Worked example: the demo robot's bridge
+
+The demo robot is a Hikvision PTZ camera. `examples/demo-robot/bridge.py` is the customer-side program: it binds the command port and the publisher-control port, and speaks the camera's ISAPI. It is what answering publisher control looks like in practice.
+
+<details>
+<summary>examples/demo-robot/bridge.py</summary>
+<Code code={bridge} lang="python" title="examples/demo-robot/bridge.py" />
+</details>
+
+What it does, in the order the messages arrive:
+
+- **Commands** (`on_command`): a JSON velocity for pan, tilt and zoom, latest value wins. A command older than `--max-command-age-ms` is dropped as stale: a command that sat in a queue is not the operator's current intent, and moving on it is how a camera ends up at its stop.
+- **`recovery-request`**: asks the camera for an IDR on the stream channel with `requestKeyFrame`. This camera has no intra refresh, so every `kind` is answered with an IDR, which is the allowed fallback.
+- **`session`** with `state: "ended"` and `sessions: 0`: stops movement and returns the camera to its home position.
+- **`layer`**: maps the layer name to an ISAPI stream channel (`--layer-channels low=102,high=101`) and asks that stream for an IDR, so the switch lands on the next frame rather than up to a GOP later.
+- **`video-config`**: writes `maxBitrateKbps` to the stream's VBR upper cap, converts `maxGopMs` to frames at the camera's baseline frame rate and writes it as the GOP, and applies `suggestedFps` as a frame-rate cap when it is non-zero, restoring the baseline when it is 0. `preferIntraRefresh` is logged and ignored, because the camera cannot do it.
+- **Coalescing**: at most one ISAPI write per two seconds per setting, latest value wins. The controller decides once a second and the camera is slower than that, so every decision applied verbatim would queue writes faster than they drain.
+
+Nothing in the bridge is Seyd. It is what you write for your own actuators and encoder.
+
+## Verifying
+
+Start the daemon and read the log. In order you should see `seydd starting`, one `candidate` line per discovered address, `certificate`, `robot identity`, and then for each input `rtsp input playing`, `rtp input listening` or `sensor input listening`. When a pilot connects you get `session started` with the role and the path, and `session ended` with a reason when it leaves. `abr` lines report the controller's decisions and `simulcast` lines a layer change. `signal denied` means the cloud refused the robot; see below.
+
+Then drive it from the pilot page at `/pilot/?robot=<id>` and press `S` for the HUD, which shows the path, the profile, loss and the layer. [Latency and the HUD](/docs/pilot/latency/) explains every field.
+
+For an assertion rather than a look, `tools/seyd-smoke.py` drives the real pilot page in headless Chrome and checks that the session connects, frames keep decoding, sensor messages arrive and a PTZ key press reaches the command output:
+
+```bash
+tools/.venv/bin/python3 tools/seyd-smoke.py --robot <id> --page <pilot url> --signal <ws url> --command-port 5004
+```
+
+`--no-sensor` for a robot without a sensor channel; `--camera-ip <ip>` verifies that PTZ moved the real demo camera; `--query loss=0.05` injects loss.
+
+## Codecs
+
+`codec` is a WebCodecs string and does double duty: the daemon uses it to pick the RTP framing, and it travels unchanged to the browser's decoder.
+
+| Codec | `codec` value | Ingest | Browser |
+|---|---|---|---|
+| H.264 | `avc1.…` | RTSP and RTP | Everywhere |
+| H.265 | `hev1.…` / `hvc1.…` | RTSP and RTP | Only where the machine has a hardware HEVC decoder |
+| Motion JPEG | `mjpeg` | RTSP only | Everywhere |
+
+Two caveats worth testing before promising them to a customer. H.265 decodes on a hardware-accelerated desktop Chrome and not in the same build headless (measured on Chrome 152); the pilot now says so on screen when it cannot decode. MJPEG costs about an order of magnitude more bandwidth than H.264 for the same picture and the daemon warns when a channel uses it; it is RTSP only, because a bare `rtp://` MJPEG stream has no JPEG headers to rebuild from, and the daemon refuses the combination with an explanation. The encoder side of all this is on [Encoder setup](/docs/robot/encoder-setup/).
+
+## The relay
+
+`relay = true` under `[agent]` (the default) lets the robot serve a session through the cloud relay when the pilot could not connect directly ([ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/)). The pilot always races its direct candidates first and asks for the relay only after that fails, and its HUD, status line and guidance say the session is relayed and why. Set `relay = false` to refuse relayed sessions altogether; such pilots get a diagnosis instead. Never expect the relay to be the first choice, and never hide it: it is metered and priced separately. What the direct race needs from the network is on [Reachability](/docs/networking/reachability/).
+
+## Troubleshooting denials
+
+`signal denied` in the log, or `SEYD_SIGNAL_DENIED` in an SDK, carries a reason:
+
+- **`unknown-robot`**: the id was never enrolled. Redeem a token as above.
+- **`key-mismatch`**: the id is enrolled with a different key. Another agent is using the id, or the credential file was replaced. Delete the robot in the console and enrol again.
+
+In development, `SEYD_DEV_OPEN_ENROLMENT=1` on the signal server trusts an unknown robot on first connection instead. Such a robot has no org and is visible only to an unauthenticated console.

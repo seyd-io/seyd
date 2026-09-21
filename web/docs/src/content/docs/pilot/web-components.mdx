@@ -1,0 +1,98 @@
+---
+title: "The web components"
+description: "Put a drivable robot feed into any web page with <seyd-video>, add the HUD and the connection guidance, and theme them from your own stylesheet."
+---
+
+import { Code } from '@astrojs/starlight/components';
+import minimal from '@repo/sdks/js/web/examples/minimal.html?raw';
+import demoMain from '@repo/web/demo/src/main.ts?raw';
+
+`@seyd/web` is three custom elements over [`@seyd/core`](/docs/pilot/session-api/): `<seyd-video>` connects to a robot and paints its video, `<seyd-hud>` shows the numbers, and `<seyd-connect-error>` says what to fix when no direct path connects. They are Shadow DOM elements with no framework dependency, so they work in plain HTML and inside React, Vue, Svelte or anything else that can put a tag in a document. There is no React package; the elements are the integration.
+
+## Browser support
+
+The pilot runs where WebTransport and WebCodecs run: Chrome and Edge, on desktop and on Android. Safari has no WebTransport, so an iPhone or iPad cannot run the web pilot today.
+
+## `<seyd-video>`
+
+Set `robot-id` and `signal-url` and the element creates a `SeydSession`, races the robot's candidates and renders the video channel into its own canvas. Over the picture it draws a status line (bottom left), a red border while the picture is degraded by loss, and an amber RELAY badge (top right) for as long as the session is carried by the cloud relay. The badge cannot be switched off, because a relayed session must never pass for a direct one ([ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/)).
+
+Every attribute the element observes, from `sdks/js/web/src/seyd-video.ts`:
+
+| Attribute | What it does |
+|---|---|
+| `robot-id` | The robot to connect to. Required; nothing starts until both this and `signal-url` are set. |
+| `signal-url` | The signal server's WebSocket, for example `wss://signal.seyd.io/ws`. Required. |
+| `qos` | The QoS profile to ask for: `latency`, `balanced` or `quality` ([reference](/docs/reference/qos-profiles/)). Changing it on a live session calls `setQos()`; it is the only attribute that applies without a restart. |
+| `token` | A session token minted by `POST /api/v1/session-tokens` (see [session tokens](/docs/pilot/session-api/#session-tokens)). Leave it out only for a robot with a public grant. |
+| `loss` | Inject chunk loss at the pilot, as a fraction such as `0.05`. For exercising the recovery path; values above 1 are clamped to 1. |
+| `burst` | Length of each injected loss burst, in chunks. Default 1; only read together with `loss`. |
+| `host` | Where the media engine runs: `auto` (a Web Worker with an OffscreenCanvas where the browser supports it, the default), `worker` or `inline`. |
+| `trace` | Present or absent. When present, every stats snapshot carries a per-frame pipeline trace in its `trace` field; `tools/latency-ab.py` reads it. |
+| `paths` | Comma-separated candidate labels to race, such as `srflx` or `host,portmap`; every other candidate is left out. A label that matches nothing (`none`) makes the race fail at once, which is how the relay is exercised on demand. |
+| `presentation-delay` | Milliseconds to hold each decoded frame behind the capture timeline ([ADR 0005](/docs/reference/adr/0005-presentation-pacing/)). Overrides the profile's value; `0` restores decode on arrival. |
+| `relay` | `0`, `false` or `off` refuses the cloud relay, so a failed race ends in a diagnosis instead. Any other value, or no attribute, allows it. |
+
+Changing `qos` applies live. Changing any other attribute closes the session and starts a new one, and changes that arrive in the same task are coalesced into one start, so a framework that sets `robot-id`, `signal-url` and `token` one after the other starts exactly one session. The element also waits while Chrome is prerendering the page, so a prediction from the address bar cannot take a driver slot nobody asked for.
+
+Properties: `.session` is the live `SeydSession`, or `null`; `.canvas` is the canvas the video is drawn into, whose `width` and `height` follow the decoded picture. Anything you slot inside the element is positioned absolutely over the picture, which is where your own controls go.
+
+### The `seyd-session` event
+
+The element creates the session and hands it out once, as a bubbling `CustomEvent` named `seyd-session` whose `detail` is the `SeydSession`. Listen for it to wire the HUD and the guidance box, subscribe to sensors and send commands. A restart (any attribute other than `qos` changed) dispatches it again with the new session, so wire things up inside the handler rather than once at load.
+
+## `<seyd-hud>`
+
+The stats overlay. Set `.session` and it subscribes to the session's `stats` events. It starts hidden; the `S` key toggles it (without Ctrl or Cmd held), and so does `.toggle()`, for a button on a touch screen. `.visible` reports the state, which the element keeps in `localStorage` under `seyd.hud` so it survives a reload. Every line is explained in [Latency and the HUD](/docs/pilot/latency/).
+
+## `<seyd-connect-error>`
+
+The guidance box. Set `.session` and it listens for `p2p-failed` and `relay`; or set `.failure` with a `P2pFailure` you already hold. It sorts the failure into one of nine classes and shows a title, one paragraph of what to change, a "How to fix this" link to that class's page under [Networking](/docs/networking/reachability/#how-a-failure-is-classified), and the raw diagnosis (reason, candidates, NAT report) behind a Diagnostics disclosure.
+
+It has two forms:
+
+- **Red**, after `p2p-failed`: there is no session. The full guidance is shown.
+- **Amber**, after `relay`: the session runs through the cloud relay. The same guidance collapses to one line, "Relayed via Seyd cloud", with a "why / how to fix" button that expands it, so the box never sits in the way of driving. The relay is the symptom of a network problem, not its cure, so the guidance stays until a session connects directly.
+
+Both forms can be dismissed with the × or Escape; the next failure or relay event brings the box back. A pointer event that starts on the box never reaches the video surface, so a click on the link cannot become a camera command.
+
+## Theming
+
+The overlays read the Seyd design tokens as CSS custom properties from the host page, each with a fallback equal to the dark theme's value. A page that imports `@seyd/theme` gets the look of the demo and the console; a page that has never heard of it still looks right. Define any of these on `:root`, or on the element, to restyle them:
+
+| Property | Used for |
+|---|---|
+| `--seyd-scrim`, `--seyd-on-scrim`, `--seyd-on-scrim-2` | The translucent panel over the picture and its text. The scrim tokens do not flip between light and dark mode, because they always sit on video. |
+| `--seyd-accent` | Connected directly, and links. |
+| `--seyd-amber` | Relayed: the status line, the RELAY badge, the relayed guidance box. |
+| `--seyd-danger` | The degraded-picture border, error status, the failure box border. |
+| `--seyd-font-body`, `--seyd-font-mono`, `--seyd-font-display` | The status line and guidance body; the HUD and the status text; the guidance heading. |
+| `--seyd-radius`, `--seyd-radius-sm` | Corner radii of the HUD and the guidance box; of the status line. |
+
+The colour meanings are the same on every Seyd surface: green is direct, amber is relayed, red is stop. Keep them if you retheme, so an operator who has seen the demo reads your page the same way. The whole system is `docs/design.md` in the repository.
+
+## The smallest page
+
+One element, one robot, wired to the HUD and the guidance box. This is `sdks/js/web/examples/minimal.html` in the repository, rendered as is:
+
+<Code code={minimal} lang="html" title="sdks/js/web/examples/minimal.html" />
+
+## The demo pilot page
+
+The public demo at `/pilot/` is the same three elements plus a header, a footer and PTZ controls, so it is the second real example. The page, `web/demo/pilot/index.html`, holds layout only: a header with the robot id, the role tag, a QoS select and a stats button; `<seyd-video>`, `<seyd-hud>` and `<seyd-connect-error>` inside `main`; a footer with the key hints and the last sensor value. The script does the rest:
+
+<Code code={demoMain} lang="ts" title="web/demo/src/main.ts" />
+
+Things worth copying from it:
+
+- **Attributes are set last, with `robot-id` at the end**, because that is the attribute whose arrival starts the session. The token is fetched first: the page asks `POST /api/v1/session-tokens` for `drive`, then for `observe`, and connects without one only if both are refused.
+- **`welcome` tells you the role.** A driver gets the PTZ controls; an observer sees "someone else is driving" and the controls stay off. `hasCommandChannel('ptz')` decides whether there is anything to drive at all.
+- **The state handler disables the controls on anything but `connected`**, so a dropped session cannot leave a command timer running.
+- **The stats button mirrors `hud.visible`**, because a phone has no `S` key.
+- **The query parameters** `?loss=`, `?paths=`, `?relay=`, `?pd=` and `?trace=` map straight onto the attributes above; see [Latency and the HUD](/docs/pilot/latency/#query-parameters-of-the-demo-page).
+
+The PTZ controls are `web/demo/src/ptz.ts`: a drag on the picture is a virtual joystick with a 12 % dead zone, the arrow keys pan and tilt, Shift is fast, the wheel and `+`/`-` zoom, `H` goes home. It sends velocity, not position, on the `ptz` command channel, repeating every 200 ms while held so a lost stop costs the robot one expiry window, and it stops on window blur and on tab hide.
+
+## Reference
+
+The generated API for both packages is the [JavaScript reference](/docs/reference/js/): [`SeydVideoElement`](/docs/reference/js/seyd/web/classes/seydvideoelement/), [`SeydHudElement`](/docs/reference/js/seyd/web/classes/seydhudelement/), [`SeydConnectErrorElement`](/docs/reference/js/seyd/web/classes/seydconnecterrorelement/) and [`classify()`](/docs/reference/js/seyd/web/functions/classify/).

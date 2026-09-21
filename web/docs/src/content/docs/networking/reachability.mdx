@@ -1,0 +1,91 @@
+---
+title: "Reachability"
+description: "How a robot finds its candidates, how the cloud measures them before anyone connects, how the browser races them, when the relay is taken, and what every failure class means."
+---
+
+import Figure from '@components/Figure.astro';
+import Race from '@components/figures/Race.astro';
+
+The pilot is a browser, which makes it a QUIC client and nothing else. It only ever opens outbound connections, so the pilot's network needs no configuration beyond letting UDP out. Everything about reachability is therefore one question: **can an unsolicited inbound UDP packet reach the robot's QUIC port** (4433 by default)? This page follows that question from the robot's own discovery, through the cloud's measurement, to the browser's race and the relay decision, and ends with what to change on a network that says no.
+
+## What the robot announces
+
+At start, and again whenever its network changes, the agent gathers candidates: addresses at which a pilot might reach it. Each carries a label, a priority and a `needs_probe` flag, from `packages/seyd-nat/src/gather.rs`:
+
+| Label | Priority | Held for the probe | Where it comes from |
+|---|---|---|---|
+| `host` | 240 | no | Each local IPv4 address. Works only from the robot's own LAN. |
+| `portmap` | 220 | no | The router's external address and port, when it granted a PCP, NAT-PMP or UPnP mapping (a 3600 s lease the agent renews) *and* that address is globally routable. A mapping to a private address (double NAT, CGNAT) is kept for renewal but not advertised; the report then says `external address not globally routable (double NAT or CGNAT)`. |
+| `host6` | 200 | yes | Each global IPv6 address, when IPv6 is enabled. IPv6 removes the NAT but not the router's firewall, so the agent's probe packets still help. |
+| `srflx` | 150 | yes | The public address and port two STUN servers agreed on. Skipped behind a symmetric NAT, where the mapping a pilot would see is not the one STUN saw. |
+
+The `NatReport` travels with the candidates in the `announce` and reaches the pilot in the `offer`:
+
+| Field | Contents |
+|---|---|
+| `ipv4` | `local` addresses, the `public` address STUN saw, `nat` (`cone`, `symmetric` or `unknown`), `cgnat` (the gateway's external address is in carrier-grade space, or the NAT is symmetric behind a CGNAT-range local address), `gateway_external`. |
+| `ipv6` | `present`, the `global` addresses, `inbound_ok` (filled in by the prober; `null` until then). |
+| `portmap` | `protocol` (`pcp`, `nat-pmp`, `upnp`), `external`, `error`, `lease_s`. |
+| `candidates` | One `{ label, ok }` per candidate; `ok` is filled in by the prober. |
+| `prober` | `reachable` and `unreachable` labels and a timestamp, once the cloud has probed. |
+| `hint` | The robot's own P2P outlook. |
+
+The hint is `likely` when there is an advertised port mapping, a reflexive address or a global IPv6 address; `lan-only` when the only candidates are `host`; `none` when there are no candidates at all. The landing page's robot list shows it as `p2p likely`, `lan-only` or `none`, and the browser sets its race deadline from it.
+
+## The cloud prober
+
+STUN infers; the prober measures. On every announce (at most once a minute per robot) the signal server sends each publicly probeable candidate to `seyd-prober`, a separate service (`packages/seyd-prober`) that makes one real QUIC dial per target from the cloud. Any response at all, including a certificate error, proves an unsolicited inbound flow reaches the robot; only silence within the timeout (1500 ms) means unreachable. Private, link-local and CGNAT-range addresses are not probed, because reaching them from the cloud is meaningless.
+
+The outcomes are folded into the report: `candidates[].ok`, `prober.reachable` and `prober.unreachable`, and `ipv6.inbound_ok` for the `host6` candidates. The hint is then made honest: any reachable candidate makes it `likely`; all candidates unreachable makes it `none`, unless one of the dark candidates is a punchable one (`srflx`, `host6`), because a prober cannot hole-punch and field run A connected over an `srflx` an unsolicited probe would have called dark. The result is shown as the badge in the console's robot detail and on the landing page, before any pilot has tried.
+
+## The race in the browser
+
+<Figure caption="The candidate race: every candidate is dialled, held candidates after the probe window, the first to finish its handshake wins and the rest are closed; only a failed race, with a relay offered, attaches to the cloud."><Race /></Figure>
+
+When the offer arrives the engine races the candidates (`sdks/js/core/src/race.ts`), sorted by priority:
+
+1. Candidates that do not need a probe (`host`, `portmap`) are dialled at once.
+2. Candidates that do (`srflx`, `host6`) are held 400 ms, so the agent's probe packets toward the pilot's address can open the NAT mapping or firewall state before the browser's QUIC Initial arrives.
+3. The first WebTransport session to become ready wins, and every other attempt is closed at once. This is load-bearing: the agent switches its video to a session the moment it is accepted, so a late second connection would steal the picture.
+4. The whole race has a deadline from the hint: 10 s for `likely`, 4 s for `lan-only`, 2 s for `none`.
+
+A race ends with one `FailureReason`: `no-candidates` (nothing to dial), `all-candidates-timeout` (the deadline passed), `cert-mismatch` (every attempt failed on the certificate, usually a robot that rotated its certificate mid-session) or `handshake-timeout` (every attempt failed for another reason). `robot-offline` and `token-rejected` come from signaling before any race, and `relay-unavailable` from the relay step below.
+
+One browser rule to know: a page on a public origin is refused a direct connection to a private address unless the user allows it in the site's permissions (Chrome's local network access). A pilot on the robot's own LAN then falls through `host` to the hairpin over `srflx` or `portmap`, and the demo page says so.
+
+## The relay decision
+
+The relay is taken last, and only when offered ([ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/)). After the race has failed, the engine checks whether the offer carried a relay, which the cloud includes only when the robot announced `relay: true` and the server has the relay enabled, and whether the session allows it (`relay` option, `relay="0"` on the element). If both, it emits `relay` with the diagnosis and attaches to the WebSocket relay on the signal server; if the attach fails the session ends in `p2p-failed` with `relay-unavailable`. There is no relay-first mode and no retry through the relay: the race runs first, every time, and a relayed session stays relayed until it ends.
+
+A relayed session is always shown as one: `transport: 'relay'` on `welcome` and `stats`, an amber RELAY badge on `<seyd-video>`, an amber path line in the HUD with the direct-path reason beside it, and the guidance box kept up under a "Relayed through the Seyd cloud" heading. The relay is metered and adds latency; it is the symptom of a network problem, and the fix is on this page.
+
+## How a failure is classified
+
+`<seyd-connect-error>` calls `classify()` (`sdks/js/web/src/seyd-connect-error.ts`) on the `P2pFailure`, which pairs the failure reason with the NAT report. The first matching row wins, and each class has a page with the exact router or SIM change:
+
+| Class | Chosen when | Page |
+|---|---|---|
+| `robot-offline` | Signaling said the robot is not registered. | [Robot is offline](/docs/networking/classes/robot-offline/) |
+| `cert-or-token` | Signaling refused the token (`token-rejected`), or every candidate failed on the certificate (`cert-mismatch`). | [Certificate or token](/docs/networking/classes/cert-or-token/) |
+| `pilot-udp-blocked` | The failure reason is `pilot-udp-blocked`: the pilot's own network drops UDP, the robot is fine. `@seyd/core` does not yet produce this reason itself; the check is planned. | [Your network blocks UDP](/docs/networking/classes/pilot-udp-blocked/) |
+| `robot-cgnat` | `ipv4.cgnat`, no working port mapping, no global IPv6. | [Robot is behind carrier-grade NAT](/docs/networking/classes/robot-cgnat/) |
+| `robot-symmetric-nat` | `ipv4.nat` is `symmetric` and no working port mapping. | [Symmetric NAT](/docs/networking/classes/robot-symmetric-nat/) |
+| `robot-port-restricted` | `ipv4.nat` is `port-restricted` and the port mapping reported an error. The agent's STUN classification reports `cone`, `symmetric` or `unknown`, so this row is not reached by today's agent. | [Port mapping failed](/docs/networking/classes/robot-port-restricted/) |
+| `robot-upstream-firewall` | The router granted a mapping, but the prober found it dark or the race timed out: a second NAT layer or the modem's firewall. | [Upstream firewall or double NAT](/docs/networking/classes/robot-upstream-firewall/) |
+| `robot-ipv6-firewalled` | A global IPv6 address exists and the prober measured `inbound_ok: false`. | [Robot IPv6 is firewalled](/docs/networking/classes/robot-ipv6-firewalled/) |
+| `unknown` | Nothing above matched. The box lists how many paths failed and the reason. | [No direct connection](/docs/networking/classes/unknown/) |
+
+The build fails if a class in that union has no page, so the SDK's "How to fix this" link can never dangle.
+
+## Deployment guidance
+
+From the field runs in `docs/field-test.md` and PLAN.md:
+
+- **A robot on an office or home network with an ordinary (cone) NAT works without configuration.** Field run A (2026-08-30): robot on the office LAN, pilot on an iPhone hotspot, connected over `srflx` by hole punch.
+- **A robot behind a consumer 4G/5G router is not reachable out of the box, on either address family.** Field run B (2026-08-31, Tele2): the router gave a public IPv4 that STUN called cone and three global IPv6 addresses, and still no inbound packet arrived on either. The carrier NAT behaved as port-restricted, and the router's stateful IPv6 firewall dropped inbound it had not seen outbound first. **Enable UPnP or NAT-PMP on the router** and Seyd installs the pinhole itself: the same router then advertised a `portmap` candidate and the pilot connected directly. Otherwise forward UDP 4433 to the robot once, or use a SIM with a public IP.
+- **Behind carrier-grade NAT** (a `100.64.0.0/10` address on the router's WAN side) no port mapping can help. Enable IPv6 on the SIM or APN, get a public-IP SIM, or put the robot behind a router on a non-CGNAT uplink. [Starlink](/docs/networking/starlink/) is a common case.
+- **IPv6 removes the NAT, not the firewall.** With a global IPv6 address the remaining question is the router's IPv6 firewall; open a pinhole for UDP 4433. The prober's `inbound_ok` tells you before a pilot tries.
+- **On the pilot side** only outbound UDP matters. A corporate network or VPN that blocks it is fixed by another network; a phone hotspot works.
+- **The relay** covers a demo or a first day on a network that says no. It is shown, metered and slower, so make the network change above rather than living on it.
+
+The console shows every robot's candidates, NAT report and prober result, so you can read the outlook before driving. The startup lines of `seydd` (`candidate …`, `NAT type …`, `nat_report`) say the same thing on the robot.

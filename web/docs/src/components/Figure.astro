@@ -1,0 +1,15 @@
+---
+// A figure frame for the inline-SVG diagrams under ./figures (docs/design.md
+// §6: figures sit in a bordered surface frame, draw with the tokens, and
+// follow the theme). Usage in MDX:
+//
+//   import Figure from '../../components/Figure.astro';
+//   import Parties from '../../components/figures/Parties.astro';
+//   <Figure caption="…"><Parties /></Figure>
+interface Props { caption?: string }
+const { caption } = Astro.props;
+---
+<figure class="seyd-figure">
+  <div class="frame"><slot /></div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

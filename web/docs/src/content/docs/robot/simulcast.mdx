@@ -1,0 +1,95 @@
+---
+title: "Simulcast"
+description: Declare several encodings of one picture and let Seyd pick which already-encoded stream to relay, so adapting costs a keyframe and never a reconnect.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import setup from '@repo/examples/demo-robot/setup-simulcast.py?raw';
+
+Under congestion the controller lowers the bitrate request. Where a publisher offers only one stream, the encoder has to spend fewer bits on the same picture. Where it already encodes the picture more than once, as most IP cameras do simultaneously and for free, Seyd can instead choose which already-encoded stream to forward. That is simulcast ([ADR 0008](/docs/reference/adr/0008-simulcast/)): adapt resolution by selecting a stream, not by reconfiguring one.
+
+## Why select rather than reconfigure
+
+Three measurements on the demo camera shaped the decision. Its main stream cannot go below 1280x720, so there was no resolution rung on it at all. Writing a new resolution to a running stream is stored but does not affect the live session; only a new session gets it, so a resolution change costs an RTSP reconnect (about 83 ms) plus a pilot decoder reconfigure, exactly when the link is already in trouble. And the camera's channels are independent encoders over the same sensor image, all running whether or not anyone reads them.
+
+So a video channel may declare more than one **layer**. Each layer is an independently encoded stream of the same picture at a different operating point. The agent subscribes to every declared layer and relays exactly one. Nothing is decoded, re-encoded or inspected beyond the framing Seyd already does; this is the no-transcoding rule applied to adaptation, not an exception to it.
+
+Frame rate stays the same on every rung on purpose. Dropping resolution is the point of the ladder; dropping cadence is what the ladder exists to avoid, because for a remote pilot the frame interval is latency.
+
+## The rules of a switch
+
+1. **Switch on a keyframe of the target layer, never mid-GOP.** Frames of the non-active layer are dropped at ingest, so whole frame or nothing is untouched.
+2. **Ask for that keyframe rather than waiting for it.** Selecting a layer raises a `layer` message naming it; a publisher that can force an IDR on that stream makes the switch immediate instead of up to a GOP away.
+3. **A layer switch is not a loss event.** It raises neither the FEC level nor the recovery ladder.
+4. **Hysteresis is mandatory.** A layer change costs the pilot a decoder reconfigure. Downward moves are immediate; an upward move needs the target to sit 25 % above the rung's activation point for 10 continuous seconds, and the selector remembers the target at which a rung failed and refuses to climb back for less, forgetting that after 600 s.
+
+Selection is policy and lives in `seyd-qos` (`simulcast::LayerSelector`), a pure function of the declared layers, the controller's target and the current layer. The controller decides how many bits; the selector decides which encoding fits them. A robot with one layer runs the same controller unchanged.
+
+## The codec string must admit the highest layer
+
+The pilot configures its `VideoDecoder` once, from the channel's `codec`. `avc1.42001f` is Baseline level 3.1, whose 3600-macroblock ceiling is exactly 1280x720; a ladder topped by 1920x1080 needs `avc1.420028` (level 4.0). All layers must be the same codec family, and `seydd` rejects a configuration that mixes them. Inputs are Annex B with parameter sets inline on every keyframe, so the new SPS travels with the keyframe that begins the new layer and the pilot resizes on its own.
+
+## In the daemon: `[[channel.layer]]`
+
+Give every stream as a layer and omit `input`; the two are not allowed together. From the `Layer` doc comment in `config.rs`:
+
+```toml
+[[channel]]
+kind  = "video"
+name  = "main"
+codec = "avc1.42001f"   # must admit the *highest* layer
+fps   = 25
+
+  [[channel.layer]]
+  name  = "low"
+  input = "rtsp://cam:554/Streaming/Channels/102"
+
+  [[channel.layer]]
+  name  = "high"
+  input = "rtsp://cam:554/Streaming/Channels/101"
+  activate_above_kbps = 1800
+```
+
+`activate_above_kbps` is the controller target at or above which the layer is the right choice. Layers are ordered by it, lowest first, whatever order the file lists them in; the lowest is the base, must be 0, and is used whenever nothing better is affordable, so a link below every activation point still gets video. Two layers sharing a value, or a base above 0, is refused at load, because either would present as a rung that is silently never used. Every key is in the [seydd.toml reference](/docs/reference/seydd-config/#channellayer); the demo robot's real ladder is rendered on [Integrate the daemon](/docs/robot/daemon/#the-configuration-file).
+
+The robot receives every layer and forwards one, so the camera-to-agent link carries the sum of the layers. That is free on a LAN or a cable, and it is why simulcast is a robot-side feature: the uplink still carries exactly one stream. `frames_dropped_inactive_layer` in the counters is large by design.
+
+## In C: `seyd_channel_add_layer` and `seyd_push_frame_layer`
+
+```c
+seyd_channel_add(agent, &vc, &video);
+seyd_channel_add_layer(agent, video, "low",  0);      /* the base rung */
+seyd_channel_add_layer(agent, video, "high", 1800);   /* needs 1800 kbps */
+
+seyd_agent_start(agent);
+seyd_push_frame_layer(agent, video, 0, low_au,  low_len,  is_idr, ts);
+seyd_push_frame_layer(agent, video, 1, high_au, high_len, is_idr, ts);
+```
+
+Call `seyd_channel_add_layer` once per layer before start, in any order. Feed every declared layer with `seyd_push_frame_layer`; Seyd relays one and drops the rest. A channel with fewer than two layers behaves exactly as one with none, `seyd_push_frame` still works and means layer 0, and on a channel with no layers `seyd_push_frame_layer` ignores `layer`, so a wrapper may always call it. Set `on_layer_changed` and force a keyframe on the incoming layer when it fires. These were appended under [ADR 0004](/docs/reference/adr/0004-c-abi/) rule 3, so `SEYD_ABI_VERSION` stays 1; see the [C ABI reference](/docs/reference/c/#seyd_channel_add_layer). In Rust the same calls are `ChannelSpec.layers` and `Agent::push_video_layer`. The Python SDK does not expose layers yet.
+
+## The `layer` control message
+
+```json
+{"type": "layer", "channel": 1, "layer": 0, "name": "low", "reason": "down"}
+```
+
+Sent when the relayed layer changes. `reason` is `up` or `down`. Seyd switches on that layer's next keyframe regardless; forcing one on the named stream turns "next keyframe" from up to a GOP into right now, which is the whole point of simulcast over a reconnect. Nothing is required of a publisher that ignores it. The demo bridge maps the name to a camera stream channel and asks it for an IDR; see the [worked example](/docs/robot/daemon/#worked-example-the-demo-robots-bridge).
+
+## Camera-side example
+
+The camera has to be provisioned so its streams agree: same codec family, same profile, same frame rate, a sensible bitrate cap per rung. `examples/demo-robot/setup-simulcast.py` does that for the demo Hikvision over ISAPI. Both rungs are forced to Baseline H.264, because the agent's frame gate forbids B-frames and the sub stream ships as Main from the factory; that one setting would otherwise turn a layer switch into corruption rather than a smaller picture. It reads the camera's own values back rather than trusting the 200, because this firmware silently keeps its old resolution when it rejects one. Nothing in it is Seyd; it is vendor provisioning and lives in `examples/` for that reason.
+
+<details>
+<summary>examples/demo-robot/setup-simulcast.py</summary>
+<Code code={setup} lang="python" title="examples/demo-robot/setup-simulcast.py" />
+</details>
+
+Run it with the camera's address and credentials in the environment, as often as you like:
+
+```bash
+set -a; . ./.env.local; set +a
+python3 examples/demo-robot/setup-simulcast.py [--dry-run]
+```
+
+The pilot's HUD shows which layer is live, and the daemon logs a `simulcast` line with the layer, its name, the reason and the target at every change.

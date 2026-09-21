@@ -1,5 +1,5 @@
 # Seyd demo robot — Hikvision PTZ camera (DEMO.md). Nothing in this file is
-# vendor-specific; the Hikvision driver is examples/demo-robot/ptz_bridge.py,
+# vendor-specific; the Hikvision driver is examples/demo-robot/bridge.py,
 # which consumes the generic UDP interfaces declared here.
 [agent]
 robot_id        = "seyd-demo"

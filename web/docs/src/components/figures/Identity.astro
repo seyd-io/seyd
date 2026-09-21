@@ -1,0 +1,61 @@
+---
+// The three identity planes (PLAN.md §2.8 "Figures"). Inline SVG on the
+// design tokens (docs/design.md §6), rendered inside <Figure>. Facts:
+// docs/adr/0007-identity.md (Ed25519 robot key, challenge-response; ES256
+// session token minted with Seyd's key, verified by the agent, ttl ≤ 300 s in
+// cloud/api/src/session-tokens.ts; OIDC via Logto, replaceable), CLAUDE.md
+// "Authentication is pluggable; authorization is the product".
+---
+<svg viewBox="0 0 660 258" role="img" aria-label="Three identity planes. A robot proves itself with its own Ed25519 key against Seyd's registry on every connect. A driving session presents a pass of at most five minutes signed by Seyd's key, checked by the agent. A person signs in once through the identity provider, Logto today and replaceable, and cloud/api turns the OIDC token into a Principal. Only the bottom row leaves our code; robots and sessions carry on if the provider is down.">
+  <defs><marker id="fig-identity-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="4" y="24" width="3" height="120" fill="var(--seyd-accent)"/>
+  <rect x="4" y="160" width="3" height="52" fill="var(--seyd-amber)"/>
+
+  <g fill="none" stroke="currentColor" stroke-opacity=".6">
+    <rect x="16" y="24" width="124" height="52" rx="6"/>
+    <rect x="16" y="92" width="124" height="52" rx="6"/>
+    <rect x="16" y="160" width="124" height="52" rx="6"/>
+    <rect x="440" y="24" width="212" height="52" rx="6"/>
+    <rect x="440" y="92" width="212" height="52" rx="6"/>
+    <rect x="440" y="160" width="212" height="52" rx="6"/>
+  </g>
+  <rect x="176" y="24" width="220" height="52" rx="6" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)"/>
+  <rect x="176" y="92" width="220" height="52" rx="6" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)"/>
+  <rect x="176" y="160" width="220" height="52" rx="6" fill="var(--seyd-amber-bg)" stroke="var(--seyd-amber)"/>
+
+  <text class="node" x="78" y="46" text-anchor="middle">Robot</text>
+  <text class="sub" x="78" y="64" text-anchor="middle">seydd or the SDK</text>
+  <text class="node" x="286" y="46" text-anchor="middle" style="fill: var(--seyd-accent)">Ed25519 key</text>
+  <text class="sub" x="286" y="64" text-anchor="middle">kept on the robot, never sent</text>
+  <text class="node" x="546" y="46" text-anchor="middle">Seyd's registry</text>
+  <text class="sub" x="546" y="64" text-anchor="middle">challenge on every connect</text>
+
+  <text class="node" x="78" y="114" text-anchor="middle">Driving session</text>
+  <text class="sub" x="78" y="132" text-anchor="middle">pilot's browser</text>
+  <text class="node" x="286" y="114" text-anchor="middle" style="fill: var(--seyd-accent)">Session pass</text>
+  <text class="sub" x="286" y="132" text-anchor="middle">ES256 · Seyd's key · ≤ 5 minutes</text>
+  <text class="node" x="546" y="114" text-anchor="middle">The agent</text>
+  <text class="sub" x="546" y="132" text-anchor="middle">checks it against Seyd's JWKS</text>
+
+  <text class="node" x="78" y="182" text-anchor="middle">Person</text>
+  <text class="sub" x="78" y="200" text-anchor="middle">signs in once</text>
+  <text class="node" x="286" y="182" text-anchor="middle" style="fill: var(--seyd-amber)">Identity provider</text>
+  <text class="sub" x="286" y="200" text-anchor="middle">Logto today · replaceable</text>
+  <text class="node" x="546" y="182" text-anchor="middle">cloud/api</text>
+  <text class="sub" x="546" y="200" text-anchor="middle">OIDC token → Principal</text>
+
+  <g stroke="currentColor" stroke-opacity=".6">
+    <line x1="141" y1="50" x2="175" y2="50" marker-end="url(#fig-identity-ar)"/>
+    <line x1="397" y1="50" x2="439" y2="50" marker-end="url(#fig-identity-ar)"/>
+    <line x1="141" y1="118" x2="175" y2="118" marker-end="url(#fig-identity-ar)"/>
+    <line x1="397" y1="118" x2="439" y2="118" marker-end="url(#fig-identity-ar)"/>
+  </g>
+  <g stroke="var(--seyd-amber)" style="color: var(--seyd-amber)">
+    <line x1="141" y1="186" x2="175" y2="186" marker-end="url(#fig-identity-ar)"/>
+    <line x1="397" y1="186" x2="439" y2="186" marker-end="url(#fig-identity-ar)"/>
+  </g>
+
+  <text class="lbl" x="16" y="234" style="fill: var(--seyd-accent)">Robot keys and session passes are ours: they carry on if the provider is down.</text>
+  <text class="lbl" x="16" y="250" style="fill: var(--seyd-amber)">Only the bottom row leaves our code.</text>
+</svg>

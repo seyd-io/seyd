@@ -1,0 +1,87 @@
+---
+title: "A robot in Python"
+description: The seyd package over libseyd, a complete robot with its own x264 encoder, and the rules a Python integration must follow.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import example from '@repo/sdks/python/examples/ffmpeg_robot.py?raw';
+
+The Python SDK is for a robot whose own process already holds encoded frames. It is a thin cffi wrapper over `libseyd`, the C ABI ([ADR 0004](/docs/reference/adr/0004-c-abi/)): the wire format, FEC, NAT traversal, QoS and signaling all live in the Rust core, so this SDK, the daemon and the C wrapper cannot drift apart. If your camera publishes RTSP or RTP on a socket, run [the daemon](/docs/robot/daemon/) instead and skip the code.
+
+## Install
+
+No package is published yet. From a source checkout, build the library and point Python at the SDK:
+
+```bash
+cargo build -p seyd-ffi --release
+pip install cffi
+PYTHONPATH=sdks/python python3 -c "import seyd; print(seyd.ABI_VERSION)"
+```
+
+The SDK finds `libseyd` in this order: `$SEYD_LIBRARY` (a full path), then inside the installed package, then the workspace's `target/release` and `target/debug`. From a checkout it needs no install step. When none of those exist it raises `SeydLibraryNotFound`, which names the fix.
+
+## The shape of an integration
+
+Create an `Agent`, add channels, set handlers, `start()`, then push frames and messages. Channels are numbered from 1 in the order you add them, and that numbering is what the pilot sees.
+
+```python
+from seyd import Agent, ChannelKind
+
+with Agent("my-robot", "wss://signal.seyd.io/ws", qos_profile="latency") as agent:
+    video = agent.add_channel(ChannelKind.VIDEO, "main", codec="avc1.42001f", fps=25)
+    telemetry = agent.add_channel(ChannelKind.SENSOR, "telemetry")
+    agent.add_channel(ChannelKind.COMMAND, "drive")
+
+    agent.on_command = lambda channel, payload: motors.apply(payload)
+    agent.on_session_ended = lambda sid, reason: motors.park()
+
+    agent.start()
+    for au in my_encoder:
+        agent.push_frame(video, au.bytes, keyframe=au.is_idr, capture_ts_us=au.pts_us)
+```
+
+Seyd relays encoded bytes. It never decodes, re-encodes or inspects a payload: hand it the access units your encoder produced, one per `push_frame`, and the pilot decodes exactly those.
+
+## The example: a robot with its own encoder
+
+`sdks/python/examples/ffmpeg_robot.py` is a complete robot. x264 runs in a pipe, access units go straight into Seyd, and there is a sensor channel and a command channel. It is rendered here from the repository, so what you read is what runs.
+
+<Code code={example} lang="python" title="sdks/python/examples/ffmpeg_robot.py" />
+
+Walking through it:
+
+**`PROFILES` and `ffmpeg_command`.** The encoder settings live in the publisher, on purpose. Seyd states transport-observable targets through `on_requested_config`; resolution, preset and VBV are the publisher's to choose. The command line follows the [publisher contract](/docs/robot/publisher-contract/): Baseline profile and `-bf 0` (no B-frames), `zerolatency`, a VBV of about 100 ms, and periodic intra refresh (`intra-refresh=1`) instead of periodic IDRs. `-g` is the refresh sweep period, and `force_key_frames` forces an IDR only every `idr_s` seconds, the profile's `maxGopMs`: x264 in a pipe cannot answer a `recovery-request`, so this bounds a joining pilot's wait. `aud=insert` marks every access-unit boundary so the reader needs no slice parser.
+
+**`access_units` and `_is_keyframe`.** Splits the Annex B stream at each access-unit delimiter (NAL type 9) and flags an access unit as a keyframe when it carries an IDR slice (type 5) or a parameter set (type 7). That flag is what `push_frame` needs; Seyd does not look inside the bytes to find it.
+
+**`make_command_handler`.** Logs each command and, with `--command-udp`, forwards it to a local UDP port with a non-blocking socket. That is the same generic interface `seydd` offers, so robot software already listening on a socket needs no change. Non-blocking matters: the handler runs on the Seyd callback thread.
+
+**`main`.** Builds the `Agent` with `credential_path`, `qos_profile` and an optional `host_override` for LAN testing. Adds the video channel with the codec string the pilot will configure its decoder from, a `telemetry` sensor channel and a `ptz` command channel (named so the demo pilot's controls reach it). Registers the handlers, all of which only log: a real publisher reconfigures its encoder in `on_requested_config` and answers `on_recovery_request`. After `start()` a thread pushes a counter on the sensor channel at 10 Hz, and the main thread reads access units from ffmpeg and calls `push_frame` with the read clock as `capture_ts_us`, because raw Annex B on a pipe carries no timestamp. Every ten seconds it prints `agent.counters`. The `with` block stops the agent on the way out.
+
+## The rules
+
+- **Handlers run on one Seyd thread and must not block.** A slow handler delays every later event. Queue the work and return; do no I/O in a handler.
+- **`push_frame` and `push_message` never block.** A frame arriving while the previous one is still going out is dropped by admission control and counted in `agent.counters.frames_dropped_backlog`. Keyframes are never dropped. This is whole frame or nothing: a torn frame costs a GOP, a skipped frame costs a frame.
+- **Pass the encoder's own `capture_ts_us`** whenever you have it. The pilot paces presentation on the source's capture clock ([ADR 0005](/docs/reference/adr/0005-presentation-pacing/)); passing "now" adds jitter the pilot cannot remove.
+- **Park actuators in `on_session_ended`.** It fires whether the pilot said goodbye or simply vanished.
+- **Answer `on_requested_config` and `on_recovery_request`.** `on_requested_config` is the one place Seyd talks to your encoder: a bitrate ceiling, a latency budget, a GOP bound. Ignore it and Seyd's rate control cannot act on a congested link. `on_recovery_request` carries `ltr`, `intra_refresh` or `idr`; answer with what your encoder can do, and treat `maxGopMs` as a long ceiling, never a one-second IDR cadence ([ADR 0009](/docs/reference/adr/0009-keyframes-on-demand/)).
+
+Simulcast layers ([ADR 0008](/docs/reference/adr/0008-simulcast/)) are not exposed by the Python SDK yet; they are on the [C ABI](/docs/robot/c/) and in the daemon.
+
+## Running it
+
+```bash
+./py-robot.sh                                    # robot id seyd-py, synthetic source
+VIDEO_DEVICE=0 ./py-robot.sh                     # the Mac webcam instead
+DARC_QOS_PROFILE=latency ROBOT_ID=my-py ./py-robot.sh
+SIGNAL_URL=ws://localhost:8080/ws ./py-robot.sh  # against a local cloud
+ENROL_TOKEN=seyd_enr_… ./py-robot.sh             # first run on a cloud with real accounts
+```
+
+The script builds `libseyd`, checks for `ffmpeg` and `cffi`, and runs the example against the deployed signal server, printing the pilot URL to open in Chrome. `ENROL_TOKEN` redeems an enrolment token into the credential file the robot then runs with. The C ABI has no enrolment call yet, so the script goes through `seydd enrol`; the key file format is shared. To run the example directly:
+
+```bash
+python3 sdks/python/examples/ffmpeg_robot.py --robot-id seyd-py --device lavfi
+```
+
+The [Python reference](/docs/reference/python/) lists every class, handler and method, generated from the package's docstrings.

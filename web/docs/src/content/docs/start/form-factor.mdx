@@ -1,0 +1,84 @@
+---
+title: "Choose a form factor"
+description: The daemon, the Python SDK, the C ABI or the Rust crate. Which one is right depends on where your encoded frames are.
+---
+
+Every form factor is the same Rust core with a different host around it. The
+question that picks one is simple: where are your encoded frames?
+
+## The four options
+
+| Form factor | Your frames are | You write | Status |
+|---|---|---|---|
+| **The daemon, `seydd`** | On a socket: the camera publishes RTSP or RTP | A TOML file. No code | Built |
+| **Python SDK, `seyd`** | In your own Python process, as access units | A few lines: `Agent`, `add_channel`, `push_frame` | Built, cffi over `libseyd` |
+| **C ABI, `seyd.h`** | In your own process, in any language that can call C | Against the header, or a wrapper of your own | Built at ABI 1. C++ and ROS 2 wrappers are planned, not built |
+| **Rust, `seyd_core::Agent`** | In your own Rust program | A host of your own, the way `seydd` and `seyd-ffi` are hosts | Built |
+
+## When each one is right
+
+**Run `seydd`** when the robot's camera already publishes RTP or RTSP on a
+socket. The daemon owns the depacketization, reads UDP sockets for sensors,
+writes commands to a UDP socket, and tells your publisher what to change on
+another. Enrolment is built in, and an install is one binary, one config file
+and a systemd unit. Most IP cameras and most existing robot software
+stacks land here. Start at [Integrate the daemon](/docs/robot/daemon/).
+
+**Use the Python SDK** when your process already holds encoded frames and
+going through a socket would be a copy and a hop for nothing: an encoder you
+drive yourself, a GStreamer or FFmpeg pipeline you already own, a research
+stack. The SDK reads its declarations out of `seyd.h`, so it cannot drift
+from the ABI. Start at [A robot in Python](/docs/robot/python/).
+
+**Use the C ABI** when the language is not Python: C, C++, Go, anything with a
+foreign-function interface. The header is cbindgen output from the Rust crate
+and is checked in, so a consumer needs no Rust toolchain. The ABI is
+versioned; additions are appended and never reordered until the version is
+bumped. Start at [A robot in C](/docs/robot/c/) and the
+[C reference](/docs/reference/c/).
+
+**Use the Rust crate** when you are writing the robot's program in Rust and
+want the same type the daemon is built on. A host supplies media, consumes
+`AgentEvent`, and owns nothing of the lifecycle. Start at
+[A robot in Rust](/docs/robot/rust/) and the
+[rustdoc](/docs/reference/rust/).
+
+:::note
+RTP and RTSP ingest is the daemon's job, not the ABI's. A robot whose camera
+publishes on a socket should run `seydd` rather than write depacketization
+against the header.
+:::
+
+## What every form factor shares
+
+One Rust core carries all the protocol logic: the wire format, FEC, NAT
+traversal, QoS, signalling and the agent lifecycle. The daemon, the Python
+SDK and the C header are thin hosts of it with no protocol logic of their
+own, so they cannot drift apart and one conformance suite covers them all.
+That is the decision in [ADR 0004](/docs/reference/adr/0004-c-abi/).
+
+The rules are the same everywhere too:
+
+- **Seyd is handed encoded bytes and relays them.** It never decodes,
+  re-encodes or inspects payloads.
+- **Callbacks run on one Seyd thread and must not block.** A slow handler
+  delays every later event. Queue the work and return.
+- **Pushing a frame or a message never blocks.** A frame that arrives while
+  the previous one is still going out is dropped by admission control, and
+  counted; keyframes never are.
+- **Pass the encoder's own capture timestamp.** The pilot paces presentation
+  on it; passing "now" adds jitter the pilot cannot remove.
+- **Answer the publisher requests.** A bitrate ceiling, a latency budget, a
+  GOP bound and recovery requests reach your encoder through
+  `on_requested_config` and `on_recovery_request` (the daemon's
+  publisher-control port). Ignoring them means Seyd cannot act on a congested
+  link. See [The publisher contract](/docs/robot/publisher-contract/).
+- **Park actuators when a session ends.** The event fires whether the pilot
+  said goodbye or simply vanished.
+
+## One gap to know about
+
+The C ABI at version 1 has no enrolment call, so an SDK robot cannot redeem an
+enrolment token itself. Enrol its key file with `seydd enrol` against the same
+credential path, then start the SDK robot. Enrolment is planned as an append
+to the ABI, not a break. Details in [Enrolment and access](/docs/cloud/access/).

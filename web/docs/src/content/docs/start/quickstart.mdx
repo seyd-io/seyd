@@ -1,0 +1,126 @@
+---
+title: "Quickstart: drive the demo"
+description: Drive the public demo robot from a page of your own in five minutes, with one element and no account.
+---
+import { Code } from '@astrojs/starlight/components';
+import minimal from '@repo/sdks/js/web/examples/minimal.html?raw';
+
+The demo robot `seyd-demo` is a real steerable camera on a real network,
+enrolled in the deployed cloud with a public grant. Anyone may observe and
+drive it without an account. This page puts it in a page of your own.
+
+## What you need
+
+- **Chrome or Edge**, on a desktop or an Android handset. The pilot uses
+  WebTransport with a certificate fingerprint pinned per robot, and Apple's
+  browsers do not implement that, so Safari cannot connect and neither can any
+  browser on an iPhone or iPad, since they are all WebKit.
+- **Node and pnpm**, to build the SDK from a checkout.
+- Nothing on the robot side. The demo robot is already running.
+
+## Step 0: drive it without writing anything
+
+Open the deployed pilot page and take the wheel:
+
+```
+https://seyd-signal-flj7s44j4a-ew.a.run.app/pilot/?robot=seyd-demo
+```
+
+Press `S` to show the HUD: the path the session won, the round-trip time, the
+frame rate, the bitrate and the glass-to-glass estimate. If the page says the
+session is relayed, in amber, the direct race failed from your network; the
+guidance box says what it found.
+
+## Step 1: get `@seyd/web`
+
+The packages are not published to npm yet. `@seyd/web` and `@seyd/core` are
+workspace packages in the Seyd repository, so today you build them from a
+checkout:
+
+```bash
+git clone <the seyd repository> seyd
+cd seyd
+pnpm install
+pnpm -r build
+```
+
+Then depend on the built package from your own project. Inside the workspace
+(a package under `web/` or `sdks/js/`), the way the demo does it:
+
+```json
+"@seyd/web": "workspace:*"
+```
+
+Outside the workspace, point at the built package directory:
+
+```json
+"@seyd/web": "file:../seyd/sdks/js/web"
+```
+
+`@seyd/web` depends on `@seyd/core` from the same checkout, so both must be
+built before you install.
+
+## Step 2: the page
+
+This is the smallest pilot page, the file in the repository that the SDK
+ships as its example. Serve it from a bundler that resolves `@seyd/web`
+(Vite, esbuild, webpack), or replace the import with the path to your built
+bundle.
+
+<Code code={minimal} lang="html" title="sdks/js/web/examples/minimal.html" />
+
+Two attributes to change for the demo:
+
+- `robot-id="seyd-demo"`
+- `signal-url="wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws"`
+
+Three elements do the work. `<seyd-video>` creates the session, connects and
+paints the feed. `<seyd-hud>` shows the numbers and toggles on `S`.
+`<seyd-connect-error>` is the guidance box: when the direct path fails it
+names what it found and the setting to change, and while a session is relayed
+it says so. The `seyd-session` event hands you the `SeydSession` once; use it
+to read sensors and send commands.
+
+The demo robot's command channel is named `ptz` and takes JSON like
+`{"pan": 20, "tilt": 0, "zoom": 0}`. The example sends on a channel named
+`drive`; rename it to `ptz` to move the camera from your page.
+
+## The signal URL
+
+`signal-url` is the cloud your robot announced itself to. The deployed Seyd
+cloud is at `wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws`, and that is
+where `seyd-demo` lives. A cloud you run yourself has its own URL, and a robot
+and a pilot must use the same one, because that is where the introduction
+happens. The signal socket carries a few kilobytes; the video goes directly
+from the robot to your browser.
+
+:::note
+From a page served over public HTTPS, Chrome asks for the Local Network
+Access permission before it will try a robot's private LAN address. Deny it
+and a same-LAN pilot falls through to the next candidate, which is slower.
+Allow it when you see the prompt.
+:::
+
+## What you should see
+
+The status line goes from connecting to the winning path, and the video
+appears. Press `S` for the HUD. If the direct race fails, the guidance box
+explains why and, if the robot allows a relay, the session continues through
+the cloud with an amber RELAY badge on the video for as long as it lasts.
+`?paths=none` on the demo page forces the race to fail so you can see that
+path; `?relay=0` refuses the relay; `<seyd-video relay="0">` does the same in
+your page.
+
+## Then run your own robot
+
+The demo robot is public. Yours will not be: it enrols with a one-time token
+from the console, and pilots reach it with a session token minted for them.
+
+- [Integrate the daemon](/docs/robot/daemon/) if your camera publishes RTSP or
+  RTP.
+- [Choose a form factor](/docs/start/form-factor/) if your own process holds
+  the frames.
+- [Enrolment and access](/docs/cloud/access/) for tokens, grants and session
+  passes.
+- [The web components](/docs/pilot/web-components/) for every attribute and
+  event of `<seyd-video>`.

@@ -1,0 +1,46 @@
+---
+// The channel model (PLAN.md §2.8 "Figures"). Inline SVG on the design tokens
+// (docs/design.md §6), rendered inside <Figure>. Facts: docs/protocol/chunks.md
+// (kinds, directions, codec), packages/seyd-core/src/channels.rs (ChannelSpec),
+// docs/protocol/seydd.md (observers' commands are dropped), seyd.h
+// seyd_channel_kind. Driver in the accent, observers in amber (design.md §3).
+---
+<svg viewBox="0 0 660 250" role="img" aria-label="Channel model. Video and sensor channels flow from the robot to every session; the command channel flows from the driver to the robot only, and commands from observers are dropped by the robot. Channels are numbered from 1 in declaration order, each with its codec: avc1 for video, json for messages.">
+  <defs><marker id="fig-channels-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="8" y="28" width="150" height="208" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="83" y="52" text-anchor="middle">Robot</text>
+  <text class="sub" x="146" y="72" text-anchor="end">ch 1 · video</text>
+  <text class="sub" x="146" y="110" text-anchor="end">ch 2 · sensor</text>
+  <text class="sub" x="146" y="154" text-anchor="end">ch 3 · command</text>
+  <text class="lbl" x="83" y="200" text-anchor="middle">numbered 1..n in</text>
+  <text class="lbl" x="83" y="214" text-anchor="middle">declaration order</text>
+
+  <rect x="440" y="28" width="212" height="208" rx="6" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-dasharray="4 4"/>
+  <text class="lbl" x="452" y="44">PILOTS</text>
+  <rect x="456" y="52" width="180" height="56" rx="4" fill="var(--seyd-surface-2)"/>
+  <text class="sub" x="546" y="76" text-anchor="middle">every session</text>
+  <text class="sub" x="546" y="92" text-anchor="middle">gets video + sensors</text>
+  <rect x="456" y="128" width="180" height="44" rx="6" fill="none" stroke="var(--seyd-accent)" stroke-width="1.6"/>
+  <text class="node" x="546" y="147" text-anchor="middle" style="fill: var(--seyd-accent)">Driver</text>
+  <text class="sub" x="546" y="163" text-anchor="middle">holds the driver slot</text>
+  <rect x="456" y="180" width="180" height="44" rx="6" fill="none" stroke="var(--seyd-amber)" stroke-width="1.6"/>
+  <text class="node" x="546" y="199" text-anchor="middle" style="fill: var(--seyd-amber)">Observers</text>
+  <text class="sub" x="546" y="215" text-anchor="middle">read-only</text>
+
+  <line x1="158" y1="68" x2="455" y2="68" stroke="var(--seyd-accent)" stroke-width="3" marker-end="url(#fig-channels-ar)" style="color: var(--seyd-accent)"/>
+  <text x="307" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="var(--seyd-accent)">video · avc1.42001f</text>
+  <text class="lbl" x="307" y="82" text-anchor="middle">FEC blocks · whole frame or nothing</text>
+
+  <line x1="158" y1="106" x2="455" y2="106" stroke="currentColor" stroke-opacity=".7" stroke-width="1.6" marker-end="url(#fig-channels-ar)"/>
+  <text x="307" y="99" text-anchor="middle" font-size="11" fill="currentColor">sensor · json</text>
+  <text class="lbl" x="307" y="120" text-anchor="middle">one message per datagram</text>
+
+  <line x1="455" y1="150" x2="159" y2="150" stroke="currentColor" stroke-opacity=".7" stroke-width="1.6" marker-end="url(#fig-channels-ar)"/>
+  <text x="307" y="143" text-anchor="middle" font-size="11" fill="currentColor">command · json</text>
+  <text class="lbl" x="307" y="164" text-anchor="middle">driver → robot only · on_command</text>
+
+  <line x1="455" y1="202" x2="342" y2="202" stroke="var(--seyd-amber)" stroke-width="1.6" stroke-dasharray="4 3"/>
+  <text x="334" y="206" text-anchor="middle" font-size="14" fill="var(--seyd-amber)">×</text>
+  <text class="lbl" x="324" y="206" text-anchor="end" style="fill: var(--seyd-amber)">observer commands dropped</text>
+</svg>

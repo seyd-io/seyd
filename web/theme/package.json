@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./tokens.css": "./src/tokens.css",
-    "./ui.css": "./src/ui.css"
+    "./ui.css": "./src/ui.css",
+    "./fonts.css": "./src/fonts.css"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",

@@ -1,0 +1,56 @@
+---
+title: "A robot in Rust"
+description: Host seyd_core::Agent directly, the host contract, and a compiled minimal host you can run against the cloud.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import example from '@repo/packages/seyd-core/examples/minimal_host.rs?raw';
+
+A Rust program can skip the C ABI and drive `seyd_core::Agent` directly. It is the same type `seydd` and `seyd-ffi` are built on, so a Rust host gets exactly the daemon's behaviour with none of its plumbing.
+
+## The host contract
+
+`Agent` owns everything between a configuration and a running robot: sockets, candidate discovery, the certificate, the QUIC endpoint, the session engine, signaling, port-mapping lease renewal, certificate rotation and re-gathering on a network change. A *host* supplies media and consumes events, and owns only what differs by form factor. `seydd` owns TOML, RTSP/RTP inputs and UDP sinks; `seyd-ffi` owns C marshalling. If you find yourself writing lifecycle code in a host, it belongs in `Agent`; otherwise the form factors drift.
+
+The API is small:
+
+- **`AgentConfig`**: the robot's configuration, independent of where it came from. `robot_id`, `signal_url`, `credential_path`, `quic_port`, `ipv6`, `port_mapping`, `host_override`, `qos_profile`, `max_sessions`, `channels`, `agent_version`, `recovery_ladder` and `relay`. `AgentConfig::default()` carries the same defaults as `seydd.toml`.
+- **`ChannelSpec`**: one channel, with `id`, `kind`, `name`, `codec`, `fps` and optional simulcast `layers`. Ids are what the pilot sees and what pushes and events refer to.
+- **`Agent::start(cfg)`**: binds, discovers, announces, and returns `(Agent, Receiver<AgentEvent>)` once pilots may connect. The maintenance loop runs in the background until `stop()` or until the receiver is dropped.
+- **`push_video(channel, VideoFrame)`** and **`push_video_layer`**: hand an encoded picture to the engine. `VideoFrame` is `data`, `keyframe` and `capture_ts_us`. Never blocks; a frame that finds the slot full is dropped by admission control, and keyframes never are.
+- **`push_message(channel, &[u8])`**: a message on a sensor channel.
+- **`AgentEvent`**: `SessionStarted`, `SessionEnded`, `Command`, `RequestedConfig`, `RecoveryRequest`, `LayerChanged`, `SignalConnected`, `SignalDisconnected`, `SignalDenied` and `NatReport`.
+- **`stop()`**: the maintenance loop exits, the endpoint closes and in-flight sessions are torn down. `Agent` is cheap to clone; every clone refers to the same agent.
+
+Also on the handle: `set_qos_profile`, `set_status`, `session_count`, `counters`, `profile` and `channels`.
+
+## The minimal host
+
+`packages/seyd-core/examples/minimal_host.rs` is the whole contract in one file: an `AgentConfig` from `argv`, a sensor channel and a command channel, `start`, a counter pushed once a second, every event printed, `stop` on Ctrl-C. It is a Cargo example, so `cargo build -p seyd-core --examples` compiles it and this page cannot show code that does not build.
+
+<Code code={example} lang="rust" title="packages/seyd-core/examples/minimal_host.rs" />
+
+Run it against the deployed cloud with an enrolled robot id (see [Enrolment and access](/docs/cloud/access/)):
+
+```bash
+cargo run -p seyd-core --example minimal_host -- <robot_id> wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws ./robot.key
+```
+
+The example installs no log subscriber, so the agent's own tracing is silent and only the events print. Add `tracing_subscriber::fmt().init()` to see what `seydd` logs.
+
+## How seydd drives the same agent
+
+`packages/seydd/src/main.rs` is the reference host. Read it next to the example and the split is plain:
+
+- It builds `ChannelSpec`s from the TOML, one per `[[channel]]`, numbered from 1 in file order, and hands them to `Agent::start` inside an `AgentConfig`.
+- For each video channel it spawns one input task per simulcast layer and calls `push_video_layer` with every access unit; a single-input channel is layer 0. For each sensor channel it spawns a UDP listener and calls `push_message` per datagram.
+- Its event loop is daemon policy and nothing else: `Command` goes out as a UDP datagram to the channel's `output`; `RequestedConfig`, `RecoveryRequest` and `LayerChanged` become publisher-control JSON; `SessionStarted` and `SessionEnded` become `session` messages. Signaling events are ignored, because the agent has already handled them.
+- Ctrl-C calls `agent.stop()`.
+
+Enrolment is the one thing the daemon does outside the agent today: `seydd enrol` posts the public key with a token, using `seyd_signal_client::Identity`, which is the same key file format every host reads.
+
+## What a Rust host must still do
+
+The rules are the same as for every other form factor. Push whole encoded access units and pass the encoder's `capture_ts_us`; Seyd never decodes or re-encodes. Do not block on the event receiver's thread. Park actuators on `SessionEnded`, which fires whether the pilot said goodbye or vanished. Act on `RequestedConfig` and `RecoveryRequest`: keyframes are on demand ([ADR 0009](/docs/reference/adr/0009-keyframes-on-demand/)), and a publisher that ignores them leaves a joining pilot waiting up to `maxGopMs`. The details are on [The publisher contract](/docs/robot/publisher-contract/).
+
+The [Rust reference](/docs/reference/rust/) lists the crates, and the rustdoc for the agent is at [`seyd_core`](/docs/rust/seyd_core/).

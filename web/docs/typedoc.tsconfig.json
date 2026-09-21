@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@types/dom-webcodecs"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "@seyd/core": ["../../sdks/js/core/src/index.ts"],
+      "@seyd/core/worker": ["../../sdks/js/core/src/worker.ts"]
+    }
+  },
+  "include": ["../../sdks/js/core/src/**/*.ts", "../../sdks/js/web/src/**/*.ts"]
+}

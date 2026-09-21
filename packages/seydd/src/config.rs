@@ -14,18 +14,30 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Agent {
+    /// The robot's id as enrolled with the cloud; what pilots and the console see.
     pub robot_id: String,
+    /// The signal server's WebSocket URL, `wss://host/ws`. Enrolment derives
+    /// its REST address from it.
     pub signal_url: String,
+    /// Ed25519 seed file, created on first run. The private half never leaves
+    /// the robot; enrolment registers the public half (ADR 0007).
     #[serde(default = "default_credential_path")]
     pub credential_path: PathBuf,
+    /// UDP port the QUIC endpoint binds; the port a router forward or pinhole
+    /// must open.
     #[serde(default = "default_quic_port")]
     pub quic_port: u16,
+    /// Bind and advertise IPv6 as well as IPv4.
     #[serde(default = "yes")]
     pub ipv6: bool,
+    /// Ask the router for a port mapping (PCP, NAT-PMP, UPnP) during discovery,
+    /// so a robot behind a consumer router is reachable without a manual forward.
     #[serde(default = "yes")]
     pub port_mapping: bool,
+    /// The QoS ceiling: `latency`, `balanced` or `quality`.
     #[serde(default = "default_profile")]
     pub qos_profile: String,
+    /// Concurrent pilot sessions (one driver, the rest observers).
     #[serde(default = "default_max_sessions")]
     pub max_sessions: u32,
     /// Skip discovery and advertise this host only (LAN testing).
@@ -89,7 +101,9 @@ pub enum ChannelKind {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Layer {
+    /// The layer's name, reported in `layer` messages and the HUD.
     pub name: String,
+    /// The stream carrying this encoding, `rtsp://` or `rtp://`.
     pub input: String,
     /// The ABR target at or above which this layer is the right choice. The
     /// lowest layer is the base and is used whenever nothing better is
@@ -100,15 +114,24 @@ pub struct Layer {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Channel {
+    /// `video`, `sensor` or `command`.
     pub kind: ChannelKind,
+    /// The channel's name as shown to the pilot and used in `SeydSession.send`.
     pub name: String,
     #[serde(default)]
+    /// Where the bytes come from: `rtsp://` or `rtp://` for video, `udp://` for
+    /// a sensor. Required for `video` and `sensor` channels without layers.
     pub input: Option<String>,
     #[serde(default)]
+    /// Where a `command` channel delivers each driver message, as one UDP
+    /// datagram per message.
     pub output: Option<String>,
     #[serde(default = "default_codec")]
+    /// A WebCodecs codec string for video (`avc1.42001f`, `hev1.…`, `mjpeg`);
+    /// `json` or `octet-stream` for messages.
     pub codec: String,
     #[serde(default)]
+    /// Nominal frame rate of a video channel; 0 for messages.
     pub fps: u32,
     /// Simulcast layers. Empty means the single `input` above — the ordinary
     /// case, and what every pre-simulcast config keeps doing.
@@ -153,6 +176,7 @@ impl Channel {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PublisherControl {
+    /// `host:port` the daemon sends its JSON control messages to, one per datagram.
     pub udp: String,
 }
 

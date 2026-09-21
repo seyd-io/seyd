@@ -1,0 +1,62 @@
+---
+// The agent lifecycle (PLAN.md §2.8 "Figures"). Inline SVG on the design
+// tokens (docs/design.md §6), rendered inside <Figure>. Facts: the header
+// comment of sdks/c/include/seyd.h, packages/seyd-ffi/src/lib.rs "Lifecycle"
+// and "Threading", and the seyd_callbacks struct (one field per AgentEvent).
+---
+<svg viewBox="0 0 660 250" role="img" aria-label="Agent lifecycle: create from a config, add channels numbered from 1 in declaration order, start (bind, discover, announce), serve while sessions come and go as driver or observers, stop, destroy. Every event is delivered on one Seyd thread, in order.">
+  <defs><marker id="fig-lifecycle-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="8" y="16" width="84" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="50" y="38" text-anchor="middle">create</text>
+  <text class="sub" x="50" y="57" text-anchor="middle">agent_create</text>
+  <text class="lbl" x="50" y="90" text-anchor="middle">from a config</text>
+
+  <line x1="93" y1="44" x2="107" y2="44" stroke="currentColor" stroke-opacity=".6" marker-end="url(#fig-lifecycle-ar)"/>
+
+  <rect x="108" y="16" width="110" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="163" y="38" text-anchor="middle">add channels</text>
+  <text class="sub" x="163" y="57" text-anchor="middle">channel_add ×n</text>
+  <text class="lbl" x="163" y="90" text-anchor="middle">numbered 1..n</text>
+  <text class="lbl" x="163" y="104" text-anchor="middle">in declaration order</text>
+
+  <line x1="219" y1="44" x2="233" y2="44" stroke="currentColor" stroke-opacity=".6" marker-end="url(#fig-lifecycle-ar)"/>
+
+  <rect x="234" y="16" width="84" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="276" y="38" text-anchor="middle">start</text>
+  <text class="sub" x="276" y="57" text-anchor="middle">agent_start</text>
+  <text class="lbl" x="276" y="90" text-anchor="middle">bind · discover</text>
+  <text class="lbl" x="276" y="104" text-anchor="middle">announce</text>
+
+  <line x1="319" y1="44" x2="333" y2="44" stroke="currentColor" stroke-opacity=".6" marker-end="url(#fig-lifecycle-ar)"/>
+
+  <rect x="334" y="16" width="110" height="56" rx="6" fill="var(--seyd-accent-bg)" stroke="var(--seyd-accent)"/>
+  <text class="node" x="389" y="38" text-anchor="middle" style="fill: var(--seyd-accent)">serving</text>
+  <text class="sub" x="389" y="57" text-anchor="middle">push media</text>
+  <text class="lbl" x="389" y="90" text-anchor="middle">sessions come</text>
+  <text class="lbl" x="389" y="104" text-anchor="middle">and go</text>
+  <rect x="337" y="112" width="50" height="18" rx="9" fill="var(--seyd-accent-bg)"/>
+  <text x="362" y="125" text-anchor="middle" font-size="10.5" fill="var(--seyd-accent)">driver</text>
+  <rect x="393" y="112" width="66" height="18" rx="9" fill="var(--seyd-amber-bg)"/>
+  <text x="426" y="125" text-anchor="middle" font-size="10.5" fill="var(--seyd-amber)">observers</text>
+
+  <line x1="445" y1="44" x2="459" y2="44" stroke="currentColor" stroke-opacity=".6" marker-end="url(#fig-lifecycle-ar)"/>
+
+  <rect x="460" y="16" width="84" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="502" y="38" text-anchor="middle">stop</text>
+  <text class="sub" x="502" y="57" text-anchor="middle">agent_stop</text>
+  <text class="lbl" x="502" y="90" text-anchor="middle">sessions end</text>
+
+  <line x1="545" y1="44" x2="559" y2="44" stroke="currentColor" stroke-opacity=".6" marker-end="url(#fig-lifecycle-ar)"/>
+
+  <rect x="560" y="16" width="92" height="56" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="606" y="38" text-anchor="middle">destroy</text>
+  <text class="sub" x="606" y="57" text-anchor="middle">agent_destroy</text>
+  <text class="lbl" x="606" y="90" text-anchor="middle">handle freed</text>
+
+  <rect x="8" y="140" width="644" height="98" rx="6" fill="var(--seyd-surface-2)"/>
+  <text class="lbl" x="20" y="160">Events arrive on one Seyd thread, in order; a callback must not block</text>
+  <text x="20" y="188" font-size="11" fill="currentColor">on_session_started · on_session_ended · on_command · on_requested_config</text>
+  <text x="20" y="208" font-size="11" fill="currentColor">on_recovery_request · on_layer_changed · on_signal_state · on_nat_report</text>
+  <text class="lbl" x="20" y="228">push_frame and push_message may be called from any thread and never block</text>
+</svg>

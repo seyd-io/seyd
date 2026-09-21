@@ -1,0 +1,145 @@
+---
+title: "Run the cloud yourself"
+description: The whole Seyd cloud from one docker compose file, what is portable and what is not, and where the deployed cloud runs today.
+---
+
+The cloud is deliberately small and deliberately portable. Everything in it
+is a plain container on Postgres, and `docker compose up` in `cloud/` brings
+up all of it on a laptop with no cloud-provider credentials. That is also the
+proof that it moves.
+
+## What the cloud is
+
+| Service | What it does |
+|---|---|
+| **`api`** (`cloud/api`) | The signal server on `/ws`, the relay on `/relay`, the console API under `/api/v1/`, and static files: the landing and pilot pages at `/`, the console at `/console/`, these docs at `/docs/`. TypeScript, Fastify and ws |
+| **`postgres`** | Orgs, members, roles, robots, grants, enrolment tokens, API keys, the audit log. The schema in `cloud/api/db/migrations/` is applied at boot |
+| **`logto`** | The identity provider for console sign-in, `svhd/logto:1.43.0`, pinned. It owns its own database in the same server |
+| **`prober`** | Dials each robot's announced public candidates with a real QUIC handshake after every announce, so the reachability report says what is actually reachable |
+
+Media does not pass through any of it on a direct session. On a relayed
+session it passes through `api`, which forwards frames verbatim and never
+looks inside them.
+
+## Bring it up
+
+```bash
+cd cloud && docker compose up -d
+open http://localhost:3002        # Logto admin — first run asks you to create an account
+```
+
+The ports the compose file publishes:
+
+| Port | Service |
+|---|---|
+| `8080` | `api`: signalling, relay, REST, static pages |
+| `3001` | Logto's OIDC endpoint: issuer, authorize, token, JWKS |
+| `3002` | Logto's admin console |
+
+Postgres and the prober are reachable only inside the compose network.
+
+On the first run, create two objects in Logto's admin console and copy the
+values out, once per deployment: a **single-page application** for the console
+(redirect URI `http://localhost:5173/`), whose App ID becomes the console's
+client id, and an **API resource** whose identifier becomes the access token's
+audience. `cloud/README.md` walks through it and lists the four values for
+`cloud/.env` and the console's `.env.development.local`. Then run the console
+against it:
+
+```bash
+pnpm --filter @seyd/console dev     # http://localhost:5173
+```
+
+`cloud/logto/configure.mjs` creates the same objects through Logto's
+management API instead, idempotently, which is how a scripted deployment
+avoids the admin console altogether.
+
+The pilot pages come from `web/demo/dist`, mounted into the container; build
+them first with `pnpm --filter demo build`, or the console's "Open pilot"
+button has nothing to open.
+
+:::note
+Without Docker, `cloud/api` also runs standalone with no database at all:
+accounts live in memory and vanish on restart, which is enough for the smoke
+harness. `SEYD_DEV_OPEN_ENROLMENT=1` then trusts an unknown robot on first
+connection and `SEYD_DEV_ALLOW_ANONYMOUS=1` accepts pilots without a token.
+Both are development switches; never set them on a cloud that has a second
+customer.
+:::
+
+## The settings that matter
+
+The complete table is in `cloud/README.md`. These are the ones a self-hosted
+deployment has to decide.
+
+| Variable | Meaning |
+|---|---|
+| `SEYD_DATABASE_URL` | Postgres. Without it, everything is in memory |
+| `SEYD_OIDC_ISSUER`, `SEYD_OIDC_AUDIENCE`, `SEYD_OIDC_CLIENT_ID` | Which identity provider signs console users in, and for which audience. Unset means no console login, only API keys |
+| `SEYD_OIDC_JWKS_URI`, `SEYD_OIDC_USERINFO_URI` | Where the API reaches the provider when that differs from the browser's address, as it does in compose |
+| `SEYD_PROVISIONING` | What a first login gets: `self-serve` creates an org the user owns, `invite-only` gives nothing until invited, `default-org` joins one org at a mapped role |
+| `SEYD_SESSION_PRIVATE_KEY`, `SEYD_SESSION_ISSUER` | The key that signs pilot session tokens. Ephemeral if unset, which is fine on a laptop and wrong anywhere real |
+| `SEYD_CONSOLE_URL` | The console's public URL, so invitations are links |
+| `SEYD_PROBER_URL` | Where the prober is; unset means no reachability probing |
+| `SEYD_RELAY=0` | Disable the relay; offers then carry no relay at all |
+| `SEYD_STATIC_DIR` | Serve the pilot pages from here |
+
+A cloud with `invite-only` provisioning starts with no users, so nobody can
+sign in, so no organisation exists to own a robot. `cloud/api/dist/bootstrap.js`
+breaks that cycle by writing to Postgres directly: `create-org`, `invite`,
+`enrolment-token`, `public-grant`, `revoke-public`, `list`. It is the only
+thing in the codebase that touches accounts without authenticating.
+
+## What is portable and what is not
+
+Portable, by construction:
+
+- The application code uses no cloud-provider SDK. It speaks Postgres, HTTP
+  and WebSocket, and the identity provider only through OIDC discovery and
+  JWKS.
+- The identity provider is a container of its own and can be swapped for any
+  OIDC issuer by changing the `SEYD_OIDC_*` variables. See
+  [Identity providers](/docs/cloud/identity-providers/).
+- Robot identity and session tokens are Seyd's own keys, so a fleet keeps
+  connecting through a provider outage or a provider migration.
+
+Not portable, and kept in one place:
+
+- `cloud/api/deploy.sh` is the only piece that knows about Google Cloud. It
+  builds the image, bundles the pilot pages, the console and the docs, and
+  runs `gcloud run deploy`. Moving providers means replacing that script, not
+  the application.
+
+Not yet done:
+
+- Presence and live sessions are held in the API process's memory, so one
+  deployment runs one instance of `api`. The seam for Redis exists and the
+  work is independent of everything else on this page.
+- There is no mail transport. Invitations are links handed over by whoever
+  issued them, and a password-reset code from the provider lands in the API's
+  log until a transport exists.
+
+## Where the deployed cloud runs today
+
+Seyd's own cloud runs on Google Cloud Run in `europe-west1`: `seyd-signal`
+(the `api` service, with the landing page, the pilot, the console and these
+docs), `seyd-logto` (the identity provider, scale-to-zero, admin console
+disabled), and `seyd-prober`. Postgres is on Neon in `eu-central-1`, one
+database for the API and one for Logto. The deployed console is invite-only in
+both senses; robots must be enrolled, and pilots without an account reach only
+robots with a public grant. Region choices, the residency reasoning and the
+triggers for moving to an EU provider are recorded in the repository's
+`docs/eu-hosting.md`.
+
+## The relay, self-hosted
+
+The relay is part of `api`, so a self-hosted cloud has one too, and it is
+subject to the same rule: the direct race runs first, the relay is taken only
+when it fails and the robot allows it, and every surface shows the session
+as relayed. Every relayed byte crosses your server twice, and the API logs
+the byte counts of each relayed session for metering; on Seyd's cloud the
+relay is metered and priced separately for that reason. Cloud Run cuts a
+relayed session at its 60-minute request cap, after which the pilot re-races
+and re-relays; a compose deployment has no such limit.
+[ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/) has the design
+and the measured cost.

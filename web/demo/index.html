@@ -134,6 +134,7 @@
         <a href="#measured">Measured</a>
         <a href="#cloud">Cloud</a>
         <a href="#model">Pricing</a>
+        <a href="./docs/">Docs</a>
         <a class="button" href="./console/">Console</a>
         <a class="button primary" href="#robots">Live demo</a>
       </nav>
@@ -150,6 +151,7 @@
         <div class="cta">
           <a class="button primary" href="#robots">Drive the live camera</a>
           <a class="button" href="#integrate">How it integrates</a>
+          <a class="button" href="./docs/">Developer docs</a>
         </div>
         <div class="stats">
           <div class="stat"><b>17–31 ms</b><span>median robot-to-browser latency, measured over one and two cellular hops</span></div>
@@ -410,7 +412,7 @@
       <div class="section-head">
         <p class="eyebrow accent">Integration</p>
         <h2>Point Seyd at what you already have.</h2>
-        <p class="lede">Seyd does not replace your cameras, your autonomy stack or your safety logic. It states its needs; your systems decide how to meet them. A first integration is an afternoon.</p>
+        <p class="lede">Seyd does not replace your cameras, your autonomy stack or your safety logic. It states its needs; your systems decide how to meet them. A first integration is an afternoon. The <a href="./docs/">developer docs</a> walk through every form factor, with the API references generated from the code.</p>
       </div>
       <div class="grid-2">
         <div class="snippet">
@@ -439,7 +441,7 @@ output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
 
 &lt;<span class="k">seyd-video</span> robot-id="lift-truck-07"&gt;&lt;/seyd-video&gt;
 &lt;<span class="k">seyd-hud</span>&gt;&lt;/seyd-hud&gt;</pre>
-          <p>A live, drivable feed inside your own web app: your branding, your workflow. Connection health, a "someone else is driving" indicator and the relayed-session notice come with it. A React wrapper is included.</p>
+          <p>A live, drivable feed inside your own web app: your branding, your workflow. Connection health, a "someone else is driving" indicator and the relayed-session notice come with it. Any framework; the elements are plain custom elements.</p>
           <h3 style="margin-top:22px">Or the engine directly</h3>
 <pre><span class="k">seyd_agent_create</span>(&amp;cfg, &amp;callbacks, &amp;agent);
 <span class="k">seyd_push_frame</span>(agent, video, au, len, keyframe, capture_ts_us);</pre>
@@ -451,7 +453,7 @@ output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
           <thead><tr><th>Piece</th><th>Who uses it</th><th style="width:16%">State</th></tr></thead>
           <tbody>
             <tr><td><b>seydd</b> daemon</td><td>Anyone who wants it running: a config file, no code. RTSP, RTP and UDP inputs</td><td><span class="tag on">shipping</span></td></tr>
-            <tr><td><b>@seyd/web</b> and <b>@seyd/react</b></td><td>The web app an operator drives from</td><td><span class="tag on">shipping</span></td></tr>
+            <tr><td><b>@seyd/web</b> on <b>@seyd/core</b></td><td>The web app an operator drives from: custom elements, or the session API for your own UI</td><td><span class="tag on">shipping</span></td></tr>
             <tr><td><b>libseyd</b> C ABI</td><td>The foundation every wrapper attaches to</td><td><span class="tag on">shipping</span></td></tr>
             <tr><td><b>Python</b> SDK</td><td>Research robots, prototypes, our own demo</td><td><span class="tag on">shipping</span></td></tr>
             <tr><td><b>C++</b> wrapper, <b>ROS 2</b> node</td><td>Industrial controllers; the standard robotics framework</td><td><span class="tag">planned</span></td></tr>
@@ -557,7 +559,7 @@ output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
           <ul class="points">
             <li>Rust engine: framing, Reed-Solomon repair, closed-loop rate control, simulcast stream selection, keyframes on demand</li>
             <li>Direct QUIC to the browser, verified against real Chrome; reachability probed from the cloud before anyone connects</li>
-            <li>The daemon, the C ABI, the Python SDK, the web components and the React wrapper</li>
+            <li>The daemon, the C ABI, the Python SDK and the web components, with developer docs generated from the code</li>
             <li>Accounts, organisations, roles, robot grants and the audit log; the console, invite-only, on the deployed cloud in the EU</li>
             <li>The relay as a shown, metered last resort</li>
             <li>An always-on demo camera anyone can drive</li>
@@ -587,6 +589,7 @@ output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
 
   <footer class="wrap">
     <span>Seyd · seyd.io · remote operation for robots and autonomous vehicles</span>
+    <a href="./docs/">Docs</a>
     <a href="./console/">Console</a>
     <span>Early access: the cloud is invite-only, and the demo robot is deliberately public.</span>
     <span id="theme-switch"></span>

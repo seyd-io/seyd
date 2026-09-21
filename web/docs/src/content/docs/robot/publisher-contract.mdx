@@ -1,0 +1,90 @@
+---
+title: "The publisher contract"
+description: What Seyd asks of a video encoder, how it asks, and what happens when the publisher ignores it.
+---
+
+import Figure from '@components/Figure.astro';
+import ControlLoop from '@components/figures/ControlLoop.astro';
+
+Seyd relays encoded video without touching it, so most of the latency a pilot sees is decided before Seyd receives a byte. The publisher, your encoder or camera, owns resolution, preset, VBV and the actual GOP. Seyd owns what the transport can observe: a bitrate ceiling, a latency budget, a GOP bound, and when a pilot needs a recovery point. **Seyd states intent; the publisher decides how to meet it.** This page is Seyd's half. The per-encoder recipes are on [Encoder setup](/docs/robot/encoder-setup/).
+
+<Figure caption="The control loop: the pilot reports loss and latency, the agent adapts, and the publisher is asked for a rate and for recovery points.">
+  <ControlLoop />
+</Figure>
+
+## How Seyd asks
+
+In the daemon, as JSON datagrams on `[publisher_control]`. In the SDKs, as `on_requested_config` and `on_recovery_request` (Python), `on_requested_config`, `on_recovery_request` and `on_layer_changed` (C), or `AgentEvent::RequestedConfig`, `RecoveryRequest` and `LayerChanged` (Rust). The content is the same everywhere; the [protocol contract](/docs/reference/protocol/seydd/) is the source.
+
+## video-config: the targets
+
+```json
+{"type": "video-config", "channel": 1, "profile": "balanced",
+ "maxBitrateKbps": 3000, "latencyBudgetMs": 100, "maxGopMs": 10000,
+ "preferIntraRefresh": true, "suggestedFps": 0, "reason": "profile"}
+```
+
+| Field | What it asks |
+|---|---|
+| `maxBitrateKbps` | The current request. Never above the profile's ceiling, never below 25 % of it. The link carries this plus Seyd's FEC, so a cap at or under it and a VBV of about 100 ms is what keeps a motion burst from queueing. |
+| `latencyBudgetMs` | How much end-to-end delay the profile is prepared to spend, so the encoder can size its own buffers. |
+| `maxGopMs` | The longest the publisher may go without a full recovery point: an IDR, or a completed intra-refresh sweep. A ceiling and a safety net, not a cadence. 10 s on `latency` and `balanced`, 4 s on `quality`. |
+| `preferIntraRefresh` | Refresh the picture gradually where the encoder can (x264, NVENC, Jetson), with any sweep period up to `maxGopMs`. A publisher that cannot uses the longest GOP up to `maxGopMs` and answers requests with an IDR. |
+| `suggestedFps` | Non-zero only when the request is at the bitrate floor and the link is still congested. 0 means restore full cadence. |
+| `reason` | `profile` once at start, `pilot-request` when the profile changes, `abr-down` or `abr-up` when the closed-loop controller moves the request inside the ceiling. |
+
+The three profiles' values are on [QoS profiles](/docs/reference/qos-profiles/), generated from `seyd-qos`. There is no resolution in a profile, and there must never be: which pixels to spend the bits on is the publisher's call.
+
+## Degrade resolution first, frame rate last
+
+For a remote pilot the interval between frames is latency, not quality. Going from 25 to 15 fps stretches that interval from 40 ms to 67 ms, so the operator waits up to 27 ms longer to see the result of their own input, against a measured glass-to-glass p50 of about 10 ms. So when `maxBitrateKbps` falls, spend fewer bits on pixels and keep the cadence. Where the publisher already encodes the picture more than once, let Seyd pick the encoding instead ([Simulcast](/docs/robot/simulcast/)). `suggestedFps` is the last rung: it only appears once the request is pinned at the floor.
+
+## recovery-request: keyframes on demand
+
+```json
+{"type": "recovery-request", "channel": 1, "kind": "idr", "reason": "pilot-loss"}
+```
+
+Seyd asks for a recovery point whenever a pilot needs one: on a join, on a loss the FEC could not repair, on a backlog drop. A layer switch asks through the `layer` message below. That is the mechanism by which a pilot gets a decodable picture ([ADR 0009](/docs/reference/adr/0009-keyframes-on-demand/)). Never emit an IDR every second on a timer: on the demo camera's static scene the periodic IDRs were 43 % of the stream, and through a shaped link they were the whole p95 tail.
+
+`kind` is what the pilot needs:
+
+- **`ltr`**: a frame predicted from a long-term reference the decoder still holds. Cheapest.
+- **`intra_refresh`**: one refresh sweep, gradual, no burst.
+- **`idr`**: a full keyframe. 30 to 60 KB against a 2 KB delta; on a 2 Mbps uplink that spike is 120 to 240 ms of serialisation.
+
+A publisher that cannot honour `ltr` answers with whatever it can, and one that ignores `kind` entirely and always sends an IDR behaves as before. When the pilot itself asks for a keyframe (its decoder cannot start or resync without one), `kind` is `idr` unconditionally.
+
+**The ladder.** The agent starts at the cheapest rung and climbs only when a rung has had the profile's `recovery_grace_ms` and loss continues: `ltr`, then `intra_refresh`, then `idr`. It resets to `ltr` after two quiet seconds, so an isolated loss never permanently escalates a link. Set `recovery_ladder = false` in `[agent]` to force `idr` for every request, for a publisher that mishandles any other kind.
+
+**The rate limit.** One request per 250 ms per channel. A lost delta frame smears the picture until a recovery point arrives, so waiting longer costs the operator more than the keyframe costs the link.
+
+**`recovery_grace_ms`.** A publisher that answers with `ltr` or `intra_refresh` never produces a keyframe. After dropping a delta frame for backlog, Seyd stops sending deltas and waits for a recovery point; without a timeout that wait never ends and the stream latches silent. `recovery_grace_ms` in the profile is that timeout: deltas resume when it expires, and the ladder escalates if loss continues. It is 700 ms on `latency`, 900 ms on `balanced` and 1400 ms on `quality`.
+
+## layer
+
+```json
+{"type": "layer", "channel": 1, "layer": 0, "name": "low", "reason": "down"}
+```
+
+Sent when the relayed simulcast layer changes, on a channel that declared layers. Seyd switches on that layer's next keyframe regardless; a publisher that can force an IDR on the named stream should, which makes a switch cost one frame rather than a GOP. `reason` is `up` or `down`. Nothing is required of a publisher that ignores it.
+
+## What happens if the publisher ignores all this
+
+The robot keeps streaming on whatever it was configured with. What you lose:
+
+- **Rate control.** Seyd's FEC rates still move with loss, but the bitrate does not, so a congested link tears frames instead of thinning them.
+- **First picture.** With a 10 s GOP and nobody answering `recovery-request`, a joining pilot waits up to `maxGopMs`. The publisher-control path is load-bearing for joins, not just adaptation. Measured on the demo camera with its bridge answering: first picture in about 150 ms.
+- **Loss recovery.** A pilot that lost a frame shows a broken picture until the next recovery point, up to `maxGopMs`, where an answered request costs one round trip plus the publisher's reaction.
+
+Which is why the request path must be verified when a camera is brought up. `tools/keyframe-probe.py` does it: it prints every keyframe with its arrival time and, for each request, how long the publisher took to answer. The procedure is at the end of [Encoder setup](/docs/robot/encoder-setup/#verify-it).
+
+## The rules, in one place
+
+- No B-frames, no frame threading or lookahead: each one holds a frame back before Seyd sees it.
+- Parameter sets inline on every keyframe, because a pilot joins mid-stream.
+- Keyframes on demand: intra refresh where you have it, otherwise the longest GOP `maxGopMs` allows, and always answer `recovery-request`.
+- Bitrate cap at or under `maxBitrateKbps`, VBV about 100 ms.
+- Full frame rate; degrade resolution first and cadence last.
+
+The worked example of a publisher meeting this contract is the demo robot's bridge on [Integrate the daemon](/docs/robot/daemon/#worked-example-the-demo-robots-bridge).

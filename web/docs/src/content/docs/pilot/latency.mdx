@@ -1,0 +1,105 @@
+---
+title: "Latency and the HUD"
+description: 'What every line of the HUD means, what "g2g" measures and what it leaves out, presentation pacing, loss measured on one clock, and how to measure end to end honestly.'
+---
+
+The HUD is the pilot's instrument panel: every number in it comes from `PilotStats`, which the session emits every 500 ms. This page says what each number is, which span the headline latency covers, and how to measure a real deployment so the number you quote means what a customer thinks it means. The rule throughout: no latency claim without the span it covers.
+
+## Opening the HUD
+
+Press `S` on a page that has a [`<seyd-hud>`](/docs/pilot/web-components/#seyd-hud), or call `.toggle()` from a button. The element remembers the choice across reloads. For your own UI, subscribe to the `stats` event of [`SeydSession`](/docs/pilot/session-api/#events) and read the same fields.
+
+## What the HUD shows
+
+Line by line, from `sdks/js/web/src/seyd-hud.ts` and the `PilotStats` fields it prints:
+
+| Line | Fields | Meaning |
+|---|---|---|
+| `path` | `transport`, `pathLabel`, `rttMs` | `p2p (label)` names the candidate that won the race: `host`, `host6`, `portmap` or `srflx`. A relayed session prints `RELAY via cloud` in amber, with the reason the direct race failed next to it. `rtt` is the control-stream ping round trip. |
+| `qos` | `qos.profile`, `qosPublisher` | The profile in force. `(transport only)` means the robot's publisher could not take the profile's video targets, so only Seyd's own transport policy applies. |
+| `video` | `kbps`, `kbpsPayload`, `fps`, `g2gP50Ms`, `g2gP95Ms` | Bytes received over the last second including parity; frames per second; the parity share as `fec %`; and the headline latency, whose span is the next section. |
+| `loss` | `lossTruePct`, `lossEstPct`, `spreadP50Ms`, `spreadP95Ms` | True loss against the agent's own send count, and the pilot's own estimate, which is biased low. `spread` is the time from a frame's first chunk to its last. Green below 1 %, amber from 1 %, red from 3 %. |
+| `frames` | `framesClean`, `framesRecovered`, `framesIncomplete`, `chunksLate`, `framesTimedOut`, `framesTimedOutLate`, `deadlineDeltaMs` | Frames that arrived whole, frames FEC repaired, frames given up on; parity that arrived after its frame was already complete; frames closed by the silence timer rather than superseded, and how many of those were jitter; the adaptive close-out deadline for delta frames. |
+| `key` | `keyframesClean`, `keyframesLost`, `keyframesTimedOut`, `decodeQueue`, `decodeErrors`, `keyframesRequested` | Keyframes whole and lost (a lost keyframe costs a GOP, so the line turns amber at 1 and red at 3); frames waiting in the decoder; decoder errors; recovery points the pilot asked for. |
+| `agent` | `agent.frames_sent`, `frames_dropped_backlog`, `frames_skipped_stale` | The robot's side: frames sent, delta frames dropped because the send backlog exceeded the profile's threshold, frames skipped as stale. |
+| `link` | `agent.cwnd`, `rtt_ms`, `min_rtt_ms`, `delivery_kbps` | The robot's QUIC view of the path: congestion window, RTT and its minimum, delivered rate. |
+| `abr` | `agent.abr_*` | The closed-loop controller: the bitrate it is asking for and its ceiling, the FEC rates for delta and key frames, why it last moved, and the loss it measures (with the pilot's estimate beside it). |
+| `INJECTING` | `injecting`, `chunksDropped` | Only when loss is being injected at the pilot. |
+
+`PilotStats` also carries the presenter's counters, which the HUD does not print: `framesShown`, `framesSkippedLate`, `renderQueue`, `renderReanchors`, `renderJitterMs` (the judder left after pacing) and `presentationDelayMs` (the delay in force; `0` means decode on arrival). The full list is in the [reference](/docs/reference/js/seyd/core/interfaces/pilotstats/).
+
+## What "g2g" measures
+
+The engine computes `g2g` at the moment the reassembler hands over a complete frame, as the one-way time since the frame's `send_ts`. The robot stamps `send_ts` after the frame left the agent's queue and before its first chunk was queued to QUIC. So the span behind the number the HUD, `pilot-stats`, `seyd-smoke.py --record` and the field notes call "g2g" is:
+
+**first chunk handed to QUIC on the robot, to last chunk received and reassembled in the pilot's worker.**
+
+It is not glass to glass. On the robot it excludes sensor exposure, encoding, RTP or RTSP delivery to the agent, depacketisation and the wait in the agent's frame queue. On the pilot it excludes the decoder, the presentation delay (50, 100 or 150 ms by profile, the largest deliberate term in the whole pipeline), canvas paint, the compositor and display scan-out. Two clocks are involved, so it also depends on the control stream's clock offset estimate.
+
+The repository's `docs/latency-sources.md` walks every stage where a byte waits. Its §9 adds the stages up for the balanced profile on a clean link and arrives at an *estimate* of roughly 200 to 250 ms median glass to glass, and about 150 ms on the latency profile. That is an estimate, not a measurement: the external camera-and-stopwatch measurement PLAN.md §1.6 asks for (g2g within 5 ms of it, with a per-stage breakdown) does not exist yet.
+
+## Presentation pacing
+
+Decoding on arrival and painting from the decoder callback puts every millisecond of pipeline jitter on the glass. The structural case is the keyframe: several times a delta frame's size, produced in one frame slot, so once per GOP the picture holds for two or three frame times and then advances twice within a millisecond. On a continuous pan an operator reads that as a periodic jerk.
+
+[ADR 0005](/docs/reference/adr/0005-presentation-pacing/) fixes it. `capture_ts_us` is the source's sampling clock (the RTP timestamp), and the pilot holds each decoded frame until its capture timestamp is due, offset by a delay the QoS profile owns:
+
+| Profile | Presentation delay | Latency budget |
+|---|---|---|
+| `latency` | 50 ms | 100 ms |
+| `balanced` | 100 ms | 100 ms |
+| `quality` | 150 ms | 200 ms |
+
+Three properties keep the delay a budget rather than a drift: the capture-to-pilot mapping is learned from the fastest recent transit and slewed, not jumped; a late burst is drained at the capture cadence instead of replayed as fast as it arrived; and no frame waits longer than the delay past its own arrival, which is what stops a source with a slow clock from banking unbounded latency.
+
+The ADR's A/B on the demo camera under continuous pan, judder being the deviation of each paint interval from the ideal 40 ms, on a contended laptop running camera, agent, cloud and browser together:
+
+| Delay | Judder mean | Judder p95 | Gaps over 120 ms in 40 s | Median latency cost |
+|---|---|---|---|---|
+| 0 (before) | 19.7 ms | 77.4 ms | 61 | |
+| 50 ms | 13.3 ms | 49.0 ms | 50 | +2 ms |
+| 100 ms | 8.4 ms | 39.8 ms | 7 | +2 ms |
+| 150 ms | 4.1 ms | 14.9 ms | 4 | +3 ms |
+
+The measured cost is small because that camera's clock runs about 1.6 % slow, so the deadline keeps pulling the schedule forward. On a source with an accurate clock a frame that arrives on time waits the full delay; budget for the configured value, not for +2 ms. `presentationDelayMs` on the session, `presentation-delay` on the element and `?pd=` on the demo page override the profile for one session; `0` restores decode on arrival exactly.
+
+## Loss measured on one clock
+
+The ABR controller steers FEC and the bitrate ceiling from chunk loss, and neither end can measure it alone: a frame whose chunks were all lost is invisible to the pilot, so the pilot's own count (`lossEstPct` on the HUD) is biased low by construction. The agent used to pair its send count against the pilot's receive count with a 100 ms time shift, and the mismatch of the two windows read as loss; because negative excursions were clamped away, zero-mean noise became a steady positive signal. On a link losing nothing, 73 of 118 ABR decisions saw loss above the FEC trigger, reported loss reached 26 %, and the camera was reconfigured 6 to 22 times per run.
+
+[ADR 0006](/docs/reference/adr/0006-loss-measured-on-one-clock/) moved the pairing to the pilot: `StatsTracker` records `{sent, rx}` at the instant each `agent-stats` message arrives, `pilot-stats` carries the newest pair, and the agent differences those over its window. Both halves are read on one clock, so chunks in flight cancel in the difference. That pair is `lossTruePct`, the number the HUD prints first. After the change, the same two minutes of panning gave 0 decisions above the trigger, 0 % peak loss and one encoder reconfiguration, the initial profile apply; with 5 % burst loss injected the agent measured 3.5 to 8 % and raised FEC as designed.
+
+## Measuring end to end honestly
+
+Two harnesses in `tools/` drive the real demo page in headless Chrome (they need `tools/.venv`, created by `tools/setup-machine.sh`).
+
+**`tools/seyd-smoke.py`** asserts that a session connects, that frames keep decoding, that sensors arrive and that a PTZ key press reaches the robot; `--record SECONDS` then keeps the session open and appends `lastStats` once per second to `--record-file` (default `seyd-record.jsonl`), which is what a field run brings back: path, fps, kbps, true loss, g2g p50 and p95, rtt, incomplete and recovered frames, keyframe requests. `--query loss=0.05&burst=3` passes page parameters through; `--no-sensor` for a robot without a sensor channel; `--camera-ip` verifies that PTZ moved a real Hikvision camera. The field procedure, with the exact command lines against the deployed cloud, is `docs/field-test.md` in the repository.
+
+**`tools/latency-ab.py`** is the per-frame A/B. It opens the page with `?trace=1`, records the engine's trace (`IN` when a frame is reassembled, `SHOW` when it is painted) for `--seconds` after a warm-up, and prints frame sizes, g2g (the span above, and the script's own docstring says so), arrival and paint judder, and gaps over two frame intervals. `--pd` sets the presentation delay, `--out` keeps the raw trace. Run it behind `tools/link-shaper.py`: on loopback a 35 KB keyframe costs nothing and the effect you are looking for does not show.
+
+The numbers measured so far, each with its span and setup:
+
+| When | Setup | Path | Numbers | Span |
+|---|---|---|---|---|
+| 2026-08-30, field run A | Pilot on an iPhone hotspot, robot on the office LAN, the demo camera | `srflx` (hole punch, cone NAT) | RTT 22 ms; 25 fps at about 1.7 Mbps; g2g p50 17 ms, p95 101 ms; 0.0 % true chunk loss; no keyframes lost | HUD g2g. The p95 was dominated by 30 to 60 KB IDRs serialising over a roughly 2 Mbps uplink. |
+| 2026-08-31, field run B | Robot and camera behind a Tele2 4G router with UPnP enabled, pilot on an iPhone hotspot (both ends cellular) | `portmap` | RTT 51 ms; 24 fps; g2g p50 31 ms, p95 59 ms; 0.0 % true loss (3 chunks lost of 1689, 7 frames FEC-recovered); ABR steady at FEC 25/35 near the 3000 kbps ceiling | HUD g2g. |
+| 2026-09-08, `latency-ab.py` | Synthetic 1280×720 30 fps source, balanced profile, through `link-shaper.py` at 4.5 Mbps with 20 ms one-way delay, 40 s runs, zero chunk loss | loopback | At 100 ms presentation delay: IDR GOPs g2g p50/p95 45/148 ms with 41 arrival gaps over two frames in 40 s; intra refresh 44/48 ms with 8 gaps, all at forced IDRs | HUD g2g, plus paint cadence from the trace. |
+| 2026-09-09, relay | Loopback, balanced profile, synthetic source, `?paths=none` | relay | 30 fps, 3.3 Mbps, 0 % loss; commands and sensors crossing | Functional only. No relay latency has been measured off loopback; ADR 0010 says not to quote one until it has. |
+
+What has not been measured: any glass-to-glass number, on any profile. When one exists it will be larger than every figure above by the encoder, the presentation delay and the display, and this page will say so with its span.
+
+## Query parameters of the demo page
+
+The public pilot page at `/pilot/` reads these from the URL and sets the matching attributes on `<seyd-video>` (see `web/demo/src/main.ts`):
+
+| Parameter | Effect |
+|---|---|
+| `?robot=<id>` | The robot; default `seyd-demo`. |
+| `?signal=<ws url>` | The signal server; default is the page's own host. |
+| `?token=<jwt>` | A session token from the console's "open pilot" or your backend. Without it the page asks the server for one, which works only for a public robot. |
+| `?qos=latency`, `balanced`, `quality` | The profile; remembered in `localStorage`. |
+| `?loss=0.05&burst=3` | Inject 5 % chunk loss at the pilot in bursts of 3, to watch FEC, recovery and the HUD's loss lines. |
+| `?paths=none` | Race no candidates, so the direct path fails at once and the relay is exercised. `?paths=srflx` races only that label. |
+| `?relay=0` | Refuse the relay, so a failed race shows the diagnosis instead; for diagnosing the direct path. |
+| `?pd=0` | Presentation delay in ms; `0` is decode on arrival, for an A/B against the paced default. |
+| `?trace=1` | Collect the per-frame trace that `latency-ab.py` reads. |

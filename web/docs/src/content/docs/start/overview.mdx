@@ -1,0 +1,89 @@
+---
+title: "What Seyd is"
+description: The connectivity layer for remote operation. A robot, a browser, and a cloud that introduces them and then gets out of the way.
+---
+import Figure from '@components/Figure.astro';
+import Parties from '@components/figures/Parties.astro';
+
+Seyd puts a person at the controls of a machine anywhere on the internet.
+Video, sensors and commands go from the robot to the operator's browser over
+one direct, encrypted QUIC connection. You keep your robot, your camera, your
+control software and your operator UI. Seyd is the connection between them.
+
+## Three parties, one of them ours
+
+<Figure caption="The two thin lines are signalling and carry a few kilobytes per session. The thick line carries the video, the sensors and the commands, directly between the robot and the browser."><Parties /></Figure>
+
+**Your robot** runs a small program. If the camera already publishes RTSP or
+RTP on a socket, that program is the `seydd` daemon and a TOML file. If your
+own process holds the encoded frames, it is one of the SDKs. Either way it
+announces the robot to the cloud, listens for pilots, and forwards what your
+encoder produced.
+
+**Your operator** opens a web page in Chrome or Edge. One element,
+`<seyd-video>`, connects, decodes and paints the feed. The same session
+delivers sensor messages to your page and carries commands back to the robot.
+
+**The Seyd cloud** knows who is online and who may connect. It verifies the
+robot's key and the pilot's session token, brokers the session, and reports
+what it learned about the network. On a direct session it never sees a byte of
+video.
+
+Only the cloud is ours, and even that is optional: it is a plain container on
+Postgres, runs in the EU today, and you can run it yourself. See
+[Run the cloud yourself](/docs/cloud/self-hosting/).
+
+## Direct first. The relay last, and always shown
+
+The pilot races every address the robot announced: its LAN address, a
+port-mapped address, its public address, IPv6. The first that answers wins,
+and the session runs on it. That race runs first, every time.
+
+Only when the race fails, and only if the robot allows it, does the pilot
+attach to the WebSocket relay on the signal server. A relayed session is never
+hidden. `<seyd-video>` keeps an amber RELAY badge up for as long as it lasts,
+the HUD's path line reads *RELAY via cloud* with the reason the direct path
+failed next to it, and the guidance box stays on screen headed "Relayed
+through the Seyd cloud". The relay is the symptom of a network problem, not its
+cure: it adds a hop and a TCP leg, and it is metered and priced separately.
+
+The decision and its reasoning are in
+[ADR 0010](/docs/reference/adr/0010-cloud-relay-last-resort/). What to change
+on the router or the SIM so the direct path works is in
+[Reachability](/docs/networking/reachability/).
+
+## No transcoding
+
+Seyd forwards your camera's own encoded bytes. The agent may depacketize RTP
+and split a picture into chunks; it never decodes, re-encodes or inspects the
+payload beyond that. Quality is whatever your encoder produces, privacy is
+structural, and the latency stack has nothing in it but your encoder, the
+browser's decoder, the speed of light and a presentation budget you set.
+
+Adaptation follows the same rule. When the link narrows, Seyd asks your
+publisher for less, and where the publisher offers several encodings of the
+same picture, Seyd switches to another one instead of changing the video.
+
+## What Seyd is and is not
+
+| Seyd provides | Seyd does not provide |
+|---|---|
+| Peer-to-peer video tunnel | The camera or video encoder |
+| Sensor data channels | The sensors or sensor fusion |
+| Command channels with driver/observer roles | The control algorithms or autopilot |
+| Vehicle discovery and fleet presence | The vehicle hardware |
+| Session authentication and authorization | The operator UI (except optional SDK components) |
+| Connection-quality hooks and closed-loop rate control | The fleet management business logic |
+| Reachability diagnosis when P2P is impossible | Managed human operators |
+| Relay as the last resort (metered, always shown) | Transcoding or format conversion |
+| The real-time plane: video, commands, sensor streams | Bulk transfer: mission plans, logs, software updates |
+
+Seyd exposes SDKs and APIs. You build the robot side and the operator
+application on top.
+
+## Where next
+
+- [Concepts](/docs/start/concepts/): the words the rest of the docs use.
+- [Choose a form factor](/docs/start/form-factor/): daemon, Python, C or Rust.
+- [Quickstart](/docs/start/quickstart/): drive the public demo robot from a
+  page of your own.

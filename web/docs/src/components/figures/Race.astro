@@ -1,0 +1,49 @@
+---
+// The candidate race and the relay decision (PLAN.md §2.8 "Figures"). Inline
+// SVG on the design tokens (docs/design.md §6), rendered inside <Figure>.
+// Facts: web/demo/index.html section "reach", docs/adr/0010, sdks/js/core/
+// src/race.ts (priority order, hold, deadline), packages/seyd-nat/src/gather.rs
+// (candidate labels host 240, portmap 220, host6 200, srflx 150).
+---
+<svg viewBox="0 0 660 262" role="img" aria-label="The robot lists its candidates: host on the same network, a router port mapping, an IPv6 address, its public address. The cloud prober tests each from outside. The browser races the reachable ones in priority order and keeps the fastest. Only if none connects, and the robot allows it, does the session fall back to the relay, which is always shown.">
+  <defs><marker id="fig-race-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect x="4" y="88" width="104" height="66" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="56" y="112" text-anchor="middle">Robot</text>
+  <text class="sub" x="56" y="130" text-anchor="middle">lists its</text>
+  <text class="sub" x="56" y="144" text-anchor="middle">candidates</text>
+
+  <g stroke="currentColor" stroke-opacity=".45">
+    <line x1="108" y1="112" x2="184" y2="52"  stroke-width="1.2" marker-end="url(#fig-race-ar)"/>
+    <line x1="108" y1="118" x2="184" y2="106" stroke-width="1.2" marker-end="url(#fig-race-ar)"/>
+    <line x1="108" y1="126" x2="184" y2="160" stroke-width="1.2" marker-end="url(#fig-race-ar)"/>
+    <line x1="108" y1="134" x2="184" y2="212" stroke-width="1.2" marker-end="url(#fig-race-ar)"/>
+  </g>
+  <text class="lbl" x="270" y="24" text-anchor="middle">tried in priority order</text>
+  <g>
+    <rect x="190" y="34" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="57" text-anchor="middle">host · same network</text>
+    <rect x="190" y="88" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="111" text-anchor="middle">portmap · mapped port</text>
+    <rect x="190" y="142" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="165" text-anchor="middle">host6 · IPv6 address</text>
+    <rect x="190" y="194" width="160" height="36" rx="4" fill="var(--seyd-surface-2)"/><text class="sub" x="270" y="217" text-anchor="middle">srflx · public address</text>
+  </g>
+
+  <text class="lbl" x="452" y="80" text-anchor="middle">SEYD CLOUD</text>
+  <rect x="384" y="88" width="136" height="66" rx="6" fill="var(--seyd-surface)" stroke="var(--seyd-accent)" stroke-width="1.6"/>
+  <text class="node" x="452" y="112" text-anchor="middle" style="fill: var(--seyd-accent)">Prober</text>
+  <text class="sub" x="452" y="130" text-anchor="middle">tests each one</text>
+  <text class="sub" x="452" y="144" text-anchor="middle">from outside</text>
+  <g stroke="currentColor" stroke-opacity=".35">
+    <line x1="350" y1="52"  x2="382" y2="104"/><line x1="350" y1="106" x2="382" y2="114"/>
+    <line x1="350" y1="160" x2="382" y2="126"/><line x1="350" y1="212" x2="382" y2="138"/>
+  </g>
+
+  <line x1="520" y1="118" x2="548" y2="118" stroke="var(--seyd-accent)" stroke-width="2.5" marker-end="url(#fig-race-ar)" style="color: var(--seyd-accent)"/>
+  <rect x="554" y="88" width="102" height="66" rx="6" fill="none" stroke="currentColor" stroke-opacity=".6"/>
+  <text class="node" x="605" y="112" text-anchor="middle">Browser</text>
+  <text class="sub" x="605" y="130" text-anchor="middle">races them,</text>
+  <text class="sub" x="605" y="144" text-anchor="middle">keeps fastest</text>
+
+  <line x1="605" y1="154" x2="605" y2="234" stroke="var(--seyd-amber)" stroke-dasharray="4 3"/>
+  <rect x="282" y="234" width="374" height="22" rx="4" fill="var(--seyd-amber-bg)"/>
+  <text x="469" y="249" text-anchor="middle" font-size="10.5" fill="var(--seyd-amber)">none connects → relay, if the robot allows · always shown</text>
+</svg>

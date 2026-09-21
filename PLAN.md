@@ -199,6 +199,74 @@ on the form) with `/how-it-works`, `/docs`, `/pricing`, `/security` and
 `/request-demo` (→ `POST /api/v1/demo-requests` → Postgres + email + Slack).
 Demo on the new stack: `examples/demo-robot` (Python SDK over `libseyd`, Hikvision driver, keyframe/recovery via ISAPI), driver + observer sessions with a 90 s driver slot and queue, PTZ ignored from observers, per-IP slot limits, PTZ rate cap, auto-home on session end, RTSP-stall watchdog, `cloud/monitor` synthetic pilot every 5 min → Slack, camera DHCP reservation. `seyd-demo` has a public `observe/drive` grant; every other robot needs a token.
 
+### 2.8 Developer documentation (decided 2026-09-21)
+
+**The docs are generated from the code wherever the code can say it, and the
+hand-written parts import the code rather than quote it.** A guide that
+pastes a snippet drifts within a week; a guide that renders
+`sdks/c/examples/sensor-robot.c` cannot. The rule for every page: if a fact
+can be produced by a generator, it is; if an example can be a real file that
+the existing checks compile or run, it is; only prose is typed by hand.
+
+**Site.** `web/docs` — Astro + Starlight (Markdown/MDX, sidebar, self-hosted
+Pagefind search, light and dark), themed with `@seyd/theme` tokens and its
+bundled fonts, so it looks like the landing page and the console and loads
+nothing from a CDN. Built with `base: /docs/` and bundled into the seyd-signal
+image at `/docs/` exactly like the console (`cloud/api/deploy.sh`), so it moves
+with everything else; `docs.seyd.io` is a DNS entry pointing at the same
+service when the owner sets it up. Every generated file lives under a path
+that is gitignored and rebuilt by `pnpm --filter docs build`; a fresh checkout
+needs only the toolchain the rest of the repo already needs (Rust, Python 3,
+Node).
+
+**What is tied to code, and how (`tools/docs/`):**
+
+| Surface | Source of truth | Generator | Best practice it follows |
+|---|---|---|---|
+| C ABI reference | `sdks/c/include/seyd.h` (cbindgen output; its doc comments are the Rust `///` comments in `seyd-ffi`) | `gen-c-reference.py` parses the header into one page per group: status codes, config, callbacks, functions, counters | The header is the documentation, as for any C library; comments are written once, in Rust |
+| Python reference | `sdks/python/seyd/agent.py` docstrings and `#:` attribute comments | `gen-python-reference.py` walks the AST (no import, so no library needed) | Docstrings are the API docs (PEP 257); the page is what Sphinx autodoc would produce |
+| JavaScript reference | TSDoc on the exports of `@seyd/core` and `@seyd/web` | `starlight-typedoc` (TypeDoc + Markdown) at build | TypeDoc is the TypeScript standard; the sidebar is generated from the exports |
+| Rust reference | `///` on every workspace crate | `cargo doc --workspace --no-deps`, copied to `/docs/rust/` | rustdoc, with doctests compiled by `cargo test` |
+| `seydd.toml` reference | `packages/seydd/src/config.rs` structs, their `///` comments and serde defaults | `gen-seydd-config.py` | The config struct is the schema |
+| QoS profiles | `packages/seyd-qos/src/lib.rs` `LATENCY`/`BALANCED`/`QUALITY` constants | `gen-qos-profiles.py` | One table, regenerated when a number changes |
+| Networking guidance | the `FailureClass` union in `sdks/js/web/src/seyd-connect-error.ts`, whose "How to fix this" link is `docs.seyd.io/networking/<class>` | `check-networking.py` fails the build if a class has no page | The SDK's links can never dangle |
+| Protocol contracts, ADRs, encoder setup, Starlink, self-hosted identity | `docs/protocol/*.md`, `docs/adr/*.md`, `docs/*.md` | `collect.mjs` copies them in with front matter derived from the first heading | One source; the site is a view of the repo |
+| Examples | `sdks/c/examples/*.c` (built by `make -C sdks/c`), `sdks/python/examples/*.py`, `sdks/js/core/examples/*.ts` (type-checked by the docs build), `sdks/js/web/examples/*.html`, `examples/demo-robot/seydd.toml` | MDX imports the file with `?raw` and renders it | The example is the file; the check that compiles it is the check that the doc is right |
+
+**Hand-written pages (prose only, examples imported):**
+
+- *Start here* — what Seyd is (with the three-party figure), concepts (agent,
+  channels, sessions and roles, QoS profiles, keyframes on demand, direct
+  first and the relay), choosing a form factor (daemon vs SDK vs Rust), and a
+  five-minute quickstart that drives the public demo from a page of your own.
+- *Robot side* — integrating the daemon (install, the config file, enrolment,
+  a systemd unit, the publisher-control loop, verifying), a robot in Python, a
+  robot in C, a robot in Rust, the publisher contract (what `video-config`,
+  `recovery-request` and `layer` ask of an encoder), simulcast.
+- *Pilot side* — the web components, building your own UI on `SeydSession`,
+  reading the HUD and what "g2g" measures (docs/latency-sources.md §0).
+- *Networking* — reachability overview and one page per failure class, each
+  with the exact router or SIM change, plus Starlink.
+- *Cloud* — enrolment and access (tokens, grants, session passes, the
+  console), running the cloud yourself (compose), identity providers.
+- *Reference* — the generated pages above, the protocol contracts, the ADRs.
+
+**Figures** (`web/docs/src/components/figures/`, inline SVG on the design
+tokens so they follow the theme): the three parties; the agent lifecycle
+(create → channels → start → sessions → stop); the frame pipeline from camera
+to canvas; the channel model (video and sensors robot→pilot, commands
+driver→robot, observers read-only); the daemon's place on the robot (camera
+RTSP/RTP in, UDP sinks and sources, publisher control out); the candidate race
+and the relay decision; enrolment and the three identity planes; the
+publisher-control loop.
+
+**Keeping it current (CLAUDE.md carries the rule):** a change to the C header,
+the Python package, the `@seyd/core`/`@seyd/web` exports, `seydd`'s config
+struct, the QoS constants or the failure classes is not done until
+`pnpm --filter docs build` passes and the guide that explains the changed
+surface says the new thing. A new example is a file under an SDK's
+`examples/`, never a code block in a page.
+
 ---
 
 ## Part 3 — Ordered work
@@ -296,6 +364,9 @@ explain it (add to §2.6 classes) — pending.
 16. **Touch controls for the pilot** (before the landing page invites phone visitors). Android Chrome on a handset is a confirmed supported platform (verified 2026-09-02), but only pan and tilt work by touch: `web/demo/src/ptz.ts` drives the virtual joystick from pointer events, while everything else is mouse- or keyboard-only. Missing on touch: **zoom** (wheel or `+`/`-` only — a phone operator cannot zoom at all), **recentre** (`H` only), **the fine/fast speed modifier** (`Shift` only, so touch gets one speed curve), and **the HUD toggle** (`S`). Pinch-to-zoom needs real multi-pointer tracking, not just a gesture listener — today a second `pointerdown` overwrites `pointerVec` and `setPointerCapture` is taken for a single pointer. Decide what belongs in `@seyd/web` as default on-screen affordances versus what stays demo-specific in `web/demo`; the SDK ships the video element, so a customer building a mobile operator page should not have to reimplement zoom. Verify on a real handset, not a desktop emulator.
 17. Landing page live with demo-request flow; docs site with networking guides for every failure class; `.deb` + apt repo (`apt.seyd.io`), Python wheels (manylinux x86_64/aarch64), npm packages, Docker images.
 18. **EU-migration rehearsal** (before the first security-review customer): stand the cloud up on one EU provider (Scaleway for like-for-like managed Postgres/Redis, or Elastx/Cleura for the Swedish story) and run the smoke tests against it. Timebox one day — if it takes longer, that is a portability bug to fix. Decision context and move triggers: docs/eu-hosting.md.
+
+### Milestone B½ — developer documentation (§2.8)
+Ordered: the site and its theme; the generators (C, Python, seydd config, QoS, networking check) and the TypeDoc and rustdoc integration; the daemon guide and the three language guides with their examples imported; the pilot guides; the networking pages; the cloud pages; the figures; the landing page links; deploy at `/docs/`. Then `docs.seyd.io` DNS (owner), and a REST reference for `/api/v1` generated from the route table (not yet).
 
 ### Milestone C — breadth (when customers pull it)
 19. `sdks/ros2/seyd_ros` (Humble/Jazzy) and `sdks/cpp`.

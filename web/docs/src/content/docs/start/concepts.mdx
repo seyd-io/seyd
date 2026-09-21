@@ -1,0 +1,157 @@
+---
+title: "Concepts"
+description: The agent, channels, sessions and roles, QoS profiles, keyframes on demand, FEC, pacing, the relay and the three identity planes.
+---
+import Figure from '@components/Figure.astro';
+import Channels from '@components/figures/Channels.astro';
+import Lifecycle from '@components/figures/Lifecycle.astro';
+
+These are the words the rest of the documentation uses. Each one has a rule
+behind it, and each rule has a reason.
+
+## The agent
+
+The agent is the Seyd program on the robot. It owns everything between a
+configuration and a running robot: sockets, address discovery, the
+certificate, the QUIC endpoint, the sessions, the signalling connection to the
+cloud, and the maintenance that keeps all of it alive. In `seydd` and in every
+SDK it is the same Rust type, `seyd_core::Agent`; the daemon and the SDKs are
+hosts that supply media and consume its events.
+
+<Figure caption="The agent lifecycle. Channels are declared before start; sessions come and go while it runs; stop tears everything down."><Lifecycle /></Figure>
+
+The lifecycle is the same in every form factor: create the agent, add
+channels, start, serve sessions, stop. Channels are added before start and
+not after, because the robot announces its channel list to the cloud and the
+pilot reads it from the first message of every session.
+
+## Channels
+
+A channel is one named stream with a kind, a direction and a codec. There are
+three kinds.
+
+<Figure caption="Video and sensor channels flow from the robot to every pilot. Command channels flow from the driver to the robot; the robot drops commands from observers."><Channels /></Figure>
+
+| Kind | Direction | Carries |
+|---|---|---|
+| `video` | robot to pilot | Encoded access units, chunked into FEC blocks |
+| `sensor` | robot to pilot | One message per datagram |
+| `command` | pilot to robot | One message per datagram, from the driver only |
+
+Channels are numbered from 1 in the order they are declared; channel 0 is the
+control stream and never appears in a datagram. A channel's `codec` is a
+WebCodecs identifier (`avc1.42001f`, `hev1.…`, `mjpeg`, or `json` for
+messages) and it travels unchanged to the browser's decoder, which is why the
+value has to be right on the robot side.
+
+## Sessions and roles
+
+A session is one pilot connected to one robot. The cloud assigns roles: the
+first pilot to connect becomes the **driver**, and every later pilot is an
+**observer**, up to the robot's `max_sessions`. Observers see the same video
+and sensors and can send nothing. The role is fixed when the session is
+offered and repeated to the robot, and the robot itself drops commands from
+observers, so a page bug cannot make an observer drive. When the driver
+leaves, observers are not promoted; the next new connection takes the driver
+slot.
+
+Every session is authorized by a short-lived token the pilot presents in its
+first message, and the robot verifies it against the cloud's published key.
+Your robot-side code learns about sessions through events (`on_session_ended`
+in the SDKs, the `session` message on the daemon's publisher-control port), and
+should park actuators when the last driver leaves, because that event fires
+whether the pilot said goodbye or simply vanished.
+
+## QoS profiles are ceilings
+
+The robot picks one of three profiles, `latency`, `balanced` or `quality`,
+and a driver may ask for another during a session. A profile is a ceiling,
+not a setting: it states the highest bitrate the publisher may use, the
+latency budget, the longest GOP, and Seyd's own FEC rates, drop thresholds and
+presentation delay. The closed-loop controller moves the actual bitrate
+request and the FEC rates inside that ceiling as the link changes, never
+above it.
+
+Seyd tells your encoder the targets through `video-config` and leaves
+resolution, preset and VBV to you. Degrade resolution first and frame rate
+last: for a remote pilot the interval between frames is latency, not quality.
+The numbers for each profile are in
+[QoS profiles](/docs/reference/qos-profiles/), rendered from the constants in
+the code.
+
+## Keyframes on demand
+
+Seyd asks for a recovery point when a pilot needs one: on join, on loss it
+could not repair, after a drop, on a stream switch. The request arrives at
+your publisher as `recovery-request` with a `kind` of `ltr`, `intra_refresh`
+or `idr`, cheapest first, and it is rate-limited to one per 250 ms per
+channel. The profile's `maxGopMs` is only a safety net, the longest the
+publisher may go without a full recovery point: 10 s on `latency` and
+`balanced`, 4 s on `quality`.
+
+The rule exists because a periodic IDR is several times the size of a delta
+frame and lands in one frame slot, so a one-second IDR cadence is the latency
+tail, the once-a-second hitch and a large share of the bandwidth, all for
+recovery points nobody asked for. Prefer periodic intra refresh where the
+encoder has it; otherwise a long GOP and an IDR on request.
+[ADR 0009](/docs/reference/adr/0009-keyframes-on-demand/) has the
+measurements; [The publisher contract](/docs/robot/publisher-contract/) has
+what to implement.
+
+## Whole frame or nothing
+
+A frame is admitted before its first chunk leaves and is then sent in full. If
+the send backlog is already longer than the profile allows, the next delta
+frame is skipped whole rather than started and abandoned. A torn frame costs
+a GOP of smear; a skipped frame costs one frame interval. Keyframes are never
+dropped.
+
+## FEC per block
+
+Every video frame is sent as one or more blocks of up to 8 data chunks, and
+each block carries its own Reed-Solomon parity chunks computed over that block
+alone. The pilot rebuilds a block from any sufficient subset on arrival, with
+no round trip. The profile sets how much parity a delta frame and a keyframe
+get on a clean link, and the controller raises it under loss. What FEC cannot
+repair is reported to the robot immediately and answered with a recovery
+point.
+
+## Presentation on the capture clock
+
+Each frame carries the encoder's capture timestamp. The pilot decodes on
+arrival but paints each frame at its capture slot plus a fixed presentation
+delay from the profile, 50 to 150 ms, so the picture keeps the camera's
+cadence and never drifts further behind. The budget is fixed on purpose: a
+jitter buffer that grows to look smooth means acting on a world that has moved
+on. Decoding and pacing run in a Web Worker on an OffscreenCanvas, so your
+page cannot stutter the video by being busy. The decision is
+[ADR 0005](/docs/reference/adr/0005-presentation-pacing/); what the HUD's
+numbers mean is in [Latency and the HUD](/docs/pilot/latency/).
+
+## The direct path and the relay
+
+The robot announces every address it has, the cloud probes the public ones,
+and the pilot races them all. The winning candidate is shown in the HUD as the
+path. If no candidate connects, the pilot reports what it found and what to
+change, and, only if the robot allows it, attaches to the cloud relay for this
+session. A relayed session is marked in amber on every surface for as long as
+it lasts, and there is no live upgrade back to a direct path: reload to
+retry. See [Reachability](/docs/networking/reachability/).
+
+## Three identity planes
+
+Seyd has three kinds of identity and only one of them touches an identity
+provider.
+
+| Plane | Who | Mechanism |
+|---|---|---|
+| Robot identity | The robot | An Ed25519 key generated on the robot, registered once by enrolment, proven by challenge-response on every connection |
+| Session authorization | A pilot in one session | An ES256 token minted by the cloud with Seyd's own key, valid for at most five minutes, verified by the robot |
+| Human identity | A person in the console | OIDC sign-in through the configured provider, behind one seam in the cloud |
+
+Robots and sessions never depend on the provider, so a fleet keeps working
+while the identity provider is down or being replaced. Who may drive which
+robot is not a provider question either: organisations, roles and robot
+grants live in Seyd's own database.
+[Enrolment and access](/docs/cloud/access/) covers all three;
+[ADR 0007](/docs/reference/adr/0007-identity/) is the decision.

@@ -1,0 +1,38 @@
+---
+title: Seyd developer documentation
+description: Put a person at the controls of a machine anywhere on the internet. The daemon, the SDKs, the cloud and the protocol.
+template: splash
+hero:
+  tagline: Video, sensors and commands go straight from the robot to the operator's browser. This is how to wire it in.
+  actions:
+    - text: Start here
+      link: /docs/start/overview/
+      icon: right-arrow
+    - text: Integrate the daemon
+      link: /docs/robot/daemon/
+      variant: minimal
+    - text: Drive the live demo
+      link: /
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <LinkCard title="Robot side" description="The daemon for a camera that already publishes RTSP or RTP; Python, C and Rust for a process that holds encoded frames." href="/docs/robot/daemon/" />
+  <LinkCard title="Pilot side" description="One element for a drivable feed inside your web app, or SeydSession for a UI of your own." href="/docs/pilot/web-components/" />
+  <LinkCard title="Networking" description="Reaching a robot behind 4G routers, satellite dishes and firewalls, and what every diagnosis means." href="/docs/networking/reachability/" />
+  <LinkCard title="Cloud" description="Enrolment, access, session passes, and running the whole cloud on your own infrastructure." href="/docs/cloud/access/" />
+</CardGrid>
+
+## Reference, generated from the code
+
+<CardGrid>
+  <LinkCard title="C ABI" description="Every symbol of seyd.h, from the header cbindgen generates." href="/docs/reference/c/" />
+  <LinkCard title="Python" description="The seyd package, from its docstrings." href="/docs/reference/python/" />
+  <LinkCard title="JavaScript" description="@seyd/core and @seyd/web, from their TSDoc." href="/docs/reference/js/" />
+  <LinkCard title="seydd.toml" description="Every key of the daemon's configuration, from its serde structs." href="/docs/reference/seydd-config/" />
+  <LinkCard title="QoS profiles" description="The three profiles, from the constants in seyd-qos." href="/docs/reference/qos-profiles/" />
+  <LinkCard title="Protocol" description="The wire, control-stream and signalling contracts." href="/docs/reference/protocol/chunks/" />
+</CardGrid>

@@ -38,7 +38,7 @@ pub struct NetworkWatch {
 /// Watch for interface-address changes by polling [`ifaces::interfaces`]
 /// every 10 s. Polling rather than netlink/`SCDynamicStore` keeps it portable;
 /// a 10 s detection delay is negligible against QUIC's idle timeout. Callers
-/// treat a message as "re-run [`gather`] on the same sockets".
+/// treat a message as "re-run [`gather()`] on the same sockets".
 pub fn watch_network_changes() -> NetworkWatch {
     watch_network_changes_with(ifaces::interfaces, std::time::Duration::from_secs(10))
 }

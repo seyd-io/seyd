@@ -29,9 +29,14 @@ pub enum OnLoss {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Profile {
+    /// The profile's name: `latency`, `balanced` or `quality`.
     pub name: &'static str,
     // ── targets the publisher must honour ───────────────────────────────
+    /// The ceiling on the publisher's video bitrate; the closed-loop controller
+    /// moves the actual request between 25 % of this and this.
     pub max_bitrate_kbps: u32,
+    /// How much end-to-end delay the profile is prepared to spend, told to the
+    /// publisher so it can size its own buffers (VBV, lookahead).
     pub latency_budget_ms: u32,
     /// The longest the publisher may go without a full recovery point — an
     /// IDR, or a completed intra-refresh sweep. A *ceiling*, and a safety net:
@@ -52,11 +57,17 @@ pub struct Profile {
     /// 148 → 48 ms (docs/latency-sources.md §11).
     pub prefer_intra_refresh: bool,
     // ── Seyd's own transport policy ──────────────────────────────────────
+    /// Reed-Solomon parity added to a delta frame's block, as a percentage of
+    /// its data chunks, on a clean link; the controller raises it under loss.
     pub fec_delta_pct: u32,
+    /// Parity for keyframes, which are larger and cost a GOP if torn.
     pub fec_key_pct: u32,
     /// Drop a delta frame if the send backlog exceeds this many frame-times.
     pub backlog_drop_frames: u32,
+    /// How long the pilot waits for a delta frame's missing chunks before
+    /// closing it out.
     pub pilot_deadline_delta_ms: u32,
+    /// The same wait for a keyframe.
     pub pilot_deadline_key_ms: u32,
     /// How long the pilot holds a decoded frame past its capture slot before
     /// painting it (ADR 0005). This is the profile's judder-versus-latency
@@ -75,6 +86,8 @@ pub struct Profile {
     /// arrives first when the publisher sends IDRs, short enough that a stall
     /// is not visible as a freeze.
     pub recovery_grace_ms: u32,
+    /// What the pilot does when a frame cannot be repaired: keep decoding
+    /// (`continue`, and ask for a recovery point) or freeze until the next IDR.
     pub on_loss: OnLoss,
 }
 

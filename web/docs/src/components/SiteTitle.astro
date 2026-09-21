@@ -1,0 +1,6 @@
+---
+// The Seyd wordmark as the site title, linking back to the landing page; the
+// "docs" eyebrow says which surface this is (docs/design.md §5).
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<a class="seyd-wordmark" href={`${base}/`}><i></i>Seyd<span>docs</span></a>

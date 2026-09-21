@@ -1,0 +1,215 @@
+---
+title: "Enrolment and access"
+description: How a robot joins a fleet, who may observe or drive it, how a pilot gets a session token, and what the audit log records.
+---
+import Figure from '@components/Figure.astro';
+import Identity from '@components/figures/Identity.astro';
+
+Three kinds of identity meet in the cloud, and only one of them touches an
+identity provider. A robot proves itself with a key it generated. A pilot
+presents a short-lived session token minted by the cloud. A person signs in
+to the console through OIDC. Who may do what is decided in Seyd's own
+database, never at the provider.
+
+<Figure caption="The three identity planes. Robot keys and session tokens are Seyd's own and keep working while the identity provider is down; only console sign-in goes through the provider."><Identity /></Figure>
+
+## Enrolling a robot
+
+A robot joins a fleet by redeeming a one-time enrolment token. Create one in
+the console, on the Fleet page ("Create enrolment token"), or from a machine
+that can reach the database:
+
+```bash
+node dist/bootstrap.js enrolment-token <org-id> "Hikvision demo"
+```
+
+Hand the token to the daemon in one of three ways. In the config file:
+
+```toml
+[agent]
+enrolment_token = "seyd_enr_…"     # or SEYD_ENROLMENT_TOKEN, which wins
+```
+
+In the environment, which is the right place in a provisioning script because
+the secret never touches the disk:
+
+```
+SEYD_ENROLMENT_TOKEN=seyd_enr_… seydd --config /etc/seyd/seydd.toml
+```
+
+Or as a separate step, for an interactive install:
+
+```
+seydd --config /etc/seyd/seydd.toml enrol --token seyd_enr_…
+```
+
+Each form creates the key file at `credential_path` if it does not exist,
+then sends the public half of the key with the token to `POST /api/v1/enrol`
+at the address derived from `signal_url`. The private seed never leaves the
+robot. No user credential is involved and the robot never contacts the
+identity provider, so enrolled robots keep connecting while it is down.
+
+A token is single-use: a second robot presenting it gets `410` and needs a
+new one. The robot's key file is what stays enrolled. Keep it; lose it and
+you need a new token. Enrolment registers whatever key the robot already
+holds, so a robot that predates enrolment keeps its identity and simply
+becomes known.
+
+**SDK robots.** The C ABI at version 1 has no enrolment call, so a Python or
+C robot cannot redeem a token itself. Run `seydd enrol` against the SDK's
+credential file, which has the same format, then start the SDK robot with
+that file. The reference config page has the key:
+[seydd.toml](/docs/reference/seydd-config/).
+
+### When the signal server denies a robot
+
+| `denied` reason | Meaning | What to do |
+|---|---|---|
+| `unknown-robot` | The id was never enrolled | Redeem a token as above |
+| `key-mismatch` | The id is enrolled with a different key: another agent is using it, or the credential file was replaced | Delete the robot in the console and enrol again |
+
+Every connection after enrolment is a challenge-response: the server sends a
+nonce, the robot signs it with its Ed25519 key, and the server checks the
+signature against the stored public key.
+
+## Organisations and roles
+
+Every robot belongs to one organisation, and every person in the console is a
+member of one or more with a role. The role matrix is a closed list, not a
+policy engine, so it stays legible.
+
+| Role | May |
+|---|---|
+| `viewer` | Read the org, its members and its robots |
+| `operator` | All of viewer, plus create sessions |
+| `admin` | All of operator, plus manage the org, members, robots, enrolment, grants, API keys, and read the audit log |
+| `owner` | All of admin, plus delete the org |
+
+A role alone does not let anyone drive. Per-robot permission is a **grant**,
+and a person needs both: the role's permission to create sessions and a grant
+on that robot.
+
+## Robot grants
+
+A grant names a robot, a scope, and who holds it. There are two scopes:
+`observe` (see the video and sensors) and `drive` (also hold the driver
+slot and send commands). A **public grant** has no holder: anyone, with or
+without an account, may open a session at that scope. That is how the demo
+robot works:
+
+```bash
+node dist/bootstrap.js public-grant seyd-demo observe drive
+```
+
+`GET /api/v1/robots`, the list the landing page reads, shows only robots
+with a public grant. Everything else needs an account and a grant. Grants are
+managed on the robot's page in the console or at
+`POST /api/v1/robots/:robotId/grants`.
+
+## Session tokens
+
+A pilot does not carry a person's credentials into a session. It carries a
+session token (a session pass): an ES256 JWT minted by the cloud with Seyd's
+own key, naming one robot, one scope and one subject, valid for at most 300
+seconds. The robot verifies it against the cloud's published key at
+`/.well-known/seyd-session-jwks.json`, so a forged token is refused before
+any command is delivered, and the token's short life means it is useless
+afterwards.
+
+Mint one with `POST /api/v1/session-tokens`, with `robot_id`, an optional
+`scope` (`observe` or `drive`, the default) and an optional `ttl_sec` (capped
+at 300). The response carries `token`, `subject`, `scope`, `expires_in` and
+`issuer`. Who may call it:
+
+- **A signed-in person** with a role that may create sessions and a grant on
+  the robot at that scope. This is what the console's "Open pilot" button
+  does.
+- **An API key** of the robot's organisation with the `session.create` scope,
+  optionally with a `for` field naming the end user, so "who was driving"
+  survives into your own system.
+- **Nobody**, for a robot with a public grant at that scope. The subject is
+  then an anonymous id.
+
+The pilot puts the token in the `token` attribute of `<seyd-video>` (or
+`token` in `SeydSessionOptions`). It presents it when it authenticates to the
+signal server, and again in its first message to the robot; a robot with no
+public grant offers a session only to a pilot with a valid token.
+
+## API keys
+
+An API key is a machine credential for a customer's own backend: the path
+where you authenticate your users yourself, hold a Seyd key, and mint
+session tokens for them, so Seyd stores no human identity at all. Keys are
+Seyd's own and work regardless of which identity provider is configured.
+
+Create them on the console's Keys page or at
+`POST /api/v1/orgs/:orgId/api-keys`. A key starts with `seyd_live_`, is
+shown once, and is stored as a hash. It carries explicit scopes instead of a
+role: `*` for every action, or a list of action names. Present it as a
+bearer token:
+
+```
+Authorization: Bearer seyd_live_…
+```
+
+## The audit log
+
+Every change of access is recorded per organisation and readable by admins
+and owners at `GET /api/v1/orgs/:orgId/audit`, or on the console's Audit
+page: organisation creation, robot enrolment, updates and deletion,
+enrolment tokens created, grants created and deleted, invitations created,
+revoked and accepted, member role changes and removals, API keys created
+and revoked, and every session token minted, with its subject, scope and
+lifetime. That last entry is the answer
+to "who had control when": a session token is minted for one subject and one
+robot, and the console's presence view shows which subject holds the driver
+slot right now.
+
+## Console access is invite-only
+
+The deployed console grants no organisation to anyone who was not invited,
+and the identity provider has self-registration switched off, so nobody can
+even create an account uninvited. An invitation therefore opens the door
+itself: it carries a one-time sign-in token from the provider, and one link
+both creates the account and joins the person to the organisation at the
+invited role.
+
+Invite people from the console's Members page, or from a machine that can
+reach the database:
+
+```bash
+node dist/bootstrap.js invite <org-id> you@example.com owner
+```
+
+There is no mail transport in the cloud yet, so whoever issued the
+invitation hands the printed link over. The link is the onboarding.
+
+## The endpoints
+
+The cloud's HTTP API, as registered in `cloud/api/src`. A REST reference
+generated from the route table is planned; until then this is the list.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /healthz`, `GET /api/v1/health` | Liveness |
+| `GET /api/v1/robots` | Presence list. Without an account: robots with a public grant only |
+| `GET /api/v1/console-config` | Provider settings the console reads at boot |
+| `GET /api/v1/me` | The signed-in user and their memberships |
+| `POST /api/v1/orgs` | Create an organisation |
+| `GET /api/v1/orgs/:orgId/robots` | The org's robots with live presence |
+| `GET`, `PATCH`, `DELETE /api/v1/robots/:robotId` | One robot |
+| `POST /api/v1/robots/:robotId/grants`, `DELETE …/grants/:id` | Robot grants |
+| `POST`, `GET /api/v1/orgs/:orgId/enrolment-tokens`, `DELETE …/enrolment-tokens/:id` | Enrolment tokens |
+| `POST /api/v1/enrol` | Redeemed by the robot with its public key |
+| `GET /api/v1/orgs/:orgId/members`, `PATCH`, `DELETE …/members/:userId` | Members and roles |
+| `POST`, `GET /api/v1/orgs/:orgId/invitations`, `DELETE …/invitations/:id` | Invitations |
+| `POST /api/v1/invitations/accept` | Claim an invitation |
+| `POST`, `GET /api/v1/orgs/:orgId/api-keys`, `DELETE …/api-keys/:id` | API keys |
+| `POST /api/v1/session-tokens` | Mint a session token |
+| `GET /.well-known/seyd-session-jwks.json` | The key robots verify session tokens with |
+| `GET /api/v1/orgs/:orgId/audit` | The audit log |
+
+The signalling protocol on `/ws` and the relay on `/relay` are in
+[Signal protocol v2](/docs/reference/protocol/signal-v2/). The decision behind
+all of this is [ADR 0007](/docs/reference/adr/0007-identity/); plugging in
+your own provider is [Identity providers](/docs/cloud/identity-providers/).

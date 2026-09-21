@@ -5,14 +5,7 @@
 // paint. The fonts ship with the page (no request to a font CDN), because
 // Seyd's surfaces must work self-hosted and offline, and must not leak a
 // visitor's address to a third party.
-import '@fontsource/familjen-grotesk/latin-500.css';
-import '@fontsource/familjen-grotesk/latin-600.css';
-import '@fontsource/familjen-grotesk/latin-700.css';
-import '@fontsource/ibm-plex-sans/latin-400.css';
-import '@fontsource/ibm-plex-sans/latin-500.css';
-import '@fontsource/ibm-plex-sans/latin-600.css';
-import '@fontsource/ibm-plex-mono/latin-400.css';
-import '@fontsource/ibm-plex-mono/latin-500.css';
+import './fonts.css';
 import './ui.css';
 
 export type Theme = 'system' | 'light' | 'dark';
