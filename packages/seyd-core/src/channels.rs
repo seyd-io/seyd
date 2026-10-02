@@ -27,4 +27,11 @@ pub struct ChannelSpec {
     /// stream and no selection ever happens — the pre-simulcast behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<seyd_qos::simulcast::VideoLayer>,
+    /// The most a video channel's publisher can encode, in kbps; 0 = no limit
+    /// of its own. When it is below the QoS profile's ceiling, the rate
+    /// controller's whole range — ceiling, floor, backlog budget and every
+    /// `video-config` request — is scaled to it, so Seyd never asks for a
+    /// bitrate the encoder cannot produce. Local to the agent: not announced.
+    #[serde(default, skip_serializing)]
+    pub max_bitrate_kbps: u32,
 }

@@ -137,6 +137,14 @@ pub struct Channel {
     /// case, and what every pre-simulcast config keeps doing.
     #[serde(default, rename = "layer")]
     pub layers: Vec<Layer>,
+    /// The most this video channel's publisher can encode, in kbps; 0 (the
+    /// default) means it has no limit of its own. Set it when the encoder
+    /// tops out below the QoS profile's ceiling — a drone whose highest
+    /// setting is 4 Mbps under the `quality` profile's 6 — so the rate
+    /// controller's range, floor and `video-config` requests stay within
+    /// what the publisher can deliver.
+    #[serde(default)]
+    pub max_bitrate_kbps: u32,
 }
 
 impl Channel {

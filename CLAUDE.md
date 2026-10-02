@@ -24,7 +24,9 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   authz), 0008 (simulcast: adapt by selecting a stream, not reconfiguring
   one), 0009 (keyframes on demand: intra refresh or a long GOP, never a
   one-second IDR cadence), 0010 (cloud relay as the last resort: taken only
-  after the direct race fails, always shown as relayed). Add one for every
+  after the direct race fails, always shown as relayed), 0011 (a publisher
+  states its own bitrate ceiling: `max_bitrate_kbps` per video channel lowers
+  the rate controller's range; never raises it). Add one for every
   decision of that weight; never change a wire format or public API without one.
 - **SPEC.md** — product specification: customers, use cases, no-transcoding
   principle, competitor landscape. Written under the DARC name; the product

@@ -85,9 +85,22 @@ const CLEAN_SECONDS_TO_LOWER_FEC: u32 = 10;
 const LATENCY_SECONDS_TO_CUT: u32 = 2;
 const FLOOR_FRACTION: f64 = 0.25;
 
+/// The profile's ceiling, lowered to the publisher's own maximum when the
+/// host declared one (0 = none).
+pub fn effective_ceiling_kbps(profile: &Profile, publisher_max_kbps: u32) -> u32 {
+    if publisher_max_kbps == 0 {
+        profile.max_bitrate_kbps
+    } else {
+        profile.max_bitrate_kbps.min(publisher_max_kbps)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AbrController {
     profile: &'static Profile,
+    /// The top of the range: the profile's ceiling, lowered to what the
+    /// publisher can actually produce when the host declared that.
+    ceiling_kbps: u32,
     tick: u64,
     /// Current bitrate target before the FEC budget scaling.
     target_kbps: f64,
@@ -108,8 +121,21 @@ pub struct AbrController {
 
 impl AbrController {
     pub fn new(profile: &'static Profile) -> Self {
+        Self::with_ceiling(profile, 0)
+    }
+
+    /// A controller whose range tops out at `publisher_max_kbps` when that is
+    /// below the profile's ceiling (0 = no limit of the publisher's own).
+    ///
+    /// A publisher that cannot encode faster than some rate makes every
+    /// request above it a no-op: the controller would "raise" a bitrate that
+    /// never moves, and its floor — a fraction of the ceiling — would sit
+    /// higher than it should. Stating the publisher's limit keeps the whole
+    /// range real.
+    pub fn with_ceiling(profile: &'static Profile, publisher_max_kbps: u32) -> Self {
+        let ceiling_kbps = effective_ceiling_kbps(profile, publisher_max_kbps);
         let d = Decision {
-            max_bitrate_kbps: profile.max_bitrate_kbps,
+            max_bitrate_kbps: ceiling_kbps,
             fec_delta_pct: profile.fec_delta_pct,
             fec_key_pct: profile.fec_key_pct,
             suggested_fps: 0,
@@ -119,15 +145,16 @@ impl AbrController {
         };
         Self {
             profile,
+            ceiling_kbps,
             tick: 0,
-            target_kbps: profile.max_bitrate_kbps as f64,
+            target_kbps: ceiling_kbps as f64,
             fec_level: 0,
             clean_seconds: 0,
             clean_seconds_fec: 0,
             congested_at_floor_seconds: 0,
             last_cut_tick: None,
             last_emit_tick: None,
-            last_emitted_kbps: profile.max_bitrate_kbps,
+            last_emitted_kbps: ceiling_kbps,
             loss_window: VecDeque::new(),
             rtt_window: VecDeque::new(),
             latency_seconds: 0,
@@ -156,13 +183,13 @@ impl AbrController {
     }
 
     fn floor_kbps(&self) -> f64 {
-        (self.profile.max_bitrate_kbps as f64 * FLOOR_FRACTION).round()
+        (self.ceiling_kbps as f64 * FLOOR_FRACTION).round()
     }
 
     /// Step once per second. Returns `Some` when something should be applied.
     pub fn step(&mut self, s: &Sample) -> Option<Decision> {
         self.tick += 1;
-        let ceiling = self.profile.max_bitrate_kbps as f64;
+        let ceiling = self.ceiling_kbps as f64;
 
         // ── loss over the last 5 s ─────────────────────────────────────────
         let loss_now = s.pilot_chunk_loss_pct.unwrap_or(0.0).max(0.0);
@@ -358,6 +385,17 @@ mod tests {
 
     fn run(c: &mut AbrController, samples: impl IntoIterator<Item = Sample>) -> Vec<Decision> {
         samples.into_iter().filter_map(|s| c.step(&s)).collect()
+    }
+
+    #[test]
+    fn a_publisher_limit_lowers_the_ceiling_and_the_floor() {
+        // quality asks for 6000; this publisher tops out at 4000.
+        let c = AbrController::with_ceiling(&crate::QUALITY, 4000);
+        assert_eq!(c.current().max_bitrate_kbps, 4000);
+        assert_eq!(c.floor_kbps(), 1000.0);
+        // A limit above the profile changes nothing, and 0 means none.
+        assert_eq!(AbrController::with_ceiling(&crate::LATENCY, 4000).current().max_bitrate_kbps, 1500);
+        assert_eq!(AbrController::with_ceiling(&crate::QUALITY, 0).current().max_bitrate_kbps, 6000);
     }
 
     #[test]

@@ -255,6 +255,13 @@ impl Agent {
         self.engine.profile()
     }
 
+    /// The `video-config` a publisher should be sent for `channel` under the
+    /// profile in force, with the bitrate clamped to what that channel's
+    /// publisher declared it can produce (`ChannelSpec::max_bitrate_kbps`).
+    pub fn publisher_config(&self, channel: u8, reason: &str) -> serde_json::Value {
+        self.engine.publisher_config(channel, reason)
+    }
+
     /// Switch the QoS ceiling. `false` if no profile by that name exists.
     pub fn set_qos_profile(&self, name: &str, reason: &str) -> bool {
         match seyd_qos::get(name) {

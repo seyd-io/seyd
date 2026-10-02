@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         codec: "json".into(),
         fps: 0,
         layers: Vec::new(),
+        max_bitrate_kbps: 0,
     };
     let drive = ChannelSpec {
         id: 2,
@@ -42,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         codec: "json".into(),
         fps: 0,
         layers: Vec::new(),
+        max_bitrate_kbps: 0,
     };
 
     // Everything not set here keeps the same default as `seydd.toml`.

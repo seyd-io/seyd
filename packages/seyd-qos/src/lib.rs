@@ -162,7 +162,14 @@ impl Profile {
     /// A byte budget rather than "queue non-empty": the transport's pending
     /// queue also grows merely because the pacer is spacing packets out.
     pub fn drop_threshold_bytes(&self, fps: u32) -> usize {
-        let bytes_per_frame = self.max_bitrate_kbps as f64 * 1000.0 / 8.0 / fps.max(1) as f64;
+        self.drop_threshold_bytes_at(self.max_bitrate_kbps, fps)
+    }
+
+    /// The same budget at a ceiling other than the profile's own — a
+    /// publisher that tops out lower has smaller frames, and a backlog of
+    /// "a few frames" is correspondingly fewer bytes.
+    pub fn drop_threshold_bytes_at(&self, ceiling_kbps: u32, fps: u32) -> usize {
+        let bytes_per_frame = ceiling_kbps as f64 * 1000.0 / 8.0 / fps.max(1) as f64;
         (self.backlog_drop_frames as f64 * bytes_per_frame) as usize
     }
 

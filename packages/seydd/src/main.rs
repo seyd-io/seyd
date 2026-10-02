@@ -141,6 +141,7 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
             codec: c.codec.clone(),
             fps: c.fps,
             layers: c.layer_specs(),
+            max_bitrate_kbps: c.max_bitrate_kbps,
         })
         .collect();
 
@@ -224,9 +225,8 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
         cfg.publisher_control.as_ref().map(|p| p.udp.as_str()),
     );
     if publisher.enabled() {
-        let profile = agent.profile();
         for spec in specs.iter().filter(|s| s.kind == CoreKind::Video) {
-            publisher.send(&profile.publisher_config(spec.id, "profile"));
+            publisher.send(&agent.publisher_config(spec.id, "profile"));
         }
     }
 

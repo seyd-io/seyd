@@ -460,6 +460,9 @@ pub unsafe extern "C" fn seyd_channel_add(
             // Layers are declared afterwards with `seyd_channel_add_layer`, so
             // adding one channel stays a single struct with no array in it.
             layers: Vec::new(),
+            // Not in the C ABI yet: a host with a rate-limited encoder caps
+            // its own requests in `on_requested_config` until it is.
+            max_bitrate_kbps: 0,
         });
         if let Some(o) = out_channel_id.as_mut() {
             *o = id;

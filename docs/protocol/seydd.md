@@ -20,6 +20,7 @@ name  = "main"
 input = "rtsp://user:pass@192.168.1.20:554/Streaming/Channels/101"   # or "rtp://0.0.0.0:5000"
 codec = "avc1.42001f"                          # or "hev1.1.6.L93.B0" for H.265
 fps   = 25
+# max_bitrate_kbps = 4000                      # only if the encoder tops out below the profile's ceiling
 
 [[channel]]
 kind   = "sensor"
@@ -40,6 +41,14 @@ udp = "127.0.0.1:5003"
 Secrets: credentials in RTSP URLs may also come from the environment as
 `SEYD_RTSP_USER` / `SEYD_RTSP_PASSWORD`, which are substituted into an
 `rtsp://` URL that has no userinfo. URLs are redacted in every log line.
+
+`max_bitrate_kbps` on a video channel states the most its publisher can
+encode. Leave it out (0) for an encoder that can follow any request. Set it
+when the encoder's maximum is below the QoS profile's ceiling: the rate
+controller then works inside the smaller range — ceiling, floor at a quarter
+of it, backlog budget — and no `video-config` asks for more. Without it the
+controller "raises" a bitrate that never moves. The Tello demo sets 4000
+under a `quality` ceiling of 6000.
 
 ## Enrolment
 

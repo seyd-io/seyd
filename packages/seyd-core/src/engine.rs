@@ -403,6 +403,34 @@ struct Inner {
     simulcast: Mutex<HashMap<u8, ChannelLayers>>,
 }
 
+impl Inner {
+    /// What the publisher of `channel` declared it can encode at most, in
+    /// kbps; 0 = no limit. Channel 0 asks for the tightest limit across all
+    /// video channels, for the agent-wide figures.
+    fn publisher_max_kbps(&self, channel: u8) -> u32 {
+        self.cfg
+            .channels
+            .iter()
+            .filter(|c| c.kind == ChannelKind::Video && (channel == 0 || c.id == channel))
+            .map(|c| c.max_bitrate_kbps)
+            .filter(|&k| k > 0)
+            .min()
+            .unwrap_or(0)
+    }
+
+    fn ceiling_kbps(&self, profile: &Profile, channel: u8) -> u32 {
+        seyd_qos::abr::effective_ceiling_kbps(profile, self.publisher_max_kbps(channel))
+    }
+
+    /// The profile's `video-config`, never asking for more than the channel's
+    /// publisher can produce.
+    fn publisher_config(&self, profile: &Profile, channel: u8, reason: &str) -> serde_json::Value {
+        let mut cfg = profile.publisher_config(channel, reason);
+        cfg["maxBitrateKbps"] = serde_json::json!(self.ceiling_kbps(profile, channel));
+        cfg
+    }
+}
+
 #[derive(Clone)]
 pub struct Engine {
     inner: Arc<Inner>,
@@ -429,7 +457,11 @@ impl Engine {
             .iter()
             .filter(|c| c.kind == ChannelKind::Video && c.layers.len() > 1)
             .filter_map(|c| {
-                LayerSelector::new(c.layers.clone(), profile.max_bitrate_kbps).map(|selector| {
+                LayerSelector::new(
+                    c.layers.clone(),
+                    seyd_qos::abr::effective_ceiling_kbps(profile, c.max_bitrate_kbps),
+                )
+                .map(|selector| {
                     let active = selector.current();
                     (
                         c.id,
@@ -442,6 +474,16 @@ impl Engine {
                 })
             })
             .collect();
+        let initial_ceiling_kbps = seyd_qos::abr::effective_ceiling_kbps(
+            profile,
+            cfg.channels
+                .iter()
+                .filter(|c| c.kind == ChannelKind::Video)
+                .map(|c| c.max_bitrate_kbps)
+                .filter(|&k| k > 0)
+                .min()
+                .unwrap_or(0),
+        );
         let inner = Arc::new(Inner {
             profile: RwLock::new(cfg.profile),
             cfg,
@@ -463,7 +505,7 @@ impl Engine {
             abr: Mutex::new(AbrState {
                 controllers: HashMap::new(),
                 fec: (profile.fec_delta_pct, profile.fec_key_pct),
-                bitrate_kbps: profile.max_bitrate_kbps,
+                bitrate_kbps: initial_ceiling_kbps,
                 reason: "steady",
                 prev_backlog: 0,
                 loss_pct: None,
@@ -488,6 +530,16 @@ impl Engine {
     }
     pub fn profile(&self) -> &'static Profile {
         *self.inner.profile.read().unwrap()
+    }
+    /// The bitrate ceiling in force for a video channel: the profile's,
+    /// lowered to the publisher's declared maximum (`ChannelSpec::max_bitrate_kbps`).
+    pub fn ceiling_kbps(&self, channel: u8) -> u32 {
+        self.inner.ceiling_kbps(self.profile(), channel)
+    }
+    /// The `video-config` a publisher should receive for `channel` under the
+    /// current profile, with the bitrate clamped to the channel's ceiling.
+    pub fn publisher_config(&self, channel: u8, reason: &str) -> serde_json::Value {
+        self.inner.publisher_config(self.profile(), channel, reason)
     }
     pub fn now_us(&self) -> u64 {
         self.inner.epoch.elapsed().as_micros() as u64
@@ -543,7 +595,7 @@ impl Engine {
             let mut abr = self.inner.abr.lock().unwrap();
             abr.controllers.clear();
             abr.fec = (profile.fec_delta_pct, profile.fec_key_pct);
-            abr.bitrate_kbps = profile.max_bitrate_kbps;
+            abr.bitrate_kbps = self.inner.ceiling_kbps(profile, 0);
             abr.reason = "steady";
         }
         for c in self
@@ -554,7 +606,7 @@ impl Engine {
             .filter(|c| c.kind == ChannelKind::Video)
         {
             let _ = self.inner.events.try_send(Event::RequestedConfig(
-                profile.publisher_config(c.id, reason),
+                self.inner.publisher_config(profile, c.id, reason),
             ));
         }
     }
@@ -726,7 +778,7 @@ impl Engine {
             &frame.data,
         );
         let wire_bytes: usize = pack.chunks.iter().map(|c| c.len()).sum();
-        let threshold = profile.drop_threshold_bytes(fps);
+        let threshold = profile.drop_threshold_bytes_at(self.inner.ceiling_kbps(profile, channel), fps);
         let mut sent_any = false;
         tracing::trace!(
             frame_id,
@@ -1016,7 +1068,7 @@ impl Engine {
                     "bytes_sent": c.bytes_sent.load(Ordering::Relaxed),
                     "rtt_ms": p.rtt_ms, "min_rtt_ms": p.min_rtt_ms, "cwnd": p.cwnd,
                     "delivery_kbps": p.delivery_kbps, "lost_packets": p.lost_packets, "mtu": p.current_mtu,
-                    "abr_bitrate_kbps": abr.bitrate_kbps, "abr_ceiling_kbps": engine.profile().max_bitrate_kbps,
+                    "abr_bitrate_kbps": abr.bitrate_kbps, "abr_ceiling_kbps": engine.ceiling_kbps(0),
                     "abr_fec_delta": abr.fec.0, "abr_fec_key": abr.fec.1, "abr_reason": abr.reason,
                     "abr_loss_pct": abr.loss_pct.map(|x| (x * 10.0).round() / 10.0),
                     "abr_loss_pilot_pct": abr.loss_pilot_pct.map(|x| (x * 10.0).round() / 10.0),
@@ -1210,15 +1262,18 @@ impl Engine {
                 let ctl = abr
                     .controllers
                     .entry(ch)
-                    .or_insert_with(|| AbrController::new(profile));
+                    .or_insert_with(|| {
+                        AbrController::with_ceiling(profile, self.inner.publisher_max_kbps(ch))
+                    });
                 let Some(d) = ctl.step(&sample) else { continue };
                 abr.fec = (d.fec_delta_pct, d.fec_key_pct);
                 abr.reason = d.reason;
                 if d.bitrate_changed {
                     let up = d.max_bitrate_kbps > abr.bitrate_kbps;
                     abr.bitrate_kbps = d.max_bitrate_kbps;
-                    let mut cfg =
-                        profile.publisher_config(ch, if up { "abr-up" } else { "abr-down" });
+                    let mut cfg = self
+                        .inner
+                        .publisher_config(profile, ch, if up { "abr-up" } else { "abr-down" });
                     cfg["maxBitrateKbps"] = serde_json::json!(d.max_bitrate_kbps);
                     cfg["suggestedFps"] = serde_json::json!(d.suggested_fps);
                     let _ = self.inner.events.try_send(Event::RequestedConfig(cfg));
