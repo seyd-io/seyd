@@ -333,6 +333,9 @@ actions still pending.
 
 The signal server is deployed: `https://seyd-signal-flj7s44j4a-ew.a.run.app`
 (project `seydio`, `europe-west1`, dev-mode auth), serving the demo page at `/`.
+Until a domain is owned, `https://seydio.web.app` is the shareable address: a
+redirect-only Firebase Hosting site (`deploy/firebase-redirect/`) that 302s
+every path to that URL; no application code depends on Firebase.
 `./demo-seyd.sh` starts the camera robot against it; verified with
 `tools/seyd-smoke.py` on the real Hikvision camera (25 fps 1280×720, PTZ moves
 the camera). **Finding:** from a public HTTPS origin Chrome blocks the `host`

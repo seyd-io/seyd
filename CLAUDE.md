@@ -167,6 +167,7 @@ seyd/
 ├── web/docs       # developer docs (/docs/): Starlight; references generated from the code (PLAN.md §2.8)
 ├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
+│   └── firebase-redirect/     # seydio.web.app: a redirect-only Firebase Hosting site pointing at the Cloud Run URL
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
 ├── examples/tello-robot/      # the Tello drone demo: tello.py (protocol), h264rtp.py (Annex B → RTP), bridge.py, fake_tello.py
 ├── sim/                       # robot simulation — NOT part of Seyd
@@ -259,6 +260,18 @@ Keyframes are never dropped.
 `GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`). It is a plain container on
 Postgres/Redis-shaped seams with the GCP dependency isolated to the deploy
 script; `cloud/docker-compose.yml` is the portability proof.
+
+**The address to give people is `https://seydio.web.app`** (since 2026-10-02):
+a Firebase Hosting site in project `seydio` that does nothing but 302-redirect
+every path and query string to the Cloud Run URL above
+(`seydio.web.app/pilot/?robot=seyd-demo` works). It is a stopgap until
+`seyd.io` or `seydio.com` is owned and mapped to the service, and it is a
+redirect, not a proxy — Firebase Hosting cannot carry the signaling or relay
+WebSockets — so the address bar ends on `run.app`. Config in
+`deploy/firebase-redirect/`; nothing in the application depends on Firebase,
+and nothing may come to. If the Cloud Run URL ever changes, edit
+`firebase.json` there and run `firebase deploy --only hosting` from that
+directory.
 
 **The deployed revision runs with real accounts** (since 2026-09-04, revision
 `seyd-signal-00024`): Postgres on Neon (`eu-central-1`, URL in `.env.local` as
