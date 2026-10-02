@@ -93,6 +93,8 @@ Things worth copying from it:
 
 The PTZ controls are `web/demo/src/ptz.ts`: a drag on the picture is a virtual joystick with a 12 % dead zone, the arrow keys pan and tilt, Shift is fast, the wheel and `+`/`-` zoom, `H` goes home. It sends velocity, not position, on the `ptz` command channel, repeating every 200 ms while held so a lost stop costs the robot one expiry window, and it stops on window blur and on tab hide.
 
+The page enables one control scheme per command channel the robot declares. A robot with a `flight` channel (the Tello drone demo) gets `web/demo/src/flight.ts` instead: the arrows are pitch and roll, `R`/`F` climb and descend, `Q`/`E` turn, `T` takes off and `L` lands, with take-off and land buttons in the header for touch. Same shape as PTZ — four velocities in −100..100 repeated every 100 ms while held, one explicit zero on release — against a robot-side hold that centres the sticks when the repeats stop. A `telemetry` sensor message in the bridge's shape is formatted on the footer instead of dumped as JSON.
+
 ## Reference
 
 The generated API for both packages is the [JavaScript reference](/docs/reference/js/): [`SeydVideoElement`](/docs/reference/js/seyd/web/classes/seydvideoelement/), [`SeydHudElement`](/docs/reference/js/seyd/web/classes/seydhudelement/), [`SeydConnectErrorElement`](/docs/reference/js/seyd/web/classes/seydconnecterrorelement/) and [`classify()`](/docs/reference/js/seyd/web/functions/classify/).

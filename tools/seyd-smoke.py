@@ -84,22 +84,26 @@ async def run(args):
         role = await cdp.eval("document.getElementById('video').session?.role")
         badge = await cdp.eval("(function(){const b=document.getElementById('role'); return b && !b.hidden ? b.textContent : null})()")
         print('  badge', repr(badge))
-        has_ptz = await cdp.eval("document.getElementById('video').session?.hasCommandChannel('ptz')")
-        check(role == 'driver' and has_ptz, f'role={role!r} ptz channel={has_ptz}')
+        has_cmd = await cdp.eval(f"document.getElementById('video').session?.hasCommandChannel('{args.command}')")
+        check(role == 'driver' and has_cmd, f'role={role!r} {args.command} channel={has_cmd}')
         before = len(collected.get('msgs', []))
         az0 = smoke.camera_azimuth(args.camera_ip, os.getenv('CAMERA_USER', 'admin'), os.getenv('CAMERA_PASSWORD', '')) if args.camera_ip else None
-        await cdp.call('Input.dispatchKeyEvent', type='keyDown', key='ArrowRight', code='ArrowRight', windowsVirtualKeyCode=39)
-        await cdp.pump(1.0)
-        await cdp.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowRight', code='ArrowRight', windowsVirtualKeyCode=39)
-        await cdp.pump(1.5)
-        if args.camera_ip:
-            az1 = smoke.camera_azimuth(args.camera_ip, os.getenv('CAMERA_USER', 'admin'), os.getenv('CAMERA_PASSWORD', ''))
-            moved = az0 is not None and az1 is not None and az0 != az1
-            check(moved, f'camera azimuth moved on ArrowRight: {az0} -> {az1}')
-        else:
-            msgs = collected.get('msgs', [])[before:]
-            pans = [json.loads(m).get('pan') for m in msgs if m.startswith('{')]
-            check(any(p and p > 0 for p in pans) and pans and pans[-1] == 0, f'ptz on udp:{args.command_port}: {len(msgs)} msgs, pans={pans[:6]}..{pans[-1:] if pans else []}')
+        # ptz: ArrowRight pans; flight: ArrowUp pitches forward. Both are held
+        # for a second and released, and both schemes send one explicit zero.
+        if not args.no_drive:
+            key, code, vk, field = ('ArrowRight', 'ArrowRight', 39, 'pan') if args.command == 'ptz' else ('ArrowUp', 'ArrowUp', 38, 'pitch')
+            await cdp.call('Input.dispatchKeyEvent', type='keyDown', key=key, code=code, windowsVirtualKeyCode=vk)
+            await cdp.pump(1.0)
+            await cdp.call('Input.dispatchKeyEvent', type='keyUp', key=key, code=code, windowsVirtualKeyCode=vk)
+            await cdp.pump(1.5)
+            if args.camera_ip:
+                az1 = smoke.camera_azimuth(args.camera_ip, os.getenv('CAMERA_USER', 'admin'), os.getenv('CAMERA_PASSWORD', ''))
+                moved = az0 is not None and az1 is not None and az0 != az1
+                check(moved, f'camera azimuth moved on ArrowRight: {az0} -> {az1}')
+            else:
+                msgs = collected.get('msgs', [])[before:]
+                pans = [json.loads(m).get(field) for m in msgs if m.startswith('{')]
+                check(any(p and p > 0 for p in pans) and pans and pans[-1] == 0, f'{args.command} on udp:{args.command_port}: {len(msgs)} msgs, {field}s={pans[:6]}..{pans[-1:] if pans else []}')
         if args.record > 0:
             print(f'  recording lastStats to {args.record_file} for {args.record:.0f}s (Ctrl-C to stop early)')
             t0 = time.time()
@@ -130,8 +134,10 @@ def main():
     ap.add_argument('--page', default='http://localhost:8080/pilot/')
     ap.add_argument('--signal', default='ws://localhost:8080/ws')
     ap.add_argument('--command-port', type=int, default=5004)
+    ap.add_argument('--command', default='ptz', choices=['ptz', 'flight'], help='which command channel the robot declares and the harness drives')
     ap.add_argument('--timeout', type=float, default=15)
     ap.add_argument('--query', default='', help='extra page query, e.g. loss=0.05&burst=3')
+    ap.add_argument('--no-drive', action='store_true', help='send no command at all (a real vehicle is attached and must not move)')
     ap.add_argument('--no-sensor', action='store_true', help='robot has no sensor channel')
     ap.add_argument('--record', type=float, default=0, metavar='SECONDS', help='after the checks, keep the session open and append lastStats once per second to --record-file (field tests)')
     ap.add_argument('--record-file', default='seyd-record.jsonl')

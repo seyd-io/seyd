@@ -1,0 +1,42 @@
+# Seyd demo robot — Ryze Tello drone (DEMO-TELLO.md). Nothing in this file is
+# vendor-specific; the drone driver is examples/tello-robot/bridge.py, which
+# consumes the generic UDP interfaces declared here. Ports are distinct from
+# the camera demo's (5002–5004) so both robots can run on one host.
+[agent]
+robot_id        = "seyd-tello"
+signal_url      = "wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws"
+credential_path = "examples/tello-robot/.robot.key"
+# A drone is the case the latency profile exists for: frame interval is the
+# pilot's reaction time, and the picture is small enough to afford the FEC.
+qos_profile     = "latency"
+max_sessions    = 4
+
+[[channel]]
+kind  = "video"
+name  = "main"
+# The bridge re-frames the drone's Annex B stream as RTP (RFC 6184).
+input = "rtp://127.0.0.1:5010"
+# The drone encodes 960x720 (4:3) at about 28 fps, H.264 Main profile level
+# 4.0 — read from its SPS on the bench (2026-10-02); the bridge logs it on
+# first video. The string travels to the browser's decoder unchanged.
+codec = "avc1.4d4028"
+fps   = 30
+# The drone's encoder tops out at 4 Mbps (its level 5, measured). Without
+# this the `quality` profile asks for 6 Mbps and the rate controller steers a
+# range the encoder cannot follow.
+max_bitrate_kbps = 4000
+
+[[channel]]
+kind   = "sensor"
+name   = "telemetry"
+input  = "udp://127.0.0.1:5012"
+codec  = "json"
+
+[[channel]]
+kind   = "command"
+name   = "flight"
+output = "udp://127.0.0.1:5014"
+codec  = "json"
+
+[publisher_control]
+udp = "127.0.0.1:5013"

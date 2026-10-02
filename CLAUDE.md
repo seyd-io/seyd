@@ -56,6 +56,11 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
+- **DEMO-TELLO.md** — the Tello drone demo: the drone's binary protocol as
+  used, the bridge's safety rules (stick hold, orphan landing, altitude
+  limit), the pilot's flight control scheme, and the bench checklist for the
+  first session with the real drone. Verified against a simulated drone;
+  not yet flown.
 
 ## Before starting a bigger task — check git first
 
@@ -163,11 +168,13 @@ seyd/
 ├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
+├── examples/tello-robot/      # the Tello drone demo: tello.py (protocol), h264rtp.py (Annex B → RTP), bridge.py, fake_tello.py
 ├── sim/                       # robot simulation — NOT part of Seyd
 │   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings; intra refresh by default)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
 ├── demo-start.sh              # find the camera, then start the camera demo robot and wait for it online
 ├── demo-seyd.sh               # start the camera demo robot
+├── demo-tello.sh              # start the Tello drone demo robot (--fake: simulated drone on localhost)
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
     └── docs/                  # the docs generators: gen-c-reference.py, gen-python-reference.py, gen-seydd-config.py, gen-qos-profiles.py, check-networking.py
 ```
@@ -271,7 +278,7 @@ script; `cloud/docker-compose.yml` is the portability proof.
 - **A pilot without an account reaches only robots with a public grant**:
   `node dist/bootstrap.js public-grant <robot-id> observe drive` (needs the
   robot enrolled first). `/api/v1/robots` lists only those robots.
-- Enrolled so far: `seyd-demo`, `seyd-sim` and `seyd-py`, all in org "Seyd", all public.
+- Enrolled so far: `seyd-demo`, `seyd-sim`, `seyd-py` and `seyd-tello` (2026-09-22), all in org "Seyd", all public.
 - **The console is deployed at `/console/`** on the same service (since
   2026-09-10), signing in through the deployed Logto (`seyd-logto` on Cloud
   Run, `cloud/logto/`). Invite-only in both senses: Seyd grants no org without
@@ -289,8 +296,9 @@ script; `cloud/docker-compose.yml` is the portability proof.
 |---|---|
 | `./demo-start.sh` | "Find a camera and start the demo" in one go: probes `CAMERA_IP`, falls back to `tools/find-camera.py` discovery, starts `./demo-seyd.sh` with the address that answered, waits until the cloud lists the robot online and prints the pilot URL. `--detach` leaves it running; otherwise Ctrl-C stops it. Log in `$DEMO_LOG` (default `$TMPDIR/seyd-demo.log`). |
 | `./demo-seyd.sh` | The camera demo robot: preflights the Hikvision over ISAPI, starts `seydd` + `examples/demo-robot/bridge.py` against the deployed cloud. Overrides: `CAMERA_IP` (CLI beats `.env.local`), `SIGNAL_URL`, `DARC_QOS_PROFILE`, `ROBOT_ID`. Needs `.env.local` (`CAMERA_USER`/`CAMERA_PASSWORD`). |
+| `./demo-tello.sh` | The Tello drone robot (DEMO-TELLO.md): checks the laptop is on the drone's Wi-Fi with the default route elsewhere, then `seydd` + `examples/tello-robot/bridge.py`. `--fake` runs `fake_tello.py` instead of a drone. `BRIDGE_ARGS=--no-takeoff` for bench work. |
 | `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
-| `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs). |
+| `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs), `--command flight` for a robot with a `flight` channel instead of `ptz`. |
 | `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, Colima + Docker CLI, tools/.venv, first build). |
 | `cd cloud && docker compose up -d` | The whole cloud locally: Postgres, Logto, api. Needs `colima start` first on macOS; setup in `cloud/README.md`. |
 

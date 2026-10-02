@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Seyd demo — live PTZ camera</title>
+  <title>Seyd pilot</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%2312a37a%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27white%27/%3E%3C/svg%3E">
   <style>
     /* Page layout only; tokens, type and components come from @seyd/theme (docs/design.md).
@@ -37,13 +37,15 @@
       <span id="role" class="tag" hidden></span>
       <span class="spacer"></span>
       <label>QoS <select id="qos" class="small"><option value="latency">latency</option><option value="balanced">balanced</option><option value="quality">quality</option></select></label>
+      <button id="takeoff-btn" class="small" type="button" title="Take off (keyboard: T)" hidden>take off</button>
+      <button id="land-btn" class="small danger" type="button" title="Land now (keyboard: L)" hidden>land</button>
       <button id="hud-btn" class="small" type="button" title="Show or hide the stats HUD (keyboard: S)" aria-pressed="false">stats</button>
     </header>
     <main>
       <seyd-video id="video"></seyd-video>
       <seyd-hud id="hud"></seyd-hud>
       <seyd-connect-error id="err"></seyd-connect-error>
-      <div class="overlay notice">You are controlling a physical camera. Response latency reflects your connection.</div>
+      <div class="overlay notice" id="notice">You are controlling a physical camera. Response latency reflects your connection.</div>
       <div class="overlay lan-hint" id="lan-hint" hidden></div>
     </main>
     <footer><span id="hint">SPACE — snapshot · S — stats</span><span id="sensor"></span><span id="theme-switch"></span></footer>

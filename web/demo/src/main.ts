@@ -3,6 +3,7 @@ import { mountThemeSwitch } from '@seyd/theme';
 import type { SeydSession } from '@seyd/core';
 import type { SeydConnectErrorElement, SeydHudElement, SeydVideoElement } from '@seyd/web';
 import { PtzController } from './ptz.js';
+import { FlightController, formatTelemetry } from './flight.js';
 
 const params = new URLSearchParams(location.search);
 const ROBOT_ID = params.get('robot') || 'seyd-demo';
@@ -24,11 +25,15 @@ const hintEl = document.getElementById('hint')!;
 const sensorEl = document.getElementById('sensor')!;
 const roleEl = document.getElementById('role')!;
 const lanHintEl = document.getElementById('lan-hint')!;
+const noticeEl = document.getElementById('notice')!;
+const takeoffBtn = document.getElementById('takeoff-btn') as HTMLButtonElement;
+const landBtn = document.getElementById('land-btn') as HTMLButtonElement;
 document.getElementById('robot')!.textContent = ROBOT_ID;
 qosSelect.value = qos;
 mountThemeSwitch(document.getElementById('theme-switch')!);
 
 let ptz: PtzController | null = null;
+let flight: FlightController | null = null;
 
 video.addEventListener('seyd-session', (e) => {
   const session = (e as CustomEvent<SeydSession>).detail;
@@ -36,9 +41,20 @@ video.addEventListener('seyd-session', (e) => {
   err.session = session;
   ptz?.dispose();
   ptz = new PtzController(session, video.canvas, video);
+  flight?.dispose();
+  flight = new FlightController(session, video.canvas, video);
   session.on('welcome', ({ role, pathLabel }) => {
     const hasPtz = session.hasCommandChannel('ptz');
+    // A robot declares what it can be told: a `ptz` channel gets the camera
+    // controls, a `flight` channel the drone's. Both are velocity schemes with
+    // a hold on the robot, so an abandoned gesture stops on its own.
+    const hasFlight = session.hasCommandChannel('flight');
     ptz?.setEnabled(hasPtz && role === 'driver');
+    flight?.setEnabled(hasFlight && role === 'driver');
+    takeoffBtn.hidden = landBtn.hidden = !(hasFlight && role === 'driver');
+    noticeEl.textContent = hasFlight
+      ? 'You are flying a physical drone. L or the land button lands it; it lands itself when you leave.'
+      : 'You are controlling a physical camera. Response latency reflects your connection.';
     roleEl.textContent = role === 'driver' ? 'driver' : 'observer — someone else is driving; controls disabled';
     // Driver in the accent (you hold the direct path); observer in amber (someone else does).
     roleEl.className = role === 'driver' ? 'tag on' : 'tag warn';
@@ -50,11 +66,18 @@ video.addEventListener('seyd-session', (e) => {
     const viaHairpin = pathLabel === 'srflx' || pathLabel === 'portmap';
     lanHintEl.textContent = 'Chrome blocked the direct LAN connection (local network access); if you are on the robot\'s network, allow it in the site permissions for lowest latency.';
     lanHintEl.hidden = !(hadHost && viaHairpin && location.protocol === 'https:');
-    hintEl.textContent = (hasPtz ? 'DRAG or ARROWS — look · SHIFT — fast · WHEEL or +/− — zoom · H — home · ' : '') + 'SPACE — snapshot · S — stats';
+    hintEl.textContent = (hasPtz ? 'DRAG or ARROWS — look · SHIFT — fast · WHEEL or +/− — zoom · H — home · ' : '')
+      + (hasFlight ? 'T — take off · L — land · ARROWS or DRAG — move · R/F — up/down · Q/E — turn · SHIFT — fast · ' : '')
+      + 'SPACE — snapshot · S — stats';
   });
   session.on('stats', (s) => { const w = window as unknown as { __seydTrace?: string[] }; if (w.__seydTrace && s.trace) w.__seydTrace.push(...s.trace); });
-  session.on('sensor', ({ channel, data }) => { sensorEl.textContent = `${channel.name}: ${typeof data === 'string' ? data : JSON.stringify(data)}`; });
-  session.on('state', ({ state }) => { if (state !== 'connected') { ptz?.setEnabled(false); roleEl.hidden = true; lanHintEl.hidden = true; } });
+  session.on('sensor', ({ channel, data }) => {
+    const flightLine = formatTelemetry(data);
+    sensorEl.textContent = flightLine ? `${channel.name}: ${flightLine}` : `${channel.name}: ${typeof data === 'string' ? data : JSON.stringify(data)}`;
+  });
+  session.on('state', ({ state }) => {
+    if (state !== 'connected') { ptz?.setEnabled(false); flight?.setEnabled(false); roleEl.hidden = true; lanHintEl.hidden = true; takeoffBtn.hidden = landBtn.hidden = true; }
+  });
 });
 
 // The HUD toggles with `S`, which a phone or a touch panel does not have, so
@@ -64,6 +87,8 @@ const syncHudBtn = () => hudBtn.setAttribute('aria-pressed', String(hud.visible)
 hudBtn.addEventListener('click', () => { hud.toggle(); syncHudBtn(); });
 document.addEventListener('keydown', (e) => { if (e.code === 'KeyS') queueMicrotask(syncHudBtn); });
 syncHudBtn();
+takeoffBtn.addEventListener('click', () => flight?.takeoff());
+landBtn.addEventListener('click', () => flight?.land());
 
 qosSelect.addEventListener('change', () => {
   qos = qosSelect.value;
