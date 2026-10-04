@@ -8,9 +8,10 @@ enough to fly indoors. It is the second demo robot after the PTZ camera
 (DEMO.md) and the first with a vehicle in the loop, so it is also where the
 safety rules a customer's own bridge needs were written down.
 
-Status (2026-10-02): the real drone is connected and streams through the
-full chain into the browser (propellers idle, take-off refused). Not yet
-flown. "Bench results" below has what was measured.
+Status (2026-10-03): flown, in the room and off the LAN (drone behind 4G,
+pilot behind 5G, direct path). Forward-on-loss works; at the drone's range
+limit the keyframes stop surviving its radio, see "Range flight". "Bench
+results" has what was measured.
 
 ---
 
@@ -250,10 +251,79 @@ the drone's Wi-Fi interface. Three things came out of it:
   Idle on the desk with video on, the battery fell from 22 % to 10 % in
   about ten minutes.
 
-Still open: true glass-to-glass latency, telemetry units (needs a hover and a tape measure), heading from
-the quaternion (needs a turn), the stick path into the real drone (the smoke
-test deliberately kept stick input away from it), and how the signal
-WebSocket behaves over a long session with the drone's Wi-Fi joined.
+### Second flight (2026-10-02): forward-on-loss confirmed
+
+Same room, `latency` profile, about 100 s in the air. 36 pictures torn on
+the drone link, none held back, 40 frames shown with a missing reference:
+the keyframe repaired each tear about one frame later and the hitching was
+gone. The flight ended on a flat battery (the drone lands itself and then
+powers off; take-off had been refused at 8 %).
+
+### Range flight (2026-10-03): drone behind a 4G router, pilot behind 5G
+
+The first flight off the LAN. The drone laptop sat behind a 4G router, the
+pilot behind a 5G one; the session went **direct** through the 4G router's
+PCP port mapping, round trip 61–74 ms, on `balanced`. The drone flew from
+next to the laptop out to about 100 m and back. Up close it was fine; at
+distance the picture smeared and did not recover.
+
+What the drone link did, per 30 s (bridge counters):
+
+| | Close (11:35) | 11:37 | 11:39:37 | Far (11:40:07) | Back (11:41) |
+|---|---|---|---|---|---|
+| Pictures torn | 7 | 90 | 61 | 61 | 30 |
+| Keyframes requested | 10 | 40 | 51 | 80 | 16 |
+| Keyframes received | 10 | 26 | 12 | **1** | 13 |
+| Bytes from the drone | 1.2 Mbps | 1.8 Mbps | 0.6 Mbps | 0.3 Mbps | 1.5 Mbps |
+
+The reading:
+
+- **At range the drone's own radio is the bottleneck.** Ryze quotes 100 m
+  as the Tello's limit. Its throughput fell to a tenth and two pictures per
+  second arrived torn.
+- **Keyframes were requested; they did not survive.** A keyframe is about
+  14 datagrams against 9 for a delta, so at that loss rate the small frames
+  still get through while the keyframe is torn almost every time. The bridge
+  was already asking twice a second (80 requests, 1 answer in the worst
+  window). That is why the smear never repaired, and why a pilot-side
+  "request keyframe" key — five lines, `SeydSession.requestKeyframe()`
+  exists — would not have helped here: it sends the request the bridge was
+  already sending. Decided not to add it for this reason; it is not wrong,
+  just not the lever.
+- **The pilot leg was also lossy**, a few percent on 5G↔4G: the rate
+  controller alternated `residual`/`recover` between 0.9 and 3 Mbps the
+  whole flight. That leg is Seyd's and its FEC and adaptation were doing
+  their job; `balanced` also pushed the drone to 2–3 Mbps whenever the pilot
+  leg allowed it, which is the worst setting for a weak drone link.
+
+What would help at range, in order:
+
+1. **Adapt the encoder to the drone link, in the bridge.** The bridge sees
+   torn pictures per second directly; Seyd cannot, because loss is measured
+   on the pilot leg only (ADR 0006). Dropping to encoder level 1 when tears
+   climb makes every frame — above all every keyframe — a third of the size,
+   so more survive. Robot-side code; not built yet.
+2. **Fly on `latency`**, which keeps the drone at 1.5 Mbps regardless of
+   what the pilot leg could carry.
+3. **Accept the hardware.** Beyond the Tello's range nothing in software
+   makes the radio reach further.
+
+Two observations on the safety rules, not changed:
+
+- At 11:42:55, far out, the 5G leg stalled for 5 s, the presence heartbeats
+  stopped and the orphan rule landed the drone where it was. Whether a link
+  stall at range should land at once or hover for 15–20 s first is the
+  owner's call; the drone hovers on its own with centred sticks either way.
+- At 11:30:16 the same rule fired 3 s after a reconnect, because the
+  last-command timestamp carried over from the previous session. The drone
+  was already landing, so nothing happened; the timestamp should reset when
+  a session starts.
+
+Still open: true glass-to-glass latency, telemetry units (needs a hover and
+a tape measure), heading from the quaternion (needs a turn), the stick path
+into the real drone (the smoke test deliberately kept stick input away from
+it), and how the signal WebSocket behaves over a long session with the
+drone's Wi-Fi joined.
 
 Then fly: hover in place with T and L only, then arrows at default speed,
 before anyone else gets the link.

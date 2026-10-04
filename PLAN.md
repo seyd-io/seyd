@@ -378,6 +378,65 @@ Ordered: the site and its theme; the generators (C, Python, seydd config, QoS, n
 22. Relay tier, fast: a QUIC-forwarding relay with a public UDP address (the WebSocket relay of ADR 0010 is the one that *exists*; this is the one that is fast), live upgrade from relay to direct (the prototype retried P2P every 30 s while relaying; the new engine needs the agent to accept a second `hello` for a session it already serves), FEC off over the relay, metering into the console; MPQUIC bonding evaluation; session recording.
 23. **Signaling continuity — sessions must survive the signaling socket, and deploys must be invisible** (found 2026-09-09, deferred by the owner: "fine for now"). Two facts drive this. (a) Cloud Run treats every WebSocket as one HTTP request bounded by the service's request timeout (300 s until 2026-09-09, 3600 s — the platform maximum — since, set for relayed sessions). At the deadline the socket is cut regardless of activity; every client reconnects within ~1 s. But the hub cannot tell a pilot whose socket timed out from one who closed the tab: it ends the session and sends `session-revoked`, and the robot closes a perfectly healthy QUIC session on that. So a direct session lives at most as long as the pilot's signaling socket (now 60 min), then re-races after the 15 s retry; a relayed session is cut at its own 60 min as well and does not reconnect. (b) On a redeploy, sockets stay on the *draining* old revision until they close — up to that same hour — while presence is per-instance memory. Pilots in a session are unaffected until their socket dies; new pilots get `robot-offline` until the robot's old socket dies or the robot is restarted (observed 2026-09-09; CLAUDE.md now says restart the robot after every deploy). `deploy.sh` makes two revisions per run, so two drains. The work, cheapest first: **(i)** a grace period in the hub before a dropped pilot or robot socket ends its sessions, and `auth` carrying the session ids the client believes are live so a reconnect *resumes* them — the robot is never told to revoke a session whose pilot merely reconnected; the relay socket gets the same reconnect-and-resume so a relayed session outlives the hour; **(ii)** the server closes every signaling socket itself every few minutes with a "reconnect" close code, so after a deploy robots and pilots converge on the newest revision within that interval instead of within an hour — invisible once (i) exists; **(iii)** the Redis presence + sessions of §2.5 (the part of item 8 still open), which makes every revision see the same robots and sessions and is the proper fix for both (a) and (b). Verify with a session recorded through a forced socket cut (`SEYD_WS_MAX_AGE_MS` or a deploy) showing no `session-revoked` and no gap in frames.
 
+### Milestone D — what the Tello flights taught (2026-10-02/03, DEMO-TELLO.md)
+
+Five flights across three network setups — the same room, the drone behind a
+4G router with the pilot behind 5G, and a session from the agent's own
+laptop — with the drone flown out to its 100 m range limit. Seyd's own share
+held in every one: 30 ms agent-to-display, the direct path across the two
+mobile routers through PCP port mapping at 61–74 ms round trip, one-frame
+repairs after loss. Everything that went wrong happened at the edges Seyd
+does not cover yet. Ordered by how much each would have changed those
+flights:
+
+24. **Publisher-link health into the agent.** Loss is measured on the pilot
+    leg only (ADR 0006), so when the drone's own radio tore a picture a
+    second and, at range, delivered 1 keyframe in 80 requested, the HUD said
+    "no loss" and the rate controller kept asking for 3 Mbps. A publisher
+    reports what it sees of its *own* source link — torn pictures per
+    second, keyframes requested versus delivered, source throughput — over a
+    publisher-to-agent message (publisher control is one-way today); the
+    controller lowers its request when the source is the bottleneck, and the
+    HUD shows "source link" and "Seyd link" as two things, because a pilot
+    reacts differently to each. Applies to every camera behind its own
+    wireless hop, which is most field robots. The bridge-local version
+    (lower the drone's encoder level when tears climb, so keyframes shrink
+    and survive) is the stopgap in `examples/tello-robot`.
+25. **Driver presence in the protocol, not in every demo page.** A
+    hands-off hover landed after 5 s, a reconnect raised a false "pilot
+    gone" from a stale timestamp, and a 5 s 5G stall at 100 m landed the
+    drone where it was — three bugs from one presence rule each bridge
+    invents for itself. The agent already knows whether the driver's
+    transport is alive, when they last sent anything, and (via the SDK)
+    whether their tab is visible. Standard `driver-idle` / `driver-gone`
+    events to the robot with a configurable timeout, in `seydd.toml` and
+    the C ABI, make the safety behaviour one tested thing.
+26. **Session continuity across a reload.** A page reload is a new
+    session; the robot sees "last driver left" and the drone lands. A grace
+    period in which the same pilot resumes their session, keeping the driver
+    role and the robot's state, removes that class of surprise. Session ids
+    exist; this is policy on top of them, and it is the pilot-side twin of
+    item 23's signaling-socket resume.
+27. **A notice channel from robot to pilot.** "Take-off refused, battery
+    13 %" and "landing, no pilot" were smuggled into telemetry JSON and
+    special-cased on the page. One standard operational-notice message,
+    rendered by the HUD, serves every robot.
+28. **The robot's profile is the session's default.** The range flight ran
+    on `balanced` because the page defaults to it, while the robot's config
+    said `latency` and a weak drone link wanted it. The robot already
+    announces its ceiling; the session starts there and the pilot adjusts
+    within it.
+29. **Keyframe survivability on lossy links.** At range the drone delivered
+    deltas but not keyframes: 14 datagrams against 9. The drone's link, but
+    the same arithmetic applies to Seyd's own path on a bad connection. The
+    key-frame FEC rate exists; raising it when keyframes are failing, or
+    spreading a keyframe over a longer pacing window, is to be measured with
+    `tools/latency-ab.py` and the link shaper.
+30. **Flight analysis as a product surface.** Every conclusion above came
+    from parsing a text log by hand. Per-session timelines in the console —
+    item 24's source health beside the pilot-leg statistics the HUD already
+    has — are the session recording of item 22 made useful to a customer.
+
 ---
 
 ## Verification

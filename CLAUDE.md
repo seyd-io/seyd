@@ -59,8 +59,8 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
 - **DEMO-TELLO.md** — the Tello drone demo: the drone's binary protocol as
   used, the bridge's safety rules (stick hold, orphan landing, altitude
   limit), the pilot's flight control scheme, and the bench checklist for the
-  first session with the real drone. Verified against a simulated drone;
-  not yet flown.
+  flight logs. Flown in the room and off the LAN; at the drone's range limit
+  its own radio is the bottleneck (keyframes stop surviving it).
 
 ## Before starting a bigger task — check git first
 
