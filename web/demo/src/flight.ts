@@ -32,6 +32,7 @@ export class FlightController {
   private presence: ReturnType<typeof setInterval> | null = null;
   private sent: Sticks = { roll: 0, pitch: 0, throttle: 0, yaw: 0 };
   private pointerVec: { roll: number; pitch: number } | null = null;
+  private padVec: Sticks | null = null;
   private held = new Set<string>();
   private cleanups: (() => void)[] = [];
 
@@ -98,12 +99,21 @@ export class FlightController {
     return { roll, pitch, throttle, yaw };
   }
 
-  private refresh(): void {
-    const k = this.keyboardVector();
-    if (this.pointerVec) this.set({ ...k, roll: this.pointerVec.roll, pitch: this.pointerVec.pitch }); else this.set(k);
+  /** Sticks from a gamepad (main.ts maps the pad); a non-zero pad axis overrides keyboard and drag on that axis. */
+  setPad(v: Sticks | null): void {
+    const was = this.padVec;
+    this.padVec = v && (v.roll || v.pitch || v.throttle || v.yaw) ? v : null;
+    if (this.padVec || was) this.refresh();
   }
 
-  private stop(): void { this.held.clear(); this.pointerVec = null; this.set({ roll: 0, pitch: 0, throttle: 0, yaw: 0 }); }
+  private refresh(): void {
+    const k = this.keyboardVector();
+    const base: Sticks = this.pointerVec ? { ...k, roll: this.pointerVec.roll, pitch: this.pointerVec.pitch } : k;
+    const p = this.padVec;
+    this.set(p ? { roll: p.roll || base.roll, pitch: p.pitch || base.pitch, throttle: p.throttle || base.throttle, yaw: p.yaw || base.yaw } : base);
+  }
+
+  private stop(): void { this.held.clear(); this.pointerVec = null; this.padVec = null; this.set({ roll: 0, pitch: 0, throttle: 0, yaw: 0 }); }
 
   private set(v: Sticks): void {
     const clamp = (x: number) => Math.max(-100, Math.min(100, Math.round(x || 0)));

@@ -18,6 +18,7 @@ export class PtzController {
   private timer: ReturnType<typeof setInterval> | null = null;
   private sent: Vec = { pan: 0, tilt: 0, zoom: 0 };
   private pointerVec: { pan: number; tilt: number } | null = null;
+  private padVec: Vec | null = null;
   private wheelZoom = 0;
   private wheelTimer: ReturnType<typeof setTimeout> | null = null;
   private held = new Set<string>();
@@ -47,7 +48,7 @@ export class PtzController {
       if (e.repeat) { if (KEYS.has(e.code)) e.preventDefault(); return; }
       if (e.key === 'Shift') { this.held.add('Shift'); this.refresh(); return; }
       if (KEYS.has(e.code)) { e.preventDefault(); if (!this.enabled) return; this.held.add(e.code); if (e.shiftKey) this.held.add('Shift'); this.refresh(); return; }
-      if (e.code === 'KeyH' && this.enabled) { e.preventDefault(); this.session.send('ptz', { home: true, ts: Date.now() }); }
+      if (e.code === 'KeyH' && this.enabled) { e.preventDefault(); this.home(); }
     });
     on(document, 'keyup', (e: KeyboardEvent) => {
       if (e.key === 'Shift') { this.held.delete('Shift'); this.refresh(); return; }
@@ -60,6 +61,15 @@ export class PtzController {
   setEnabled(v: boolean): void { this.enabled = v; this.surface.style.cursor = v ? 'crosshair' : ''; if (!v) this.stop(); }
 
   dispose(): void { this.stop(); this.cleanups.forEach((c) => c()); this.cleanups = []; }
+
+  home(): void { if (this.enabled) this.session.send('ptz', { home: true, ts: Date.now() }); }
+
+  /** A velocity from a gamepad (main.ts maps the pad); a non-zero pad axis overrides keyboard and drag on that axis. */
+  setPad(v: Vec | null): void {
+    const was = this.padVec;
+    this.padVec = v && (v.pan || v.tilt || v.zoom) ? v : null;
+    if (this.padVec || was) this.refresh();
+  }
 
   private pointerVector(e: PointerEvent): { pan: number; tilt: number } {
     const r = this.canvas.getBoundingClientRect();
@@ -84,10 +94,12 @@ export class PtzController {
   private refresh(): void {
     const k = this.keyboardVector();
     const zoom = this.wheelZoom || k.zoom;
-    if (this.pointerVec) this.set(this.pointerVec.pan, this.pointerVec.tilt, zoom); else this.set(k.pan, k.tilt, zoom);
+    const base: Vec = this.pointerVec ? { pan: this.pointerVec.pan, tilt: this.pointerVec.tilt, zoom } : { pan: k.pan, tilt: k.tilt, zoom };
+    const p = this.padVec;
+    this.set(p ? p.pan || base.pan : base.pan, p ? p.tilt || base.tilt : base.tilt, p ? p.zoom || base.zoom : base.zoom);
   }
 
-  private stop(): void { this.held.clear(); this.pointerVec = null; this.wheelZoom = 0; this.set(0, 0, 0); }
+  private stop(): void { this.held.clear(); this.pointerVec = null; this.padVec = null; this.wheelZoom = 0; this.set(0, 0, 0); }
 
   private set(pan: number, tilt: number, zoom: number): void {
     const clamp = (v: number) => Math.max(-100, Math.min(100, Math.round(v || 0)));

@@ -4,6 +4,7 @@ import type { SeydSession } from '@seyd/core';
 import type { SeydConnectErrorElement, SeydHudElement, SeydVideoElement } from '@seyd/web';
 import { PtzController } from './ptz.js';
 import { FlightController, formatTelemetry } from './flight.js';
+import { GamepadReader, describe } from './gamepad.js';
 
 const params = new URLSearchParams(location.search);
 const ROBOT_ID = params.get('robot') || 'seyd-demo';
@@ -28,6 +29,7 @@ const lanHintEl = document.getElementById('lan-hint')!;
 const noticeEl = document.getElementById('notice')!;
 const takeoffBtn = document.getElementById('takeoff-btn') as HTMLButtonElement;
 const landBtn = document.getElementById('land-btn') as HTMLButtonElement;
+const padEl = document.getElementById('pad')!;
 document.getElementById('robot')!.textContent = ROBOT_ID;
 qosSelect.value = qos;
 mountThemeSwitch(document.getElementById('theme-switch')!);
@@ -68,7 +70,7 @@ video.addEventListener('seyd-session', (e) => {
     lanHintEl.hidden = !(hadHost && viaHairpin && location.protocol === 'https:');
     hintEl.textContent = (hasPtz ? 'DRAG or ARROWS — look · SHIFT — fast · WHEEL or +/− — zoom · H — home · ' : '')
       + (hasFlight ? 'T — take off · L — land · ARROWS or DRAG — move · R/F — up/down · Q/E — turn · SHIFT — fast · ' : '')
-      + 'SPACE — snapshot · S — stats';
+      + 'SPACE — snapshot · S — stats · GAMEPAD — press any button to enable';
   });
   session.on('stats', (s) => { const w = window as unknown as { __seydTrace?: string[] }; if (w.__seydTrace && s.trace) w.__seydTrace.push(...s.trace); });
   session.on('sensor', ({ channel, data }) => {
@@ -89,6 +91,26 @@ document.addEventListener('keydown', (e) => { if (e.code === 'KeyS') queueMicrot
 syncHudBtn();
 takeoffBtn.addEventListener('click', () => flight?.takeoff());
 landBtn.addEventListener('click', () => flight?.land());
+
+// A USB gamepad drives whichever scheme is live. Camera: d-pad or left stick
+// looks, shoulders or right stick zoom, Start goes home. Drone: d-pad or
+// left stick is pitch/roll, shoulders turn, X/Y or right stick climb, B or
+// the trigger descends, A is fast, Start takes off, Select lands. The pad
+// speaks velocities like the keyboard, so the robot-side holds apply as is.
+const PAD_SPEED = 35, PAD_FAST = 70, PTZ_SPEED = 55, PTZ_FAST = 100;
+const padDebug = params.get('pad') === 'debug';
+new GamepadReader((p, gp) => {
+  if (padDebug) padEl.textContent = `🎮 ${describe(gp)}`;
+  const s = p.fast ? PAD_FAST : PAD_SPEED;
+  const yaw = p.look.x * s || (p.turnRight ? s : 0) - (p.turnLeft ? s : 0);
+  const throttle = p.look.y * s || (p.up ? s : 0) - (p.down ? s : 0);
+  flight?.setPad({ roll: p.move.x * s, pitch: p.move.y * s, throttle, yaw });
+  if (p.start) flight?.takeoff();
+  if (p.select) flight?.land();
+  const z = p.fast ? PTZ_FAST : PTZ_SPEED;
+  ptz?.setPad({ pan: p.move.x * z, tilt: p.move.y * z, zoom: p.look.y * z || (p.turnRight || p.up ? z : 0) - (p.turnLeft || p.down ? z : 0) });
+  if (p.start) ptz?.home();
+}, (id) => { padEl.textContent = id ? `🎮 ${id.replace(/\s*\(.*$/, '')}` : ''; });
 
 qosSelect.addEventListener('change', () => {
   qos = qosSelect.value;

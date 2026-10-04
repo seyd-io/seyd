@@ -175,7 +175,10 @@ The pilot (`/pilot/`) enables a control scheme per declared command channel:
 descend, Q/E turn, Shift is fast, T takes off, L lands; a drag on the picture
 is a pitch/roll joystick for touch, and the header gains *take off* and
 *land* buttons. W/A/S/D are unused on purpose: S is the HUD everywhere on the
-page. The footer line reads e.g.
+page. A USB gamepad works too (verified with an iBuffalo Classic USB, which
+Chrome exposes in the standard layout): d-pad is pitch/roll, L/R turn, X
+climbs, B descends, A is fast, Start takes off, Select lands — press any
+button first, Chrome hides a pad until then. The footer line reads e.g.
 `telemetry: BAT 87% · ALT 1.2 m · SPD 0.3 m/s · HDG 90° · T+0:42 · WIFI 88 · 30 fps 1500 kbps`.
 
 ---
