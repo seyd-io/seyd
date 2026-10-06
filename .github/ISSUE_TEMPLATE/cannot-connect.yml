@@ -1,0 +1,28 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
+name: Pilot cannot connect
+description: The direct race fails or the session is relayed, and the networking docs did not resolve it
+labels: [networking]
+body:
+  - type: markdown
+    attributes:
+      value: Read the guidance box first; its "How to fix this" link names the exact change for your failure class. Open this when that did not work.
+  - type: input
+    id: class
+    attributes:
+      label: Failure class and reason
+      description: The guidance box's heading and the `reason` in its Diagnostics (for example `robot-cgnat`, `all-candidates-timeout`).
+    validations: { required: true }
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste the Diagnostics disclosure (candidates and NAT report) and the robot's `candidate …` and `nat_report` log lines.
+      render: json
+    validations: { required: true }
+  - type: input
+    id: network
+    attributes:
+      label: The robot's network
+      description: Router model, SIM or ISP, whether UPnP/NAT-PMP is on, whether UDP 4433 is forwarded, IPv6.
+    validations: { required: true }

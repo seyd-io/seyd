@@ -1,0 +1,7 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/seyd-io/seyd/security/advisories/new
+    about: Report privately; see SECURITY.md.

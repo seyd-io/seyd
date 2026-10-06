@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Fail when a tracked source file lacks the license header (docs/open-source.md).
 
 The public trees must carry the Apache-2.0 header and the private trees the
@@ -16,6 +18,8 @@ spec.loader.exec_module(ah)
 
 
 def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--root":
+        ah.ROOT = Path(sys.argv[2]).resolve()
     missing = []
     for private in (False, True):
         for path in ah.tracked_files():

@@ -16,13 +16,18 @@ of first publication and is not updated annually.
     tools/add-headers.py            # add where missing, print each file touched
     tools/add-headers.py --private  # the private trees, with the proprietary header
     tools/check-headers.py          # CI: fail on a source file without a header
+
+In the private seyd-cloud repository, where this script is reached through
+the `seyd/` submodule and every file is proprietary, pass `--root .`
+together with `--private`; the submodule itself is a gitlink, not a file,
+so it is never touched from there.
 """
 import argparse
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]  # overridden by --root
 
 HOLDER = "Copyright 2026 Anton Gravestam"
 PUBLIC = [HOLDER, "SPDX-License-Identifier: Apache-2.0"]
@@ -69,7 +74,8 @@ def wants_header(path: Path, private: bool) -> bool:
         return False
     if style_of(path) is None:
         return False
-    in_private = rel.startswith(PRIVATE_TREES)
+    # A repository that is private as a whole (seyd-cloud) has no public tree.
+    in_private = rel.startswith(PRIVATE_TREES) or not (ROOT / "LICENSE").exists()
     return in_private if private else not in_private
 
 
@@ -97,7 +103,11 @@ def with_header(path: Path, text: str, lines: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--private", action="store_true", help="header the private trees with the proprietary form")
+    ap.add_argument("--root", type=Path, help="the repository to work in (default: the one this script is in)")
     args = ap.parse_args()
+    if args.root:
+        global ROOT
+        ROOT = args.root.resolve()
     lines = PRIVATE if args.private else PUBLIC
     touched = 0
     for path in tracked_files():

@@ -1,12 +1,24 @@
 ---
 title: "Run the cloud yourself"
-description: The whole Seyd cloud from one docker compose file, what is portable and what is not, and where the deployed cloud runs today.
+description: The whole Seyd cloud from one docker compose file, what is portable and what is not, how self-hosting is offered, and where the hosted cloud runs today.
 ---
 
 The cloud is deliberately small and deliberately portable. Everything in it
-is a plain container on Postgres, and `docker compose up` in `cloud/` brings
-up all of it on a laptop with no cloud-provider credentials. That is also the
-proof that it moves.
+is a plain container on Postgres, and `docker compose up` brings up all of
+it on a laptop with no cloud-provider credentials. That is also the proof
+that it moves.
+
+:::note[What is open and what is licensed]
+Everything that runs on your hardware is open source under Apache-2.0: the
+agent, `seydd`, the SDKs, the web pilot, and the protocol contracts the cloud
+speaks. The cloud itself (the signal server, the relay, the console, the
+prober) is not in the public repository. It is offered hosted, which is the
+default, and **self-hosted under a commercial license** for customers whose
+network or procurement rules require it: defense and industrial buyers, or
+anyone who cannot route an introduction through a third party. A
+self-hosting license comes with the cloud's source and the compose file this
+page describes. Contact Seyd for it.
+:::
 
 ## What the cloud is
 
@@ -128,8 +140,7 @@ disabled), and `seyd-prober`. Postgres is on Neon in `eu-central-1`, one
 database for the API and one for Logto. The deployed console is invite-only in
 both senses; robots must be enrolled, and pilots without an account reach only
 robots with a public grant. Region choices, the residency reasoning and the
-triggers for moving to an EU provider are recorded in the repository's
-`docs/eu-hosting.md`.
+triggers for moving to an EU provider are recorded with the cloud's source.
 
 ## The relay, self-hosted
 

@@ -4,11 +4,13 @@ Seyd separates *who you are* from *what you may do*. The identity provider
 answers only the first question; orgs, roles, robot grants and the audit trail
 are Seyd's and live in Seyd's Postgres (ADR 0007).
 
-That split gives self-hosting customers three shapes to choose from.
+That split gives self-hosting customers (the cloud is offered under a
+commercial self-hosting license; see *Run the cloud yourself*) three shapes
+to choose from.
 
 ## 1. Bundled — use the identity provider we ship
 
-`docker compose up` in `cloud/` starts Logto beside the API. Nothing to
+`docker compose up` starts Logto beside the API. Nothing to
 configure; create an account in the Logto admin console on first run.
 
 Choose this if you have no identity provider of your own, or don't want Seyd

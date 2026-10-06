@@ -41,7 +41,7 @@ against the header.
 ## Gaps to put in the plan
 
 - **No packages are published** (npm, PyPI, crates.io). Everything builds
-  from a checkout of the Seyd repository: `cargo build -p seydd --release`
+  from a checkout of `https://github.com/seyd-io/seyd`: `cargo build -p seydd --release`
   (the daemon), `cargo build -p seyd-ffi --release` (`libseyd` for Python and
   C), `pnpm install && pnpm -r build` (`@seyd/core`, `@seyd/web`). The
   toolchain is Rust (rustup), Node 22 with pnpm, Python 3 with `cffi` for

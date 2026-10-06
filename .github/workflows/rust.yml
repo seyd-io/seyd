@@ -3,8 +3,11 @@
 name: rust
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,15 +28,28 @@ jobs:
         # build.rs regenerates it; a diff means someone edited the header by
         # hand or changed the ABI without committing the regenerated file.
         run: git diff --exit-code sdks/c/include/seyd.h
-  sdks:
+  licenses:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every source file carries its license header
+        run: python3 tools/check-headers.py
+      - name: Dependency licenses within deny.toml
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+  sdks:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: C ABI conformance
         run: make -C sdks/c check
       - name: Python SDK
@@ -47,5 +63,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
       - run: cargo install cross --locked
       - run: cross build --workspace --release --target aarch64-unknown-linux-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seydd-aarch64-unknown-linux-gnu
+          path: target/aarch64-unknown-linux-gnu/release/seydd

@@ -213,7 +213,7 @@ written as `/docs/…` are pages of the developer documentation, served at
 server is `wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws`.
 
 Nothing is published to npm, PyPI or crates.io yet. Every form factor is
-built from a checkout of the Seyd repository (`cargo build -p seydd
+built from a checkout of the Seyd repository, `https://github.com/seyd-io/seyd` (`cargo build -p seydd
 --release`, `cargo build -p seyd-ffi --release`, `pnpm install && pnpm -r
 build`); `references/form-factor.md` says what each one needs. The
 developer therefore has a checkout, and you should read these files in it

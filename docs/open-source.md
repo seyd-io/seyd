@@ -173,7 +173,18 @@ Each item is a decision by the owner, recorded here when made:
 ## The steps, in order
 
 1. **Prepare in the current repository** (still private, one branch
-   `open-source-prep`):
+   `open-source-prep`). **Done 2026-10-06**, in five commits on that branch;
+   what was staged for the later steps: `CLAUDE-cloud.md` (the private
+   repo's `CLAUDE.md`), `business/` (the seed of `seyd-business`),
+   `cloud/github-workflows/ci.yml` (the private repo's `.github/workflows/
+   ci.yml`), `cloud/setup-cloud.sh` (the container runtime and API build the
+   public `tools/setup-machine.sh` no longer does), and `cloud/prober` as its
+   own workspace. The header tools take `--root .` so the private repo runs
+   them through the submodule. The existing `rust.yml` and `js.yml` were
+   extended rather than replaced (a `licenses` job, a macOS leg for the SDKs,
+   Rust and Python for the docs build, the `cloud-api` job moved to the
+   staged private workflow). The tree had never been through
+   `cargo fmt --check`; it is now, in its own commit.
    - Split `CLAUDE.md` into the engineering half (stays) and `CLAUDE-cloud.md`
      (to move). Move the business sections of `PLAN.md`, `SPEC.md` and the
      `DEMO*.md` files into a `business/` directory (the seed of
@@ -205,9 +216,11 @@ Each item is a decision by the owner, recorded here when made:
    the personal account: enter a payment method for it. The Free plan
    covers everything except branch protection on private repositories,
    which needs Team; take Team so `seyd-cloud` has a PR-required `main`.
-   Turn on Dependabot alerts everywhere; branch protection on `main` (PR
-   required, CI required, linear history, no force-push) on `seyd` and
-   `seyd-cloud`. Secret scanning with push protection is free on public
+   Turn on Dependabot alerts everywhere (done 2026-10-06; the three
+   repositories exist, private, with squash/rebase-only merges and `main`
+   as default); branch protection on `main` (PR required, CI required,
+   linear history, no force-push) on `seyd` and `seyd-cloud` once the branch
+   exists; install the DCO app on the organisation. Secret scanning with push protection is free on public
    repositories only and switches on when `seyd` goes public; the two
    private repositories get a `gitleaks protect --staged` pre-commit hook
    instead. Claim the npm
@@ -242,7 +255,9 @@ Each item is a decision by the owner, recorded here when made:
    submodule. Day-to-day: core work in `~/code/darc`, pushed to the public
    repo; a cloud change or a deploy in `~/code/seyd-cloud`, bumping the
    submodule when it needs newer open code.
-6. **Make `seyd-io/seyd` public.** Repository description, topics
+6. **Make `seyd-io/seyd` public.** Enable private vulnerability reporting
+   (`SECURITY.md` and the issue-template contact link point at it) and
+   push protection. Repository description, topics
    (`teleoperation`, `robotics`, `webtransport`, `quic`, `rust`, `webcodecs`),
    the docs URL in the About box, issue templates (bug, integration
    question, network diagnosis with the guidance box's Diagnostics pasted

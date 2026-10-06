@@ -1,0 +1,20 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
+name: Integration question
+description: Which form factor, how to meet the publisher contract, how to wire a sensor or command path
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: The docs' "Choose a form factor" and "The publisher contract" pages, and the integration skill in `skills/seyd/`, answer most of these. Tell us what they left open.
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your robot
+      description: Where the encoded frames are (RTSP/RTP on a socket, or in your process), the encoder and what it can change at run time, the language and platform, how the robot reaches the internet.
+    validations: { required: true }
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+    validations: { required: true }
