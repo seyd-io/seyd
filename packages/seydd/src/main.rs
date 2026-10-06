@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! seydd — the Seyd robot daemon. See docs/protocol/seydd.md.
 //!
 //! The daemon is a *host* of [`seyd_core::Agent`] (ADR 0004): the agent owns

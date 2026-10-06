@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // SeydSession — the public entry point. Signaling on the main thread, the
 // media engine on a worker (or inline). Direct first: a failed race falls back
 // to the cloud relay when the offer carries one (ADR 0010, surfaced as a

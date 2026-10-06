@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Seyd demo robot — Hikvision PTZ camera (DEMO.md). Nothing in this file is
 # vendor-specific; the Hikvision driver is examples/demo-robot/bridge.py,
 # which consumes the generic UDP interfaces declared here.

@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Where the Engine runs. WorkerHost puts transport+FEC+decode+render on a
 // Web Worker with an OffscreenCanvas so host-page jank cannot delay video;
 // InlineHost runs the same Engine on the main thread where OffscreenCanvas or

@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Legacy v1 header (prototype fec.py/fec.js). Decode only, used by the FEC
 // interop test until the vector generator emits v2. Not used on the wire.
 export const V1_VERSION = 1;

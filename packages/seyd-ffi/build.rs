@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Generate `sdks/c/include/seyd.h` from this crate (ADR 0004: the header is
 //! cbindgen output, never hand-written). The file is checked in so that C and
 //! Python consumers do not need a Rust toolchain; it is rewritten only when

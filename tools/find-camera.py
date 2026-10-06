@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Find an IP camera on the local network.
 
 Three independent methods, because each fails differently:

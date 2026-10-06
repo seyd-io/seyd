@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Drives the client against an in-process fake signal server.
 
 use base64::Engine;

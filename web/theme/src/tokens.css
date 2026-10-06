@@ -1,4 +1,8 @@
 /*
+ * Copyright 2026 Anton Gravestam
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
  * Seyd design tokens — the single source of truth for colour, type, spacing
  * and radius on every Seyd web surface (docs/design.md). Presentations copy
  * the two palettes below verbatim; product surfaces import this file.

@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! STUN client (RFC 5389) on a socket we own, plus NAT classification.
 //!
 //! Two servers on different operators are queried so the answers can be

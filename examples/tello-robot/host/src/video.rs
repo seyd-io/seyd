@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! The drone's video datagrams → pictures the agent can take. The same rules
 //! as `../h264rtp.py`, minus the RTP: a native host hands `seyd_core::Agent`
 //! the Annex B access unit directly, with its keyframe flag and capture

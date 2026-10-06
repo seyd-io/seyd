@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Seyd developer documentation (PLAN.md §2.8).
 //
 // Served from the seyd-signal image at /docs/ (cloud/api/deploy.sh copies

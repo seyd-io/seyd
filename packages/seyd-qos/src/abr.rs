@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Closed-loop rate control inside the QoS ceiling (PLAN.md §1.3).
 //!
 //! A pure, deterministic controller stepped once per second with what the

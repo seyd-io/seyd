@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { encodeHeader, parseChunk, seqDelta, tsDeltaUs, encodeMessage, HEADER_LEN, FEC_REED_SOLOMON, FLAG2_END_OF_FRAME, FLAG2_FRAME_META, encodeFrameMeta, parseFrameMeta } from '../src/wire.js';
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Start a simulated Seyd robot on this Mac: the webcam through FFmpeg
 # (sim/video-source.sh), the counter sensor (sim/sensor-source.py) and seydd,
 # against the deployed cloud by default. Used for field-test run C (this Mac

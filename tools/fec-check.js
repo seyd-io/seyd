@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Replay FEC interop vectors from tools/fec-vectors.py through the reference JS decoder.
 //
 //     python3 tools/fec-vectors.py | node tools/fec-check.js

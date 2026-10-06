@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Wire protocol v2 chunk header and frame metadata (ADR 0001).
 //!
 //! ```text

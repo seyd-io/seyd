@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """The Seyd robot agent, as Python.
 
 A thin, Pythonic shape over the C ABI: no protocol logic lives here (ADR 0004

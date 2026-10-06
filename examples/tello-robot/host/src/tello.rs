@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! The Tello's binary protocol — the same subset `../tello.py` speaks, so the
 //! two hosts differ only in what sits between the drone and the agent. See
 //! that file's module comment and DEMO-TELLO.md for the protocol itself.

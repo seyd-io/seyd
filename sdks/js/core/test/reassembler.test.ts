@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from 'vitest';
 import { encodeFrame } from '../src/encode.js';
 import { AssembledFrame, LossEvent, Reassembler } from '../src/reassembler.js';

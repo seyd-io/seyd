@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """A complete Seyd robot in Python, with its own encoder.
 
 This is the shape of a real integration: the robot already has an H.264

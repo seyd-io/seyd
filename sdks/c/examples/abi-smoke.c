@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 /* abi-smoke.c — exercises the Seyd C ABI without touching the network.
  *
  * This is the conformance test every form factor's build should run: it proves

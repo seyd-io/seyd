@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Start the always-on Seyd demo robot (Hikvision PTZ, DEMO.md) on the Seyd
 # stack: seydd (generic daemon) + examples/demo-robot/bridge.py (the
 # camera-specific part). The successor of demo.sh.

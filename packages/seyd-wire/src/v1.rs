@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Legacy v1 header (prototype, `packages/agent/fec.py`). Decode only.
 //!
 //! Kept so the Rust coder can be checked against the Python-generated interop

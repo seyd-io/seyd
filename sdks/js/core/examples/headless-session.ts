@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // headless-session.ts — a pilot with no UI, on @seyd/core alone.
 //
 // Connects to a robot, renders the video into a canvas you own, forwards

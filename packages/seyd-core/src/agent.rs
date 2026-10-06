@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Agent lifecycle: everything between a configuration and a running robot —
 //! sockets, candidate discovery, certificate, QUIC endpoint, the session
 //! [`Engine`], signaling, and the maintenance that keeps all of it alive

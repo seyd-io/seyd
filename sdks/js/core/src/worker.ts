@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Worker entry: hosts the Engine. Loaded by WorkerHost via
 // `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`.
 import { Engine, EngineEvent } from './engine.js';

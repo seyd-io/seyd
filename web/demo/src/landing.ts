@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Landing page (marketing sections are static HTML): live list of robots from the signal server's console presence
 // feed (docs/protocol/signal-v2.md), with a REST fallback. Old links of the
 // form /?robot=<id> are forwarded to the pilot page.

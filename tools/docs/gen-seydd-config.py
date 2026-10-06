@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Render seydd's configuration schema from packages/seydd/src/config.rs (PLAN.md §2.8).
 
 The serde structs are the schema: each `pub struct` becomes a TOML table with

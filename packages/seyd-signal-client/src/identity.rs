@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Robot identity: an Ed25519 key pair stored as a 32-byte seed file.
 //!
 //! Created on first run (mode 0600 on Unix). The public key is what the cloud

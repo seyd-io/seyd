@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Generate everything the docs site takes from the code (PLAN.md §2.8).
 // Runs before `astro build` and `astro dev`. Every output path is gitignored.
 //

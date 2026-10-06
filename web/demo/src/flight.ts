@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Flight controls for a robot that declares a `flight` command channel (the
 // Tello demo, DEMO-TELLO.md). Four stick axes as velocities in -100..100:
 // arrows move (pitch/roll), R/F climb and descend, Q/E turn, Shift is fast;

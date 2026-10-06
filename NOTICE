@@ -1,0 +1,9 @@
+Seyd
+Copyright 2026 Anton Gravestam
+
+This product includes software developed by third parties under their own
+licenses. The Rust dependencies and their licenses are listed by
+`cargo deny list` and constrained by deny.toml; the JavaScript dependencies by
+`pnpm licenses list`. The bundled fonts (Familjen Grotesk, IBM Plex Sans,
+IBM Plex Mono, via @fontsource) are licensed under the SIL Open Font License
+1.1, whose terms ship with those packages.

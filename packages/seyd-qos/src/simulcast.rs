@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Which encoding to relay, given how many bits the link will carry.
 //!
 //! The `AbrController` decides *how many bits*; this decides *which of the

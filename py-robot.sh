@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Start a Seyd robot built on the Python SDK: x264 through a pipe, access units
 # pushed straight into libseyd over the C ABI (ADR 0004). No seydd, no RTP
 # socket — this is the archetype where the robot's own process already holds

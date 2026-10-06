@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! GF(256) arithmetic, field polynomial 0x11d.
 //!
 //! Every constant here is part of the wire contract: the pilot's TypeScript

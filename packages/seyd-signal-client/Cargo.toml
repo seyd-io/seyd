@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "seyd-signal-client"
 description = "Robot-side client for the Seyd signal protocol v2 (docs/protocol/signal-v2.md)"

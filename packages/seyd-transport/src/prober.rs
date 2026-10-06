@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! NAT hole punching: send small UDP packets from the QUIC socket toward the
 //! pilot's address so an address-restricted NAT opens a mapping before the
 //! pilot's QUIC Initial arrives. Repeated because a lone packet can be lost and

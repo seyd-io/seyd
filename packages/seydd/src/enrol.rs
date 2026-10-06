@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! `seydd enrol --token …` — redeem an enrolment token issued by the console.
 //!
 //! This is the robot half of the enrolment loop (PLAN.md §2.5, ADR 0007). The

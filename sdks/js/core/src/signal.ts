@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Pilot-role client for docs/protocol/signal-v2.md.
 import { Offer } from './types.js';
 

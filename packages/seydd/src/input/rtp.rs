@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Bare RTP over UDP — what `sim/video-source.sh` and most GStreamer/FFmpeg
 //! pipelines emit. In-house depacketizer for H.264 (RFC 6184: single NAL,
 //! STAP-A, FU-A) and H.265 (RFC 7798: single NAL, AP, FU); access units

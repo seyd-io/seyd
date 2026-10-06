@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // @seyd/theme — the Seyd design system as code (docs/design.md).
 //
 // Importing this module loads the self-hosted fonts and the shared

@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """The Python twin of sdks/c/examples/abi-smoke.c.
 
 Exercises the wrapper against a real `libseyd` without touching the network:

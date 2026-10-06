@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Provision the demo Hikvision as a simulcast pair (ADR 0008).
 

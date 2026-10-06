@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Presentation pacing: decoded frames are shown on the timeline the wire
 // carries (`capture_ts_us`), not at the instant their bytes happened to arrive.
 //

@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // WebTransport candidate race. Ported from the prototype: highest priority
 // first, `needs_probe` candidates held ~400 ms so the agent's NAT probes can
 // land, a deadline from the p2p hint, and — load-bearing — every losing or

@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Simulates a robot sensor publishing a counter over UDP.
 The DARC Agent subscribes to this port and forwards each packet to the pilot.

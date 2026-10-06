@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Reachability for the Seyd agent.
 //!
 //! The pilot is always the initiator, so Seyd's traversal problem is the

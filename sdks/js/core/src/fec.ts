@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Reed-Solomon erasure coding over GF(256), Cauchy generator matrix.
 // Construction is the wire contract: A[i][j] = 1 / (i XOR (k + j)), n + k <= 256.
 import { inv, mul, maddInto } from './gf.js';

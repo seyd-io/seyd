@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Render the QoS profiles from packages/seyd-qos/src/lib.rs as one table (PLAN.md §2.8).
 
 Reads the `LATENCY`, `BALANCED` and `QUALITY` constants and the `Profile`

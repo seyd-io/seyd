@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Seyd demo robot — Ryze Tello drone (DEMO-TELLO.md). Nothing in this file is
 # vendor-specific; the drone driver is examples/tello-robot/bridge.py, which
 # consumes the generic UDP interfaces declared here. Ports are distinct from

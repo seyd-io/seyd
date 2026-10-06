@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Reed-Solomon erasure coding over GF(256) with a Cauchy generator matrix.
 //!
 //! Rationale, measurements and history live in PLAN.md §1.7 and in the legacy

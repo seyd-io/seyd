@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 REFERENCE IMPLEMENTATION — not shipped. The original prototype coder, kept as
 the generator for tools/fec-vectors.py so seyd-fec (Rust) and @seyd/core (TS)

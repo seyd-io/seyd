@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "tello-host"
 description = "Tello drone as a Seyd robot, as a native host of seyd-core (no daemon in the path)"

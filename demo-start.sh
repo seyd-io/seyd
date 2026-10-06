@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Find the Hikvision demo camera and bring the demo robot up on the deployed
 # cloud — the whole "find a camera and start the demo" procedure in one go.
 #

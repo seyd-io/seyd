@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Pilot↔agent clock offset from ping/pong (docs/protocol/control-stream.md).
 export const nowUs = (): number => Math.round(performance.now() * 1000);
 

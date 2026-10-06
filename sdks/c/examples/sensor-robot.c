@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 /* sensor-robot.c — a complete Seyd robot in C, in one file.
  *
  * Announces itself to the signal cloud, publishes a counter on a sensor

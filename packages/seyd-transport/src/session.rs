@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 use crate::relay::Relay;
 use bytes::{Buf, Bytes, BytesMut};
 use std::net::SocketAddr;

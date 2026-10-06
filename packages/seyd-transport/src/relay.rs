@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! The cloud relay backend of [`Session`] (ADR 0010).
 //!
 //! When no candidate connected, the pilot may ask the signal server to carry

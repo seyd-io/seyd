@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Per-frame latency A/B for the pilot pipeline. Drives the demo pilot page with
 `?trace=1` in headless Chrome (tools/cdp.py), records the engine's per-frame

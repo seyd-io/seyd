@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Seyd wire protocol — see `docs/adr/0001-wire-protocol-v2.md`.
 //!
 //! This crate is pure data layout: no I/O, no FEC, no policy. Both ends of a

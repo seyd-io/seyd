@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! minimal_host — the smallest host of [`seyd_core::Agent`].
 //!
 //! A *host* supplies media and consumes [`AgentEvent`]s; the agent owns

@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 [package]
 name = "seyd-nat"
 description = "Reachability for the Seyd agent: socket binding, STUN + NAT classification, PCP/NAT-PMP/UPnP port mapping, candidate gathering, NatReport"

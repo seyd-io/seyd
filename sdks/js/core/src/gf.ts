@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // GF(256) arithmetic, field polynomial 0x11d. Part of the wire contract —
 // mirrors packages/seyd-fec/src/gf.rs and the legacy fec.py/fec.js exactly.
 export const POLY = 0x11d;

@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 use crate::cert::Cert;
 use crate::prober::Prober;
 use crate::session::Session;

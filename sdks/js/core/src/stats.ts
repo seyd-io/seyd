@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 import { AgentStats, PilotStats, QosInfo, TransportKind } from './types.js';
 
 export function percentile(arr: number[], p: number): number {

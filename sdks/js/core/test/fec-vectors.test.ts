@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Replays tools/fec-vectors.py (the Python reference) through @seyd/core's FEC,
 // exactly as tools/fec-check.js does, via the legacy v1 header.
 import { execFileSync } from 'node:child_process';

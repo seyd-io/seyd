@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! `seydd.toml` — see docs/protocol/seydd.md.
 
 use serde::Deserialize;

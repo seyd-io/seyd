@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Unit tests for the Tello example: packet framing against byte vectors produced
 by TelloPy (the reference implementation), frame reassembly, Annex B splitting

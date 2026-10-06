@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! RTSP input via `retina`, pulled over TCP.
 //!
 //! TCP rather than UDP on purpose: an IP camera's RTP/UDP has no FEC and its

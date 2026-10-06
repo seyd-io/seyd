@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Replay FEC interop vectors from `tools/fec-vectors.py` through the Rust coder.
 //!
 //!     python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check

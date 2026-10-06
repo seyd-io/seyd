@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 /**
  * The pilot SDK core: `SeydSession` (signalling, the candidate race, the relay as the shown last resort), wire v2 reassembly with Reed-Solomon recovery, WebCodecs decode, presentation pacing and stats. Framework-free; `@seyd/web` builds the custom elements on it.
  *

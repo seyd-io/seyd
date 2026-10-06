@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 import '@seyd/web';
 import { mountThemeSwitch } from '@seyd/theme';
 import type { SeydSession } from '@seyd/core';

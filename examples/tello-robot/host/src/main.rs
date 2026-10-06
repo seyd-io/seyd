@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! tello-host — the Tello drone as a Seyd robot, hosting `seyd_core::Agent`
 //! directly. The counterpart of `../bridge.py` + `seydd`: same protocol to the
 //! drone, same `flight` and `telemetry` channels, same safety rules, same

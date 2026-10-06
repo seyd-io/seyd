@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Demo robot bridge: the robot-side program that makes the Hikvision PTZ camera a
 Seyd robot. It consumes seydd's two generic UDP interfaces

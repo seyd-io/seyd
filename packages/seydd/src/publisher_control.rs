@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Best-effort JSON to the robot's publisher (docs/protocol/seydd.md).
 //! Fire-and-forget and never fatal: a publisher that ignores this keeps
 //! streaming on whatever it was configured with.

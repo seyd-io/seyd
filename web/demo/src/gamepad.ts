@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // A USB gamepad for the pilot page, through the browser's Gamepad API. The
 // reader polls whatever pad the browser exposes (Chrome shows one only after
 // a button has been pressed on it) and turns it into one scheme-neutral

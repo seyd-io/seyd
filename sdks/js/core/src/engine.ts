@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // The transport-side pipeline: candidate race → datagrams → reassembly → FEC →
 // decode → render, plus the control stream. Runs unchanged inside a Web
 // Worker (worker.ts) or on the main thread (host.ts InlineHost); the only

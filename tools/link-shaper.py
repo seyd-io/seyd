@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 User-space link shaper between a pilot on this machine and the robot's QUIC
 port, for measuring what a rate-limited uplink does to the pipeline without

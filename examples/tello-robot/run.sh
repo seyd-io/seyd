@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Start the Tello demo robot: seydd (generic daemon) + bridge.py (the drone).
 #
 #   examples/tello-robot/run.sh                          # drone on Wi-Fi, deployed cloud

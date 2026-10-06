@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Seyd agent core — the whole robot side of Seyd, as a Rust API.
 //!
 //! Bottom to top: channel bookkeeping (`channels`), turning encoded frames

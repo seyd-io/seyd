@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Frames → wire chunks (docs/protocol/chunks.md).
 //!
 //! A video frame becomes one or more FEC **blocks** of up to

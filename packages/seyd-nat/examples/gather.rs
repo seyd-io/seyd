@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Bind 4433, run candidate gathering against the real network, print the result.
 //!
 //!     cargo run -p seyd-nat --example gather

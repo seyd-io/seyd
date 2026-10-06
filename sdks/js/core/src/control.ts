@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // The control stream: NDJSON on one pilot-opened bidirectional stream.
 // The pilot speaks first (docs/protocol/control-stream.md).
 import { Transport } from './transport.js';

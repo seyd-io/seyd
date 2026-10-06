@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! The Seyd C ABI (ADR 0004).
 //!
 //! This crate is the *only* place Seyd crosses into C. It contains no protocol

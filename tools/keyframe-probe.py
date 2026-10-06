@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Measure a publisher's keyframe behaviour: the cadence of its periodic
 keyframes and how fast it answers an on-demand request. Vendor-neutral on the

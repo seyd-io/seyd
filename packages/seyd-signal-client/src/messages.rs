@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Signal v2 message types (docs/protocol/signal-v2.md), robot side.
 
 use serde::{Deserialize, Serialize};

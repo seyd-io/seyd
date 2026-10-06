@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Keep the integration skill (skills/seyd/) tied to the code (PLAN.md §2.8).
 
 The skill is the document a third-party developer hands their coding agent

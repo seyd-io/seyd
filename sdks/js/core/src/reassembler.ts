@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Per-channel frame reassembly with per-block Reed-Solomon recovery.
 // Rules are docs/protocol/chunks.md "Receiver rules".
 import { decode as fecDecode } from './fec.js';

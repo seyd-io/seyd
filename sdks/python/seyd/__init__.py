@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Seyd — hyper-low-latency P2P streaming for robots, as a Python package.
 
 A thin wrapper over `libseyd` (ADR 0004): all protocol logic lives in the Rust

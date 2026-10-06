@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! HTTP/3 + WebTransport session establishment on top of `h3-webtransport`.
 //!
 //! This is the only file that knows HTTP/3. If the `h3-webtransport` crate

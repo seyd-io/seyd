@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 # Captures the default Mac webcam and streams H.264 RTP to localhost:5000.
 # This simulates what a robot's camera node publishes on its internal LAN.
 # The DARC Agent subscribes to this port — start this before connecting a pilot.

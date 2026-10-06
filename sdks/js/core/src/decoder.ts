@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // WebCodecs VideoDecoder wrapper. No jitter buffer: decode() on arrival.
 export interface DecoderOptions {
   codec: string;

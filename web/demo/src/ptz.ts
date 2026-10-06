@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // PTZ operator controls, ported from the prototype pilot: canvas drag is a
 // virtual joystick (12% deadzone, speed ramped from the deadzone edge), arrow
 // keys pan/tilt, Shift is fast, wheel and +/- zoom, H goes home. Velocity, not

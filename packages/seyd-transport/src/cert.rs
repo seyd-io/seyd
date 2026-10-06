@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Self-signed certificates for `serverCertificateHashes`.
 //!
 //! Chrome accepts a self-signed certificate over WebTransport only if it is

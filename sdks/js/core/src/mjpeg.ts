@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Motion JPEG: each frame is a complete JPEG image rather than part of a
 // coded video sequence.
 //

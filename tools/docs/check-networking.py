@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Fail the docs build if a <seyd-connect-error> failure class has no page.
 
 The element links every diagnosis to `https://docs.seyd.io/networking/<class>`

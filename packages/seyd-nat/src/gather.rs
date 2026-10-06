@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Candidate gathering and the NatReport.
 
 use crate::addr::{format_host, is_global};

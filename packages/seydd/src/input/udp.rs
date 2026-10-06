@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! UDP datagram source for sensor channels: one datagram = one message.
 
 use bytes::Bytes;

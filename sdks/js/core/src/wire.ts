@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Wire protocol v2 — docs/adr/0001-wire-protocol-v2.md, packages/seyd-wire/src/v2.rs.
 export const VERSION = 2;
 export const HEADER_LEN = 20;

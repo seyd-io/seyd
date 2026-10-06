@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Echo server for the WebTransport spike: prints the certificate fingerprint,
 //! echoes datagrams, and echoes control lines as `{"echo": <line>}`.
 use seyd_transport::{session, Cert, Endpoint, TransportConfig};

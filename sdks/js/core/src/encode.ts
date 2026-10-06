@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // Sender-side framing: split a frame into FEC blocks (docs/protocol/chunks.md).
 // The pilot only sends single-chunk messages, but the block encoder is the
 // exact mirror of the receiver and is what the reassembler tests drive.

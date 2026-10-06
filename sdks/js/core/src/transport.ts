@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 // What the engine needs from a transport: datagrams in and out, one control
 // byte stream, and a close signal. Two implementations — the WebTransport
 // session that is the product, and the cloud relay (ADR 0010) that carries the

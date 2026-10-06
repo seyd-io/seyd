@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Binding the UDP sockets the QUIC server will own.
 
 use socket2::{Domain, Protocol, Socket, Type};

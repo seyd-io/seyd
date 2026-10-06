@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """Render the `seyd` Python package as a Starlight page (PLAN.md §2.8).
 
 Walks the AST of sdks/python/seyd (no import, so libseyd need not be built)

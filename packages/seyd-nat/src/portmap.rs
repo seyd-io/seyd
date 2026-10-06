@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Router port mapping — PCP (RFC 6887), NAT-PMP (RFC 6886), UPnP-IGD.
 //!
 //! An installed mapping beats an inferred one: it also covers port-restricted

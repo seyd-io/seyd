@@ -1,4 +1,8 @@
 /*
+ * Copyright 2026 Anton Gravestam
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
  * The three faces, self-hosted (docs/design.md §2). Imported by index.ts for
  * the product surfaces and by @seyd/theme/fonts.css for any consumer that is
  * CSS-only (the docs site). Latin subset only; nothing is fetched from a CDN.

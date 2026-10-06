@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! QoS profiles — the latency/quality trade-off as a named choice.
 //!
 //! The link constrains *total bytes on the wire*, so a profile is one budget

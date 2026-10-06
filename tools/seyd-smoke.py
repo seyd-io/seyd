@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 End-to-end smoke test for the Seyd stack: drives the real demo page in
 headless Chrome against a running signal server + seydd, and asserts that

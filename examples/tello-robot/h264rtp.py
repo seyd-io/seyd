@@ -1,3 +1,5 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Annex B H.264 → RTP (RFC 6184) for seydd's `rtp://` input.
 

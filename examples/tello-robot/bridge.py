@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
 """
 Tello demo robot bridge: the robot-side program that makes a Ryze Tello a
 Seyd robot. Like examples/demo-robot/bridge.py for the PTZ camera, it

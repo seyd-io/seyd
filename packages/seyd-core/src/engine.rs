@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 //! Session engine: binds the packer and control vocabulary to
 //! `seyd-transport` sessions. Owns nothing network-discovery related and
 //! nothing vendor related; the host (seydd, or an SDK wrapper) feeds frames

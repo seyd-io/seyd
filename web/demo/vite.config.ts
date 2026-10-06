@@ -1,3 +1,5 @@
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
 export default defineConfig({
