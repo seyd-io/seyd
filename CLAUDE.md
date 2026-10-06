@@ -119,10 +119,11 @@ Two things go wrong otherwise, both observed while building simulcast
 ## Commits are signed off
 
 `main` requires the DCO check: every commit carries
-`Signed-off-by: Name <email>` (`git commit -s`; `format.signOff` is set in
-this checkout so it is automatic). CONTRIBUTING.md explains it to outside
+`Signed-off-by: Name <email>`. Always commit with `git commit -s` (there is
+no git config that adds it to ordinary commits; `format.signOff` only
+affects `format-patch`). CONTRIBUTING.md explains it to outside
 contributors; it applies to the owner's commits too, because the check does
-not distinguish.
+not distinguish, and an admin's direct push bypasses the rule silently.
 
 ## Keeping documentation current — mandatory
 

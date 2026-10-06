@@ -274,8 +274,7 @@ Each item is a decision by the owner, recorded here when made:
    everyone but admins, so the owner can still push a fix directly). Branch
    protection on the private repositories needs a paid plan and was not
    taken; `seyd-cloud` relies on there being one committer. The DCO app is
-   installed on the organisation; `format.signOff = true` in both checkouts
-   adds `Signed-off-by` to every commit. Enable private vulnerability reporting
+   installed on the organisation; commits are made with `git commit -s`. Enable private vulnerability reporting
    (`SECURITY.md` and the issue-template contact link point at it) and
    push protection. Repository description, topics
    (`teleoperation`, `robotics`, `webtransport`, `quic`, `rust`, `webcodecs`),
