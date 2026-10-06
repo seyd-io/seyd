@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Seyd — the hard parts of teleoperation, solved</title>
-  <meta name="description" content="Seyd is the teleoperation connectivity layer for robots and autonomous vehicles: latency, packet loss, reachability behind NAT, security, adaptive links and a picture you can drive by, solved once and dropped into your robot and your UI. Direct over the public internet, no server in the media path. Open-source SDKs, a signalling cloud in the EU, and a live camera you can drive now." />
+  <title>Seyd — teleoperation infrastructure for robots and autonomous vehicles</title>
+  <meta name="description" content="Seyd is teleoperation infrastructure for robots and autonomous vehicles: latency, packet loss, reachability behind NAT, security, adaptive links and a picture you can drive by, built once and dropped into your robot and your UI. Direct over the public internet, no server in the media path. Open-source SDKs, a signalling cloud in the EU, and a live camera you can drive now." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%2312a37a%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27white%27/%3E%3C/svg%3E">
   <style>
     /* Page layout only; tokens, type and components come from @seyd/theme (docs/design.md).
@@ -58,7 +58,7 @@
     .hero { padding: 64px 0 56px; }
     .hero .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 56px; align-items: start; }
     @media (max-width: 960px) { .hero .grid { grid-template-columns: 1fr; gap: 40px; } }
-    .hero h1 { font-size: clamp(34px, 4.8vw, 58px); line-height: 1.04; letter-spacing: -0.022em; max-width: 15ch; }
+    .hero h1 { font-size: clamp(34px, 4.8vw, 58px); line-height: 1.04; letter-spacing: -0.022em; max-width: 19ch; }
     .hero .lede { max-width: 50ch; font-size: 17px; line-height: 1.55; margin-top: 20px; }
     .hero .cta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 28px; }
     .hero .cta a.button { padding: 8px 16px; font-size: 14px; font-weight: 500; }
@@ -148,9 +148,9 @@
   <section class="hero" id="top">
     <div class="wrap grid">
       <div>
-        <p class="eyebrow accent">Teleoperation connectivity for robots and autonomous vehicles</p>
-        <h1 style="margin-top:14px">The hard parts of teleoperation, solved.</h1>
-        <p class="lede">Seyd is a software product for fast, secure teleoperation of robots and autonomous vehicles over the public internet. It solves the parts every teleop stack ends up rebuilding: latency, loss, NAT, security, links that narrow without warning. Built once, tuned for driving by camera. Video, sensors and commands go straight from the machine to the operator's browser, with no server in between. Drop it into your robot and your UI. Keep everything else.</p>
+        <p class="eyebrow accent">For engineers building remote operation</p>
+        <h1 style="margin-top:14px">Teleoperation infrastructure for robots and autonomous vehicles.</h1>
+        <p class="lede">Seyd is a software product for fast, secure teleoperation over the public internet. It solves the parts every teleop stack ends up rebuilding: latency, loss, NAT, security, links that narrow without warning. Built once, tuned for driving by camera. Video, sensors and commands go straight from the machine to the operator's browser, with no server in between. Drop it into your robot and your UI. Keep everything else.</p>
         <div class="cta">
           <a class="button primary" href="#robots">Drive the live camera</a>
           <a class="button" href="#hard">How each part is solved</a>
