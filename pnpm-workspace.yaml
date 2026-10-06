@@ -3,6 +3,5 @@
 packages:
   - sdks/js/*
   - web/*
-  - cloud/*
 allowBuilds:
   esbuild: true

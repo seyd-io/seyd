@@ -139,7 +139,8 @@ whose answer you already have and explain the ones the user finds odd.
 
 27. **Hosted Seyd cloud or self-hosted?** The hosted cloud is a plain
     container in the EU; the same container runs under `docker compose`
-    with Postgres and Logto.
+    with Postgres and Logto for customers with a self-hosting license
+    (`access.md`, "Hosted or self-hosted").
     *Decides `signal_url`* and who creates the organisation and tokens.
 28. **Does the user have an organisation and can they mint enrolment
     tokens?** From the console's Fleet page, or `node dist/bootstrap.js`

@@ -94,13 +94,16 @@ The hosted cloud: signal server and relay at
 console at `/console/`, docs at `/docs/`, Postgres in the EU. The address to
 give people is `https://seydio.web.app`, a redirect to the same service.
 
-Self-hosted: the same container on Postgres with Logto for OIDC, run by
-`docker compose` from `cloud/` in a checkout (`cloud/README.md`); bring your
-own OIDC provider or run headless with API keys only
-(`docs/self-hosting-auth.md`). Robot and pilot must share the `signal_url`.
-In development `SEYD_DEV_OPEN_ENROLMENT=1` and `SEYD_DEV_ALLOW_ANONYMOUS=1`
-on the signal server remove enrolment and tokens for a local loop (never in
-production).
+Self-hosted: the cloud's source is not in the public repository; it is
+offered to customers under a commercial self-hosting license, which comes
+with the same container, a `docker compose` file (Postgres, Logto for OIDC,
+the API and the prober) and the operator's guide. Bring your own OIDC
+provider or run headless with API keys only (`docs/self-hosting-auth.md`).
+Robot and pilot must share the `signal_url`. A self-hosted signal server in
+development can set `SEYD_DEV_OPEN_ENROLMENT=1` and
+`SEYD_DEV_ALLOW_ANONYMOUS=1` to remove enrolment and tokens for a local loop
+(never in production). An integration plan for a customer without that
+license uses the hosted cloud.
 
 ## The HTTP API (signal server origin, `/api/v1`)
 
