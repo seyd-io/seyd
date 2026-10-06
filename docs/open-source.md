@@ -267,7 +267,15 @@ Each item is a decision by the owner, recorded here when made:
    submodule. Day-to-day: core work in `~/code/darc`, pushed to the public
    repo; a cloud change or a deploy in `~/code/seyd-cloud`, bumping the
    submodule when it needs newer open code.
-6. **Make `seyd-io/seyd` public.** Enable private vulnerability reporting
+6. **Make `seyd-io/seyd` public.** **Done 2026-10-06**: public, with private
+   vulnerability reporting, secret scanning and push protection, Discussions,
+   topics, and `main` protected (the six CI jobs and the DCO check required,
+   strict, linear history, no force-push or deletion; PRs required for
+   everyone but admins, so the owner can still push a fix directly). Branch
+   protection on the private repositories needs a paid plan and was not
+   taken; `seyd-cloud` relies on there being one committer. The DCO app is
+   installed on the organisation; `format.signOff = true` in both checkouts
+   adds `Signed-off-by` to every commit. Enable private vulnerability reporting
    (`SECURITY.md` and the issue-template contact link point at it) and
    push protection. Repository description, topics
    (`teleoperation`, `robotics`, `webtransport`, `quic`, `rust`, `webcodecs`),

@@ -116,6 +116,14 @@ Two things go wrong otherwise, both observed while building simulcast
   not yet chosen.
 - **No timeline/headcount planning.** Plans are ordered work.
 
+## Commits are signed off
+
+`main` requires the DCO check: every commit carries
+`Signed-off-by: Name <email>` (`git commit -s`; `format.signOff` is set in
+this checkout so it is automatic). CONTRIBUTING.md explains it to outside
+contributors; it applies to the owner's commits too, because the check does
+not distinguish.
+
 ## Keeping documentation current — mandatory
 
 When you make a decision that isn't reflected in PLAN.md, the ADRs or SPEC.md,
