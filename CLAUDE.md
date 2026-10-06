@@ -56,6 +56,11 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
+- **docs/open-source.md** — the plan for the public `seyd-io/seyd` repository
+  (Apache-2.0, headers, DCO, filtered history) and the private
+  `seyd-io/seyd-cloud` that pins it as a submodule. Read before adding a
+  file that straddles the two (anything under `cloud/`, `deploy/`,
+  `web/console` or `packages/seyd-prober` is private).
 - **DEMO-TELLO.md** — the Tello drone demo: the drone's binary protocol as
   used, the bridge's safety rules (stick hold, orphan landing, altitude
   limit), the pilot's flight control scheme, and the bench checklist for the

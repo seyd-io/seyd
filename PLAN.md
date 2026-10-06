@@ -273,6 +273,16 @@ with it (the build's `gen-skill.py --check` catches the mechanical part). A new 
 
 ## Part 3 — Ordered work
 
+**Open-sourcing (decided 2026-10-06):** `docs/open-source.md` is the ordered
+work for publishing the core, the SDKs, the web pilot, the docs and the
+examples at `github.com/seyd-io/seyd` under Apache-2.0 (copyright Anton
+Gravestam, DCO for contributions), with the hosted cloud, the console, the
+prober and the deploy tooling in a private `seyd-io/seyd-cloud` that pins the
+public repo as a submodule, and the business plan, pricing, customers and
+competitors in a documents-only private `seyd-io/seyd-business`. History is
+filtered, not squashed. Publishing the
+packages (npm, PyPI, crates.io) follows it.
+
 **Field test, run A (2026-08-30, pilot on an iPhone hotspot, robot on the office
 LAN):** hole punch worked (`srflx`, Telia mobile → cone NAT), RTT 22 ms, 25 fps
 at ~1.7 Mbps, g2g p50 17 ms, 0.0 % true chunk loss, no keyframes lost, PTZ
