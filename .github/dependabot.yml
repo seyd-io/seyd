@@ -2,14 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 version: 2
 updates:
+  # Minor and patch bumps arrive grouped and are merged when CI is green. A
+  # semver-major bump is a migration (rand 0.8→0.10 and ed25519-dalek 2→3 both
+  # touch robot identity) and is done deliberately, not by a bot.
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly }
     groups: { cargo: { patterns: ["*"] } }
+    ignore: [{ dependency-name: "*", update-types: ["version-update:semver-major"] }]
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
     groups: { npm: { patterns: ["*"] } }
+    ignore: [{ dependency-name: "*", update-types: ["version-update:semver-major"] }]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
