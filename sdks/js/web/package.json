@@ -1,14 +1,35 @@
 {
   "name": "@seyd/web",
   "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seyd-io/seyd.git",
+    "directory": "sdks/js/web"
+  },
   "description": "Seyd pilot web components: <seyd-video>, <seyd-hud>, <seyd-connect-error>",
-  "license": "UNLICENSED",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist", "README.md"],
-  "scripts": { "build": "tsc -p tsconfig.json", "test": "echo 'no unit tests (browser-only elements)'" },
-  "dependencies": { "@seyd/core": "workspace:*" },
-  "devDependencies": { "@types/dom-webcodecs": "^0.1.13", "typescript": "^5.6.0" }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "echo 'no unit tests (browser-only elements)'"
+  },
+  "dependencies": {
+    "@seyd/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/dom-webcodecs": "^0.1.13",
+    "typescript": "^5.6.0"
+  }
 }

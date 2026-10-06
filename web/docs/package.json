@@ -2,8 +2,14 @@
   "name": "docs",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seyd-io/seyd.git",
+    "directory": "web/docs"
+  },
   "type": "module",
-  "description": "Seyd developer documentation (PLAN.md §2.8): Starlight site; API references generated from the code by tools/docs.",
+  "description": "Seyd developer documentation (PLAN.md \u00a72.8): Starlight site; API references generated from the code by tools/docs.",
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "dev": "node scripts/generate.mjs && astro dev",

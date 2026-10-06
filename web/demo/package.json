@@ -2,6 +2,12 @@
   "name": "demo",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seyd-io/seyd.git",
+    "directory": "web/demo"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

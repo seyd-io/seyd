@@ -2,6 +2,12 @@
   "name": "@seyd/theme",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seyd-io/seyd.git",
+    "directory": "web/theme"
+  },
   "description": "The Seyd design system as code: tokens, base styles, self-hosted fonts and the light/dark switch shared by every Seyd web surface (docs/design.md).",
   "type": "module",
   "main": "./src/index.ts",

@@ -1,0 +1,41 @@
+# Copyright 2026 Anton Gravestam
+# SPDX-License-Identifier: Apache-2.0
+#
+# cargo-deny policy for the public workspace (docs/open-source.md). Every
+# dependency of libseyd and seydd is linked into customers' products, so a
+# dependency's license is our obligation: `cargo deny check licenses` is part
+# of the verification set and of CI.
+
+[graph]
+all-features = false
+
+[licenses]
+# Permissive licenses only. MPL-2.0 is file-level copyleft and allows linking;
+# anything GPL-family or SSPL is refused by omission from this list.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[advisories]
+# Vulnerabilities fail; unmaintained and yanked crates warn so a transitive
+# dependency going quiet does not block an unrelated change.
+yanked = "warn"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

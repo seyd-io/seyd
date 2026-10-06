@@ -9,11 +9,14 @@ name = "seyd"
 version = "0.1.0"
 description = "Seyd — hyper-low-latency point-to-point streaming for robots"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.9"
 dependencies = ["cffi>=1.16"]
 
 [project.urls]
 Homepage = "https://seyd.io"
+Repository = "https://github.com/seyd-io/seyd"
+Documentation = "https://seyd-signal-flj7s44j4a-ew.a.run.app/docs/"
 
 [tool.setuptools]
 packages = ["seyd"]
