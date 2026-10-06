@@ -18,17 +18,17 @@
     "test": "echo 'the build is the test'"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.2",
+    "@astrojs/starlight": "^0.42.5",
     "@seyd/core": "workspace:*",
     "@seyd/theme": "workspace:*",
     "@seyd/web": "workspace:*",
-    "astro": "^7.3.3",
+    "astro": "^7.3.5",
     "starlight-typedoc": "^0.23.1",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.13.1"
   },
   "devDependencies": {
     "@types/dom-webcodecs": "^0.1.13",
-    "typescript": "^5.6.0"
+    "typescript": "^7.0.2"
   }
 }

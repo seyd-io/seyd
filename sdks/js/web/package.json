@@ -30,6 +30,6 @@
   },
   "devDependencies": {
     "@types/dom-webcodecs": "^0.1.13",
-    "typescript": "^5.6.0"
+    "typescript": "^7.0.2"
   }
 }
