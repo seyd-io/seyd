@@ -228,16 +228,28 @@ Each item is a decision by the owner, recorded here when made:
    names `seyd-core`, `seyd-wire`, `seyd-fec`, `seyd-qos`, `seyd-nat`,
    `seyd-transport`, `seyd-signal-client`, `seyd-ffi`, `seydd`; publishing
    is later work (PLAN.md), but a name taken by someone else is a rename now.
-3. **Split the history** from two fresh clones with `git filter-repo`
-   (`brew install git-filter-repo`):
+3. **Split the history** from fresh clones with `git filter-repo`
+   (`brew install git-filter-repo`). **Done 2026-10-06**: public `main` at
+   83 commits, cloud at 28, business at 3, each scanned clean by `gitleaks`
+   and the public clone built and tested on its own (every check in the
+   verification set) before the push. One narrowing of the history decision:
+   the prototype's own signal server (`packages/signal`, deleted
+   2026-08-28) is cloud code and went to the private history, not the
+   public one, so the prototype's agent and pilot are public history and
+   its cloud is not. The public clone then needed one commit of its own
+   (`pnpm-workspace.yaml` without `cloud/*`, the lockfile regenerated, the
+   skill's self-hosting wording), and the cloud clone one (`.gitignore`).
+   The commands, for the record:
    - Public: `git filter-repo --path cloud/ --path deploy/ --path web/console/
-     --path packages/seyd-prober/ --path docs/eu-hosting.md --path .gcloudignore
-     --path .dockerignore --invert-paths`, then `git branch -m master main`.
-   - Private cloud: the same path list without `--invert-paths`, plus
-     `--path CLAUDE-cloud.md`; rename to `CLAUDE.md` in the first private
-     commit.
-   - Private business: `--path business/` only; its first commit flattens
-     the directory. Add `--path business/` to the public filter's exclusions.
+     --path packages/seyd-prober/ --path packages/signal/ --path docs/eu-hosting.md
+     --path .gcloudignore --path .dockerignore --path CLAUDE-cloud.md
+     --path business/ --path docs/business.md --invert-paths`, then
+     `git branch -m master main`.
+   - Private cloud: the cloud paths of that list without `--invert-paths`,
+     with `--path-rename CLAUDE-cloud.md:CLAUDE.md` and
+     `--path-rename cloud/github-workflows/ci.yml:.github/workflows/ci.yml`.
+   - Private business: `--path business/ --path docs/business.md` with
+     `--path-rename business/:` and `--path-rename docs/business.md:business.md`.
    - `gitleaks git .` on both; `cargo build --workspace` and `pnpm -r build`
      on the public clone with the private one absent.
    - Push: public clone to `seyd-io/seyd`, private clone to
