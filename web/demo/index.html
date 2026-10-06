@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Seyd — remote operation that feels local</title>
-  <meta name="description" content="Seyd is the connectivity layer for robots and autonomous vehicles: video, sensors and commands go straight from the machine to the operator's browser, with nothing in between. Open-source SDKs, a signalling cloud in the EU, and a live camera you can drive now." />
+  <title>Seyd — the hard parts of teleoperation, solved</title>
+  <meta name="description" content="Seyd is the teleoperation connectivity layer for robots and autonomous vehicles: latency, packet loss, reachability behind NAT, security, adaptive links and a picture you can drive by, solved once and dropped into your robot and your UI. Direct over the public internet, no server in the media path. Open-source SDKs, a signalling cloud in the EU, and a live camera you can drive now." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%2312a37a%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27white%27/%3E%3C/svg%3E">
   <style>
     /* Page layout only; tokens, type and components come from @seyd/theme (docs/design.md).
@@ -49,6 +49,8 @@
     .card p { font-size: 14px; line-height: 1.5; }
     .card .tag { margin-bottom: 10px; }
     .card.lit { border-color: var(--seyd-accent); }
+    .card a.more { display: inline-block; margin-top: 12px; font-family: var(--seyd-font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--seyd-accent); }
+    .card a.more::after { content: " →"; }
     ul.points { margin: 0; padding-left: 18px; color: var(--seyd-ink-2); line-height: 1.55; display: grid; gap: 8px; }
     ul.points li b { color: var(--seyd-ink); }
 
@@ -128,6 +130,7 @@
     <div class="wrap">
       <a class="wordmark" href="./"><i></i>Seyd</a>
       <nav aria-label="Sections">
+        <a href="#hard">The hard parts</a>
         <a href="#how">How it works</a>
         <a href="#reach">Reachability</a>
         <a href="#integrate">Integrate</a>
@@ -145,18 +148,18 @@
   <section class="hero" id="top">
     <div class="wrap grid">
       <div>
-        <p class="eyebrow accent">Connectivity for robots and autonomous vehicles</p>
-        <h1 style="margin-top:14px">Remote operation that feels local.</h1>
-        <p class="lede">Seyd puts a person at the controls of a machine anywhere on the internet. Video, sensors and commands go straight from the robot to the operator's browser, with nothing in between. Drop it into your robot and your UI. Keep everything else.</p>
+        <p class="eyebrow accent">Teleoperation connectivity for robots and autonomous vehicles</p>
+        <h1 style="margin-top:14px">The hard parts of teleoperation, solved.</h1>
+        <p class="lede">Latency, loss, NAT, security, links that narrow without warning: the parts every teleop stack ends up rebuilding. Seyd is that stack, built once for driving by camera. Video, sensors and commands go straight from the machine to the operator's browser over the public internet, with no server in between. Drop it into your robot and your UI. Keep everything else.</p>
         <div class="cta">
           <a class="button primary" href="#robots">Drive the live camera</a>
-          <a class="button" href="#integrate">How it integrates</a>
+          <a class="button" href="#hard">How each part is solved</a>
           <a class="button" href="./docs/">Developer docs</a>
         </div>
         <div class="stats">
           <div class="stat"><b>17–31 ms</b><span>median robot-to-browser latency, measured over one and two cellular hops</span></div>
           <div class="stat"><b>0 servers</b><span>in the media path. On a direct session your video never touches our cloud</span></div>
-          <div class="stat"><b>1 browser tab</b><span>Chrome or Edge, desktop or Android. Nothing to install</span></div>
+          <div class="stat"><b>99.3%</b><span>of frames arrive complete at 5% packet loss, repaired on arrival with no round trip</span></div>
         </div>
       </div>
       <aside class="panel" id="robots" aria-labelledby="robots-h">
@@ -168,31 +171,23 @@
     </div>
   </section>
 
-  <!-- The problem -->
-  <section id="problem">
+  <!-- The hard parts: the reader has built or tried a teleop stack and knows this list; each card says what Seyd did about one item and where to read more -->
+  <section id="hard">
     <div class="wrap">
       <div class="section-head">
-        <p class="eyebrow accent">The problem</p>
-        <h2>The internet was not built for driving things.</h2>
-        <p class="lede">Every team hits the same three walls: the picture lags, it smears the moment the robot moves, and the robot cannot be reached from outside its own network. The familiar tools were built for other jobs.</p>
+        <p class="eyebrow accent">The hard parts</p>
+        <h2>You know the list. Here is what we did about each.</h2>
+        <p class="lede">A WebRTC demo takes a week. Everything after it is the same six problems, and every team that ships teleoperation rebuilds them. Seyd is those six, built once, tuned on real cellular links, and open source on your hardware.</p>
       </div>
-      <div class="grid-32">
-        <div class="tablewrap">
-          <table>
-            <thead><tr><th style="width:22%">Familiar tool</th><th style="width:26%">Built for</th><th>Why it breaks down for driving</th></tr></thead>
-            <tbody>
-              <tr><td><b>SSH tunnels</b></td><td>Files and terminals</td><td class="bad">"Reliable" means it stops and re-sends whenever data goes missing. Every loss becomes a freeze.</td></tr>
-              <tr><td><b>Remote desktop</b><span class="sub">VNC, RDP</span></td><td>Viewing a screen</td><td class="bad">The feed is decoded, redrawn and re-compressed before it ships. Delay and quality lost at every step.</td></tr>
-              <tr><td><b>VPNs</b><span class="sub">WireGuard, Tailscale</span></td><td>Joining two networks</td><td class="bad">A tunnel moves bytes. It cannot tell a frame from a steering command, or ask your camera to adapt.</td></tr>
-              <tr><td><b>Video-call tech</b><span class="sub">WebRTC platforms</span></td><td>Smooth conversation</td><td class="bad">Buffers on purpose to look smooth. Harmless in a meeting; undriveable in a vehicle.</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="col">
-          <div class="card sunk"><h3>The pattern</h3><p>All of them treat your data as anonymous bytes on a reliable pipe. Driving needs the opposite: a system that knows a video frame from a steering command, and what to drop when the network has a bad second.</p></div>
-          <div class="card sunk"><h3>The honest version</h3><p>On a perfect wired LAN a VPN gets close. Robots live behind 4G routers, satellite dishes and factory firewalls.</p></div>
-        </div>
+      <div class="grid-3">
+        <div class="card sunk"><span class="tag on">latency</span><h3>A fixed budget, not a growing buffer</h3><p>No server re-compresses your video and no jitter buffer grows to look smooth. Frames are paced on the camera's clock inside a presentation budget you set, 50 to 150 ms by profile. 17–31 ms median robot to browser over cellular, span stated.</p><a class="more" href="#latency">Latency</a></div>
+        <div class="card sunk"><span class="tag on">the public internet</span><h3>Loss is repaired on arrival, never waited for</h3><p>Every frame carries Reed-Solomon repair material, so most losses are rebuilt without a round trip: 99.3% of frames complete at 5% loss. What repair misses costs one skipped frame, not a second of delay that never comes back.</p><a class="more" href="#loss">Loss</a></div>
+        <div class="card sunk"><span class="tag on">reaching the robot</span><h3>Found, probed and raced before anyone drives</h3><p>Robots sit behind 4G routers, satellite dishes and factory firewalls. Each announces its routes; our prober tests every one from outside before a session; the browser races the reachable ones and keeps the fastest. The fleet list shows who is online and whether direct will work. The relay only as a shown, metered last resort.</p><a class="more" href="#reach">Reachability</a></div>
+        <div class="card sunk"><span class="tag on">security</span><h3>Encrypted end to end; no rogue operator, ever</h3><p>Every byte rides QUIC under TLS 1.3, directly between machine and operator. A robot proves itself with a key it generated and never shares; driving is a short-lived pass signed by our key; who may drive which robot is a grant, and who had control when is in the audit log. Your video never touches our servers on a direct session.</p><a class="more" href="#cloud">Identity and permissions</a></div>
+        <div class="card sunk"><span class="tag on">links that change</span><h3>Measured continuously, adapted at the source</h3><p>Seyd measures the link in a closed loop and asks the camera for less when it narrows, more when it recovers. Where the camera offers several streams it switches instead of re-encoding. Resolution first, frame rate last, keyframes on demand. When the robot's network changes, its routes are re-gathered and announced again, so the operator reconnects to where it is now.</p><a class="more" href="#loss">Adaptation</a></div>
+        <div class="card sunk"><span class="tag on">driving by camera</span><h3>The picture is the operator's eyes. It must be current, not smooth</h3><p>A frame is admitted before its first byte leaves and sent whole; keyframes are never dropped. On a bad second the operator sees now, minus one frame. If the picture cannot be trusted, the screen says so and a clean frame is requested at once, and the HUD shows every number behind it.</p><a class="more" href="#measured">Measured</a></div>
       </div>
+      <div class="card sunk" style="margin-top:20px"><h3>What is not on the list</h3><p>Your cameras, your autonomy stack, your safety logic and your operator UI. Seyd states its needs, a bitrate ceiling, a keyframe, a latency budget, and your systems decide how to meet them. Where a network still needs a hand, Seyd names the setting: a 4G router with UPnP off wants one UDP port forwarded, Starlink is a documented configuration, and iPhone needs an app because Apple's browsers cannot open the direct path.</p></div>
     </div>
   </section>
 
@@ -588,7 +583,7 @@ output = <span class="k">"udp://127.0.0.1:5004"</span></pre>
   </section>
 
   <footer class="wrap">
-    <span>Seyd · seyd.io · remote operation for robots and autonomous vehicles</span>
+    <span>Seyd · seyd.io · teleoperation connectivity for robots and autonomous vehicles</span>
     <a href="./docs/">Docs</a>
     <a href="./console/">Console</a>
     <span>Early access: the cloud is invite-only, and the demo robot is deliberately public.</span>
