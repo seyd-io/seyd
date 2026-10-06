@@ -92,7 +92,7 @@ Two constraints shape the design:
   (in and out); the outbound half is billed egress. At the balanced profile
   (~26 MB per minute to the pilot) that is on the order of 0.2–0.4 US cents
   per relayed minute in `europe-west1` at list price, plus the instance's
-  CPU-minute while any session is live (~0.15 cents). docs/business.md keeps
+  CPU-minute while any session is live (~0.15 cents). `seyd-business/business.md` keeps
   the relay a separately priced tier for this reason; the per-session byte
   counts are logged (`relay: session ended`) for metering.
 * **Sessions cap at Cloud Run's request timeout.** Deploys now set

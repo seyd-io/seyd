@@ -10,7 +10,6 @@ members = [
     "packages/seyd-core",
     "packages/seyd-ffi",
     "packages/seydd",
-    "packages/seyd-prober",
     # Customer-style programs that host seyd-core directly (examples/, not Seyd).
     "examples/tello-robot/host",
 ]

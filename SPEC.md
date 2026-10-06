@@ -69,28 +69,13 @@ The mental model for Archetype B: **Seyd is a VPN for robot LAN data.** The pilo
 
 Both archetypes ride the same Seyd transport layer. The difference is how much of the stack above the transport Seyd owns.
 
-### Where these archetypes live (target verticals)
+### Where these archetypes live
 
-The highest-pain version of this problem is **occasional remote operation of a
-vehicle that is normally autonomous or locally operated**, on networks nobody
-controls end to end:
-
-- **AV prototypes and test rigs** — early-stage autonomous vehicles where a
-  human must be able to take over convincingly, and proof-of-concept programs
-  for driving vehicles and drones at a distance (including military test
-  ranges). The takeover path is bought before the autonomy is trusted.
-- **ROVs and remotely operated machinery** in oil & gas, subsea and defense.
-  Note the topology: a subsea ROV is tethered to a surface vessel, so Seyd's
-  "robot side" is the vessel — and the vessel's uplink is typically satellite
-  (see docs/starlink.md, which is directly about this link).
-- **Delivery/logistics robot fleets** needing rescue-and-supervise (the
-  classic Archetype A).
-
-These customers are predominantly Archetype B: they already own a command &
-control (C2) stack and want the internet leg solved. Defense and industrial
-buyers also make the portable-cloud decision load-bearing — the whole cloud
-runs from `docker compose` on their infrastructure, with no hyperscaler
-dependency in application code.
+The target verticals, and which archetype each is, are go-to-market
+material and live in the private `seyd-business` repository
+(`verticals.md`). The one product fact they carry: these customers are
+predominantly Archetype B, and defense and industrial buyers make the
+portable, self-hostable cloud load-bearing.
 
 ### C2 systems, pub/sub middleware and DDS
 
@@ -584,56 +569,20 @@ measured link:
 
 ## Competitive Landscape
 
-### Voysys / Oden (acquired by Serve Robotics, September 2025)
-Previously a standalone teleoperation platform (Swedish origin, acquired by Phantom Auto). Built "Oden" — a purpose-built proprietary multi-link transport stack, not WebRTC. Claims <45ms glass-to-glass over cellular. Handles 4G/5G/WiFi bonding with custom FEC, adaptive bitrate, and careful modem-buffer management. Ran 2,000+ vehicles daily across 10 industries; vehicle side ran on Jetson AGX Orin at ~2% GPU for 6 × 1080p cameras. **Now fully internalized by Serve Robotics — no longer available as a product.** This is the most direct market gap: the best purpose-built connectivity stack in the space just went off the market.
-
-### Ottopia
-Israeli company targeting AV OEMs and defense (Hyundai, Magna, IDF). Full-stack — they own the operator UI. Uses DTLS + SRTP, proprietary AI-enhanced super-resolution, multi-path bonding, cross-channel FEC. Not middleware; not available as an SDK. Defense pivot reduces overlap with commercial robotics. Still active, Series A funded.
-
-### Adamo (founded 2025; San Francisco + London)
-Most directly comparable in positioning — hardware-agnostic, native ROS/ROS2 support, claims sub-40ms latency. Their framing explicitly calls out WebRTC as too slow ("WebRTC was built for video calls, not controlling robots"). Uses a custom transport with multi-path bonding over LTE/5G/Wi-Fi.
-
-Re-checked from adamohq.com on 2026-09-02; two earlier statements here were wrong:
-
-- **Pricing is public.** Streaming platform **$50/robot/month** (50 teleop hours included, **$0.90/hour** overage, "dedicated bandwidth", 99% uptime SLA); managed operators **from $12/operator-hour**; enterprise custom. The platform is sold **standalone** — this is not operators-only bundling, so they compete directly for the middleware sale.
-- **Product surface is ahead of ours.** SDKs for Python, Rust, C and TypeScript; hosted console at `operate.adamohq.com` with gamepad and VR teleop, recording and replay; purpose-built interfaces for humanoids, arms, AVs and AMRs; AES-256, "built to be SOC 2 compliant".
-
-Latency budget from their engineering blog: encode 3–5 ms, network transit 15–25 ms, decode+render 5–8 ms, **total 25–38 ms glass-to-glass**, conditions given only as "robot in a warehouse, operator in another city". No percentile and no tail published. That is the same range as our measured 17–31 ms p50 (§ field results) — **latency is not a differentiator against Adamo**, and neither figure is independently verified.
-
-Their media path is **not disclosed anywhere** on the site, pricing page, FAQ or docs. Two things imply an aggregation point rather than P2P: carrier bonding requires something terminating and reordering the paths, and teleoperation cannot be metered per hour if the bytes never cross the vendor's network. Treat as inference until confirmed. What follows if true is the real axis of competition — our P2P architecture forecloses bonding and recording, and their architecture forecloses zero-marginal-cost pricing, structural privacy and self-hosting.
-
-**No self-hosted or on-premise option** appears anywhere in their material, and no named customer, logo or case study. Our differentiation is architecture, auditability and cost, not speed.
-
-### LiveKit / Portal
-LiveKit is open-source WebRTC infrastructure (SFU + signaling, Rust/Go). In 2025 they launched **Portal**, a robotics-specific wrapper: per-tick observation bundling (camera + joint state + timestamp arrive together), Robot/Operator roles in Python with a unified Rust core. Polymath Robotics uses it for remote heavy machinery. **Closest existing building block to what Seyd is** — but WebRTC-only (latency floor ~100–200ms), and Portal is a thin layer, not a purpose-tuned teleoperation stack. Open-source model is a competitive advantage for adoption; also a moat-reduction risk.
-
-### Transitive Robotics
-Modular cloud platform for robot operations: live video, remote teleop, deployment, observability. WebRTC for P2P, MQTT for state sync. More of a full robotics-ops SaaS than a connectivity SDK. Niche, small team.
-
-### Viam
-Full robotics platform — gRPC for structured RPCs, WebRTC for P2P streaming, cloud-managed fleet. Significant funding (MongoDB founder). They want to own the whole robot software stack, not just connectivity. Not a pure competitor; a different layer.
-
-### Open-Source Reference
-- **phntm_bridge**: Fast WebRTC + Socket.io ROS2 bridge (C++). Now open at docs.phntm.io/bridge.
-- **LiveKit Portal**: Best production-grade open option today. Rust + Python.
-- No complete, purpose-built, drop-in connectivity platform exists in open-source.
-
-### Market Gap Summary
-| Player | Stack layer | Transport | Middleware-only? | Available? |
-|---|---|---|---|---|
-| Voysys/Oden | Connectivity | Custom QUIC-like | Yes | No (internalized) |
-| Ottopia | Full stack | Proprietary | No | Enterprise only |
-| Adamo | Connectivity + operators | Custom (bonded, path undisclosed) | Yes (platform sold standalone) | Yes — $50/robot/mo |
-| LiveKit Portal | Connectivity | WebRTC | Yes | Yes (open-source) |
-| Transitive | Full ops platform | WebRTC | Partial | Yes |
-| Viam | Full robot platform | WebRTC + gRPC | No | Yes |
-| **Seyd** | **Connectivity** | **QUIC / WebTransport** | **Yes** | **Working stack, pre-GA (field-tested demo)** |
+The competitor survey (Voysys/Oden, Ottopia, Adamo, LiveKit Portal,
+Transitive, Viam, the open-source references and the market-gap table)
+is business material and lives in the private `seyd-business` repository
+(`competitors.md`). The product consequences it produced are already in
+this document: latency is not the differentiator (the measured bar is in
+`docs/latency-roadmap.md`); architecture, auditability, self-hosting and
+cost are.
 
 ---
 
 ## Business Model & Licensing
 
-Internal position, tiers and unit economics live in **docs/business.md**.
+Internal position, tiers and unit economics live in the private
+`seyd-business` repository (`business.md`).
 The one product-shaping consequence belongs here: **the SDKs — everything that
 runs on customer hardware, robot and pilot side — are open source
 (Apache-2.0)**, with no held-back components; the protocol contracts are

@@ -1,17 +1,25 @@
-# Seyd — Monorepo Guide for Claude
+# Seyd — Repository Guide for Claude
 
 ## What this repo is
 
-This is the monorepo for **Seyd** (formerly DARC), a SaaS connectivity platform
-for remote operation of autonomous vehicles and robots: hyper-low-latency,
+This is the public repository of **Seyd** (formerly DARC), the connectivity
+layer for remote operation of autonomous vehicles and robots: hyper-low-latency,
 point-to-point video, sensor and command streaming between robot systems and
 human operators over the public internet, delivered as SDKs plus a signaling
-cloud. Domains: `seyd.io`, `seydio.com`.
+cloud. Domains: `seyd.io`, `seydio.com`. Licensed under Apache-2.0
+(`LICENSE`, `NOTICE`); contributions under the DCO (`CONTRIBUTING.md`).
 
 The product is a Rust core with a C ABI, a TypeScript web pilot SDK, and a
-portable cloud. The Python/JS proof of concept that preceded it has been
-deleted (git history before 2026-08-28 has it; PROTOTYPE.md describes it);
-its measurements remain valid. `PLAN.md` is the plan; follow it.
+portable cloud. This repository holds the core, the SDKs, the web pilot, the
+developer docs, the examples and the harnesses. The hosted cloud (signal
+server, relay, console, prober, deploy tooling) is the private repository
+`seyd-io/seyd-cloud`, which pins this one as a submodule; its operations
+guide is that repository's `CLAUDE.md`. Business planning lives in the
+private `seyd-io/seyd-business`. One question routes a document: who needs
+to read it (`docs/open-source.md`). The Python/JS proof of concept that
+preceded the new stack has been deleted (git history before 2026-08-28 has
+it; PROTOTYPE.md describes it); its measurements remain valid. `PLAN.md` is
+the plan; follow it.
 
 ## Key documents — read these first
 
@@ -28,9 +36,10 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
   states its own bitrate ceiling: `max_bitrate_kbps` per video channel lowers
   the rate controller's range; never raises it). Add one for every
   decision of that weight; never change a wire format or public API without one.
-- **SPEC.md** — product specification: customers, use cases, no-transcoding
-  principle, competitor landscape. Written under the DARC name; the product
-  decisions section at the top records what changed on 2026-08-28.
+- **SPEC.md** — product specification: vision, use cases, architecture,
+  the no-transcoding principle, latency reality, technology choices. Written
+  under the DARC name; the product decisions section at the top records what
+  changed on 2026-08-28. Customers and competitors are in `seyd-business`.
 - **PROTOTYPE.md** — the proof-of-concept build, frozen as history. Its
   measurements (FEC, NAT reachability table, decoder gotchas) remain valid
   inputs; its component descriptions describe the legacy Python/JS code only.
@@ -56,11 +65,12 @@ its measurements remain valid. `PLAN.md` is the plan; follow it.
 - **DEMO-ROVER.md** — the planned second demo: a remotely driven rover in a
   booked, attended setting; v2 adds a second camera and a two-pilot
   driver/spotter model. Hardware not yet ordered.
-- **docs/open-source.md** — the plan for the public `seyd-io/seyd` repository
-  (Apache-2.0, headers, DCO, filtered history) and the private
-  `seyd-io/seyd-cloud` that pins it as a submodule. Read before adding a
-  file that straddles the two (anything under `cloud/`, `deploy/`,
-  `web/console` or `packages/seyd-prober` is private).
+- **docs/open-source.md** — the split between this public repository
+  (Apache-2.0, headers, DCO, filtered history), the private `seyd-io/seyd-cloud`
+  that pins it as a submodule, and the documents-only `seyd-io/seyd-business`.
+  Read before adding a file that could belong to another of the three:
+  anything about running the hosted cloud is `seyd-cloud`; anything about
+  money, customers or competitors is `seyd-business`.
 - **DEMO-TELLO.md** — the Tello drone demo: the drone's binary protocol as
   used, the bridge's safety rules (stick hold, orphan landing, altitude
   limit), the pilot's flight control scheme, and the bench checklist for the
@@ -164,7 +174,7 @@ real example files, so the rule is mechanical:
 
 ```
 seyd/
-├── CLAUDE.md  PLAN.md  SPEC.md  PROTOTYPE.md  DEMO.md
+├── CLAUDE.md  PLAN.md  SPEC.md  PROTOTYPE.md  DEMO.md  README.md  LICENSE  NOTICE  CONTRIBUTING.md  SECURITY.md
 ├── Cargo.toml                 # Rust workspace
 ├── packages/                  # Seyd core — Rust, production
 │   ├── seyd-wire/             # wire protocol v2 headers + legacy v1 decode (ADR 0001)
@@ -181,16 +191,11 @@ seyd/
 │   ├── python/  # cffi ABI mode over libseyd; cpp/ and ros2/ not built yet
 │   └── js/core  js/web                # @seyd/core (session API), @seyd/web (<seyd-video>, <seyd-hud>, <seyd-connect-error>); examples/ in each
 ├── skills/seyd/               # the integration skill for third-party developers' coding agents (SKILL.md + references/); served at /docs/skill/; checked by tools/docs/gen-skill.py
-├── cloud/api      # signal v2 + console API; authn/ (pluggable) + accounts/ (ours)
-│   └── db/migrations/         # the schema, applied at boot
-├── cloud/prober  cloud/monitor
 ├── web/theme      # @seyd/theme: design tokens, base styles, self-hosted fonts, theme switch (docs/design.md)
 ├── web/demo       # the landing page (/) and the pilot page (/pilot/)
-├── web/console    # the fleet console (/console/)
 ├── web/docs       # developer docs (/docs/): Starlight; references generated from the code (PLAN.md §2.8)
-├── docs/                      # ADRs (docs/adr/) and, later, the developer docs site
-├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
-│   └── firebase-redirect/     # seydio.web.app: a redirect-only Firebase Hosting site pointing at the Cloud Run URL
+├── docs/                      # ADRs (docs/adr/), protocol contracts (docs/protocol/), the hand-written docs the site imports
+├── .github/                   # CI (the verification set below), Dependabot, issue templates
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
 ├── examples/tello-robot/      # the Tello drone demo: tello.py (protocol), h264rtp.py (Annex B → RTP), bridge.py, fake_tello.py; host/ = the same robot as a native Rust host of seyd-core (workspace member)
 ├── sim/                       # robot simulation — NOT part of Seyd
@@ -202,6 +207,12 @@ seyd/
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
     └── docs/                  # the docs generators: gen-c-reference.py, gen-python-reference.py, gen-seydd-config.py, gen-qos-profiles.py, check-networking.py, gen-skill.py
 ```
+
+Not here, by design: `cloud/` (signal server, relay, console API, Logto,
+compose), `cloud/prober`, `web/console` and `deploy/` are in
+`seyd-io/seyd-cloud`. The protocol those speak is documented here
+(`docs/protocol/`, the *Enrolment and access* docs page) because the SDKs
+speak it.
 
 **Import direction:** `tools/` may reach into `packages/`. `packages/` and
 `sdks/` must never reach into `tools/` or `sim/`. `sdks/` may only call the
@@ -246,13 +257,14 @@ decides how to meet it.
 identity planes and only one touches an identity provider. Robot identity
 (Ed25519, enrolment tokens) and pilot session tokens (ES256, our key) are ours
 and must stay that way — a fleet keeps working while the IdP is down. Human
-identity comes from OIDC, behind `cloud/api/src/authn/`, which is the only
-place that knows how a person proves who they are. Everything downstream sees a
-`Principal`. Orgs, roles, robot grants and the audit log live in
-`cloud/api/src/accounts/` and Postgres, because no IdP can express "may drive
-robot 42 but only observe robot 7". If you find yourself reaching for a
-provider-specific SDK or storing an IdP concept in `accounts/`, the boundary
-has leaked. See ADR 0007 and `docs/self-hosting-auth.md`.
+identity comes from OIDC, behind one seam in the cloud (`authn/` in
+`seyd-cloud`), which is the only place that knows how a person proves who
+they are. Everything downstream sees a `Principal`. Orgs, roles, robot grants
+and the audit log live in the cloud's own `accounts/` and Postgres, because
+no IdP can express "may drive robot 42 but only observe robot 7". If you
+find yourself reaching for a provider-specific SDK, or storing an IdP
+concept where authorization lives, the boundary has leaked. See ADR 0007
+and `docs/self-hosting-auth.md`.
 
 **No transcoding in Seyd.** The agent is a pure relay of encoded bytes. It may
 depacketize RTP and split NAL units into chunks; it never decodes, re-encodes
@@ -276,56 +288,6 @@ Keyframes are never dropped.
 | Loss resilience | Reed-Solomon GF(256), Cauchy, per FEC block; NACK-driven LTR/intra-refresh/IDR recovery | FEC pays bandwidth, not round trips; recovery in one RTT for what FEC misses |
 | Cloud | TypeScript (Fastify + ws), Postgres, Redis (not yet), OIDC via self-hosted Logto, Docker | Portable by construction; `docker compose` runs the whole cloud (ADR 0007) |
 
-## Hosting (current)
-
-`cloud/api` runs on Google Cloud Run in `europe-west1`, project `seydio`:
-`https://seyd-signal-flj7s44j4a-ew.a.run.app` (deploy with
-`GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`). It is a plain container on
-Postgres/Redis-shaped seams with the GCP dependency isolated to the deploy
-script; `cloud/docker-compose.yml` is the portability proof.
-
-**The address to give people is `https://seydio.web.app`** (since 2026-10-02):
-a Firebase Hosting site in project `seydio` that does nothing but 302-redirect
-every path and query string to the Cloud Run URL above
-(`seydio.web.app/pilot/?robot=seyd-demo` works). It is a stopgap until
-`seyd.io` or `seydio.com` is owned and mapped to the service, and it is a
-redirect, not a proxy — Firebase Hosting cannot carry the signaling or relay
-WebSockets — so the address bar ends on `run.app`. Config in
-`deploy/firebase-redirect/`; nothing in the application depends on Firebase,
-and nothing may come to. If the Cloud Run URL ever changes, edit
-`firebase.json` there and run `firebase deploy --only hosting` from that
-directory.
-
-**The deployed revision runs with real accounts** (since 2026-09-04, revision
-`seyd-signal-00024`): Postgres on Neon (`eu-central-1`, URL in `.env.local` as
-`SEYD_DATABASE_URL`), `SEYD_PROVISIONING=invite-only`, and neither
-`SEYD_DEV_OPEN_ENROLMENT` nor `SEYD_DEV_ALLOW_ANONYMOUS`. Consequences:
-
-- **A robot must be enrolled before it can connect**, or the signal server
-  denies it with `unknown-robot`. Mint a token from the repo root with
-  `set -a; . ./.env.local; set +a` and then
-  `(cd cloud/api && node dist/bootstrap.js enrolment-token <org-id> "<label>")`;
-  the org id comes from `node dist/bootstrap.js list`. Redeem it once:
-  `ENROL_TOKEN=seyd_enr_… ./sim-robot.sh` (or `./py-robot.sh`), or
-  `seydd --config … enrol --token …`. The robot's key file (`.seyd-sim.key`,
-  `.seyd-py.key`, `examples/demo-robot/.robot.key`) is what stays enrolled;
-  keep it, or you need a new token. The C ABI cannot enrol yet, so the Python
-  robot's key is enrolled through `seydd enrol` (same file format).
-- **A pilot without an account reaches only robots with a public grant**:
-  `node dist/bootstrap.js public-grant <robot-id> observe drive` (needs the
-  robot enrolled first). `/api/v1/robots` lists only those robots.
-- Enrolled so far: `seyd-demo`, `seyd-sim`, `seyd-py` and `seyd-tello` (2026-09-22), all in org "Seyd", all public.
-- **The console is deployed at `/console/`** on the same service (since
-  2026-09-10), signing in through the deployed Logto (`seyd-logto` on Cloud
-  Run, `cloud/logto/`). Invite-only in both senses: Seyd grants no org without
-  an invitation, and Logto has self-registration off — an invitation carries a
-  one-time sign-in token that creates the account (`cloud/README.md`,
-  "Invitations under a closed door"). The owner holds a pending owner
-  invitation for org "Seyd"; nobody has signed in yet. Invite people from the
-  console's Members page, or `node dist/bootstrap.js invite <org-id> <email> <role>`
-  with `.env.local` sourced, and hand over the printed link. Logto's admin
-  console is not public: `bash cloud/logto/admin-local.sh`.
-
 ## Running things — the scripts
 
 | Script | What it does |
@@ -335,50 +297,19 @@ directory.
 | `./demo-tello.sh` | The Tello drone robot (DEMO-TELLO.md): checks the laptop is on the drone's Wi-Fi with the default route elsewhere, then `seydd` + `examples/tello-robot/bridge.py`. `--fake` runs `fake_tello.py` instead of a drone; `--rust` runs the native host (`examples/tello-robot/host`) instead of `seydd` + the bridge. `BRIDGE_ARGS=--no-takeoff` for bench work. |
 | `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
 | `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs), `--command flight` for a robot with a `flight` channel instead of `ptz`. |
-| `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, Colima + Docker CLI, tools/.venv, first build). |
-| `cd cloud && docker compose up -d` | The whole cloud locally: Postgres, Logto, api. Needs `colima start` first on macOS; setup in `cloud/README.md`. |
+| `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, FFmpeg, tools/.venv, first build). |
 
 Both robot scripts `pkill` any running `seydd` and rebuild `target/release/seydd`
-from the working tree first. Pilot pages: deployed landing at `/`, pilot at
-`/pilot/?robot=<id>`; press `S` for the HUD. `?paths=none` forces the direct
-race to fail so the relay path can be exercised; `?relay=0` refuses the relay.
-Field procedures: docs/field-test.md.
-
-## Deploying the backend
-
-Three Cloud Run services, project `seydio`, region `europe-west1` (memory +
-docs/eu-hosting.md carry the context):
-
-- **seyd-signal** (signal server + landing and pilot pages + the console at `/console/` + the developer docs at `/docs/`):
-  `pnpm -r build && GCLOUD_PROJECT=seydio bash cloud/api/deploy.sh`.
-  The script bundles `web/demo/dist`, `web/console/dist` and `web/docs/dist` into the image
-  (`.gcloudignore` keeps them in the upload), passes the OIDC, Logto and
-  console settings from `.env.local`, and re-applies the prober env after
-  deploy (plain `--set-env-vars` would wipe it). URL:
-  `https://seyd-signal-flj7s44j4a-ew.a.run.app`. Real accounts on Neon Postgres
-  (see Hosting above): robots need an enrolment token, pilots a public grant.
-  **After every deploy, restart the robot.** Presence is in-memory, and a
-  robot's signaling WebSocket stays on the *draining* old revision until it
-  drops — which, since `--timeout 3600` (needed for relayed sessions), can be
-  up to an hour: the new revision lists the robot as offline for all of it
-  (observed 2026-09-09). The same service is the relay (`/relay`, ADR 0010):
-  relayed sessions drop on deploy and at Cloud Run's 60-minute request cap;
-  the pilot re-races and re-relays.
-- **seyd-logto** (the identity provider, ADR 0007): `GCLOUD_PROJECT=seydio bash
-  cloud/logto/deploy.sh` — the stock `svhd/logto:1.43.0` image on its own Neon
-  database, admin console disabled, scale-to-zero. Administer it with
-  `cloud/logto/admin-local.sh` (admin console on the laptop, same database) and
-  `cloud/logto/configure.mjs` (Seyd's objects, idempotent). Details in
-  `cloud/README.md`, "The deployed identity provider".
-- **seyd-prober** (reachability probe, called by seyd-signal on every announce):
-  build with Cloud Build from the REPO ROOT context —
-  `gcloud builds submit --project seydio --config deploy/cloudbuild-prober.yaml .`
-  then the `gcloud run deploy` command in that file's header. The
-  `SEYD_PROBER_TOKEN` must match on both services; it lives in `.env.local`
-  (gitignored).
-- Logs: `gcloud logging read 'resource.type="cloud_run_revision" AND
-  resource.labels.service_name="seyd-signal"' --project seydio ...` (pino JSON
-  in textPayload; session events have `msg` like "session offered/accepted").
+from the working tree first. They talk to the hosted cloud
+(`wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws`), where a robot needs an
+enrolment token (`ENROL_TOKEN=seyd_enr_… ./sim-robot.sh` redeems one; the
+robot's key file is what stays enrolled) and a pilot without an account
+reaches only robots with a public grant. Tokens and grants come from the
+console or from the operator of the cloud. Pilot pages: deployed landing at
+`/`, pilot at `/pilot/?robot=<id>`; press `S` for the HUD. `?paths=none`
+forces the direct race to fail so the relay path can be exercised; `?relay=0`
+refuses the relay. Field procedures: docs/field-test.md. Running the cloud
+itself, locally or deployed, is `seyd-cloud`.
 
 ## Verifying work
 
@@ -388,19 +319,18 @@ cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 python3 tools/fec-vectors.py | cargo run -p seyd-fec --example check   # Rust ↔ Python FEC interop
 make -C sdks/c check                                                    # C ABI conformance (abi-smoke)
 tools/.venv/bin/python3 -m pytest sdks/python/tests                     # Python SDK over libseyd
-pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo, web/console, web/docs (generates the references; SEYD_DOCS_SKIP_RUSTDOC=1 to skip cargo doc locally)
-(cd cloud/api && npm test)
+pnpm -r build && pnpm -r test                                           # @seyd/core, @seyd/web, web/demo, web/docs (generates the references and checks the skill; SEYD_DOCS_SKIP_RUSTDOC=1 to skip cargo doc locally)
+python3 tools/check-headers.py                                          # every source file carries the license header
+cargo deny check licenses                                               # dependency licenses stay within deny.toml
 
-# End to end on this machine (sim source, no camera):
-(cd cloud/api && PORT=8080 SEYD_DEV_OPEN_ENROLMENT=1 SEYD_DEV_ALLOW_ANONYMOUS=1 \
-   SEYD_STATIC_DIR=$PWD/../../web/demo/dist node dist/index.js &)
-VIDEO_DEVICE=lavfi DARC_QOS_PROFILE=latency ./sim/video-source.sh & python3 sim/sensor-source.py &
-./target/debug/seydd --config <a seydd.toml with rtp://127.0.0.1:5000, udp://127.0.0.1:5002, ptz → udp://127.0.0.1:5004> &
-tools/.venv/bin/python3 tools/seyd-smoke.py --robot <robot_id> [--query loss=0.05]   # venv: tools/setup-machine.sh
+# End to end on this machine (sim source, no camera), against the hosted cloud:
+VIDEO_DEVICE=lavfi ./sim-robot.sh                                       # robot seyd-sim; first run needs ENROL_TOKEN=…
+tools/.venv/bin/python3 tools/seyd-smoke.py --robot seyd-sim [--query loss=0.05]   # venv: tools/setup-machine.sh
 ```
-Then open `http://localhost:8080/?robot=<robot_id>&signal=ws://localhost:8080/ws`
-in Chrome. The real camera: `./demo-seyd.sh` (DEMO.md); verify with
-`tools/seyd-smoke.py --robot seyd-demo --no-sensor --camera-ip <ip>`.
+`.github/workflows/ci.yml` runs the same set on every pull request. The real
+camera: `./demo-seyd.sh` (DEMO.md); verify with
+`tools/seyd-smoke.py --robot seyd-demo --no-sensor --camera-ip <ip>`. A
+local cloud (no accounts, no tokens) is `seyd-cloud`'s loop.
 
 Field testing off the LAN: `docs/field-test.md`.
 
