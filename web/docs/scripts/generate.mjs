@@ -55,6 +55,19 @@ importDoc('docs/self-hosting-auth.md', 'cloud/identity-providers.md', { title: '
 // 3. The networking pages must cover every failure class the SDK links to.
 run('python3', [join(tools, 'check-networking.py')]);
 
+// 3b. The integration skill (skills/seyd/, the document a developer hands
+//     their coding agent) must mention every public surface and name only
+//     paths and routes that exist; its two generated references must be
+//     current. Then it is published verbatim at /docs/skill/ for download.
+run('python3', [join(tools, 'gen-skill.py'), '--check']);
+const skillOut = resolve(here, '../public/skill');
+rmSync(skillOut, { recursive: true, force: true });
+cpSync(join(root, 'skills/seyd'), skillOut, { recursive: true });
+// files.txt lets a shell one-liner on the "Integrate with a coding agent" page fetch the whole skill.
+const skillFiles = readdirSync(skillOut, { recursive: true }).filter((f) => f.endsWith('.md')).sort();
+writeFileSync(join(skillOut, 'files.txt'), skillFiles.join('\n') + '\n');
+console.log(`generate: skills/seyd → web/docs/public/skill (${skillFiles.length} files)`);
+
 // 4. TypeScript examples are type-checked, so a guide that imports one cannot show stale code.
 run(resolve(here, '../node_modules/.bin/tsc'), ['--noEmit', '-p', join(root, 'sdks/js/core/examples/tsconfig.json')]);
 

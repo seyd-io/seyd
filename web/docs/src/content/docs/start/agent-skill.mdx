@@ -1,0 +1,79 @@
+---
+title: "Integrate with a coding agent"
+description: A skill file for Claude Code and other coding agents that holds everything an agent needs to plan and build a Seyd integration, interviewing you for what it cannot read from your code.
+---
+
+import { Code } from '@astrojs/starlight/components';
+import skill from '@repo/skills/seyd/SKILL.md?raw';
+
+Most integrations are built with a coding agent in the loop today. The Seyd
+**skill** is the document you hand that agent: what Seyd is and is not, the
+parts every integration has, which form factor fits where your encoded
+frames are, the publisher contract your encoder must meet, enrolment and
+access, the pilot page, the network, and how to verify the result. It
+follows the [Agent Skills](https://agentskills.io) format (a `SKILL.md` with
+front matter plus a `references/` folder), which Claude Code and a growing
+number of agents load on their own.
+
+With it installed, you say
+
+> I want to integrate my robot with Seyd.
+
+and the agent reads your codebase for what it can learn there (an RTSP URL,
+a GStreamer pipeline, a ROS 2 package, an existing web app), interviews you
+for what it cannot (what your encoder can change at run time, what "safe"
+means when the driver vanishes, who the pilots are, how the robot reaches the
+internet), chooses the form factor, writes an integration plan with every
+part filled in, and only then builds and verifies it against the ladder in
+the skill. The questions it asks are the ones a Seyd engineer would ask; the
+rules it enforces are the ones on these pages.
+
+## Install it
+
+**Claude Code.** Skills live in `.claude/skills/<name>/` in a project, or in
+`~/.claude/skills/<name>/` for every project. This fetches the current skill
+from this site into the project you are in:
+
+```bash
+BASE=https://seyd-signal-flj7s44j4a-ew.a.run.app/docs/skill
+mkdir -p .claude/skills/seyd && cd .claude/skills/seyd && \
+curl -fsSL "$BASE/files.txt" | while read -r f; do
+  mkdir -p "$(dirname "$f")" && curl -fsSLo "$f" "$BASE/$f"
+done
+```
+
+Self-hosting the cloud? Replace the origin in `BASE` with your own; the
+skill is served at `/docs/skill/` of every deployment.
+
+**From a checkout.** The skill is `skills/seyd/` in the Seyd repository:
+`cp -r seyd/skills/seyd .claude/skills/`.
+
+**Other agents.** Any agent that reads the Agent Skills format takes the same
+folder. One that does not can be handed `SKILL.md` as context; it points at
+the reference files by name, so include them.
+
+## It is kept current with the code
+
+The skill is a public surface of Seyd, like `seyd.h` or the `seydd.toml`
+reference, and it is held to the same rule: no public surface changes
+without the documentation changing in the same commit. Two of its references
+are generated from the code (`seydd-config.md`, every key of the daemon's
+configuration; `qos-profiles.md`, every number of the three profiles), and
+every build of this site runs `tools/docs/gen-skill.py --check`, which fails
+if a function, callback, element attribute, session event, agent event,
+publisher-control message or failure class exists in the code and is not
+mentioned in the skill, if the skill names a file or a documentation page
+that no longer exists, or if a generated reference is stale. The copy you
+download from this site is therefore the one that matches the code these
+pages were built from.
+
+## The skill, verbatim
+
+What the agent reads first. The references it points at are at
+[`/docs/skill/`](/docs/skill/files.txt): `interview.md` (the question bank
+and the plan template), `form-factor.md`, `robot-daemon.md`,
+`robot-sdk.md`, `publisher-contract.md`, `pilot.md`, `access.md`,
+`networking.md`, `verification.md`, `seydd-config.md` and
+`qos-profiles.md`.
+
+<Code code={skill} lang="markdown" title="skills/seyd/SKILL.md" />

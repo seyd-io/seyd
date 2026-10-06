@@ -12,3 +12,4 @@ src/content/docs/robot/encoder-setup.md
 src/content/docs/networking/starlink.md
 src/content/docs/cloud/identity-providers.md
 public/rust
+public/skill

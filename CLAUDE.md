@@ -121,10 +121,27 @@ real example files, so the rule is mechanical:
   `seyd-ffi`'s `///` comments, which *are* the C reference), the `seyd` Python
   package's docstrings, the exports of `@seyd/core` and `@seyd/web` (TSDoc →
   TypeDoc), `packages/seydd/src/config.rs` (the `seydd.toml` reference), the
-  QoS constants in `seyd-qos`, and the `FailureClass` union in
+  QoS constants in `seyd-qos`, the `FailureClass` union in
   `<seyd-connect-error>` (one page per class under
   `web/docs/src/content/docs/networking/classes/`, enforced by
-  `tools/docs/check-networking.py`).
+  `tools/docs/check-networking.py`), and **the integration skill
+  `skills/seyd/`** (below).
+- **The integration skill changes with every public surface.** `skills/seyd/`
+  (`SKILL.md` + `references/`) is the document a third-party developer hands
+  their coding agent to plan and build an integration: it interviews for what
+  the plan needs, picks the form factor, and holds the rules of every part.
+  It is served verbatim at `/docs/skill/` and explained on
+  `web/docs/src/content/docs/start/agent-skill.mdx`. When you add or change a
+  C function or callback, a Python `Agent` method or handler, a `<seyd-video>`
+  attribute, a `SeydSession` event or failure reason, an `AgentEvent`
+  variant, a publisher-control message, a failure class, a `seydd.toml` key,
+  a QoS number, an example file or a docs page, say in the skill what an
+  integrator does with it, in the same commit. `tools/docs/gen-skill.py`
+  regenerates its two generated references (`seydd-config.md`,
+  `qos-profiles.md`); `--check` runs in the docs build and fails on an
+  unmentioned surface, a dead path or route, or a stale generated file. A
+  change in *behaviour* (a rule, a default, a measured number) is not caught
+  by the check: re-read the reference that states it.
 - **Doc comments are the documentation.** A new field, function or event
   without a `///`, a docstring or a TSDoc comment renders as a blank row on
   the site; write the comment where the code is.
@@ -158,6 +175,7 @@ seyd/
 │   ├── c/       # generated seyd.h, Makefile, abi-smoke + sensor-robot examples
 │   ├── python/  # cffi ABI mode over libseyd; cpp/ and ros2/ not built yet
 │   └── js/core  js/web                # @seyd/core (session API), @seyd/web (<seyd-video>, <seyd-hud>, <seyd-connect-error>); examples/ in each
+├── skills/seyd/               # the integration skill for third-party developers' coding agents (SKILL.md + references/); served at /docs/skill/; checked by tools/docs/gen-skill.py
 ├── cloud/api      # signal v2 + console API; authn/ (pluggable) + accounts/ (ours)
 │   └── db/migrations/         # the schema, applied at boot
 ├── cloud/prober  cloud/monitor
@@ -177,7 +195,7 @@ seyd/
 ├── demo-seyd.sh               # start the camera demo robot
 ├── demo-tello.sh              # start the Tello drone demo robot (--fake: simulated drone on localhost)
 └── tools/                     # harnesses: seyd-smoke.py, cdp.py, latency-ab.py + link-shaper.py + keyframe-probe.py, fec-vectors.py + fec-reference/, find-camera.py, setup-machine.sh
-    └── docs/                  # the docs generators: gen-c-reference.py, gen-python-reference.py, gen-seydd-config.py, gen-qos-profiles.py, check-networking.py
+    └── docs/                  # the docs generators: gen-c-reference.py, gen-python-reference.py, gen-seydd-config.py, gen-qos-profiles.py, check-networking.py, gen-skill.py
 ```
 
 **Import direction:** `tools/` may reach into `packages/`. `packages/` and

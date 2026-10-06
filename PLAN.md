@@ -232,6 +232,7 @@ Node).
 | Networking guidance | the `FailureClass` union in `sdks/js/web/src/seyd-connect-error.ts`, whose "How to fix this" link is `docs.seyd.io/networking/<class>` | `check-networking.py` fails the build if a class has no page | The SDK's links can never dangle |
 | Protocol contracts, ADRs, encoder setup, Starlink, self-hosted identity | `docs/protocol/*.md`, `docs/adr/*.md`, `docs/*.md` | `collect.mjs` copies them in with front matter derived from the first heading | One source; the site is a view of the repo |
 | Examples | `sdks/c/examples/*.c` (built by `make -C sdks/c`), `sdks/python/examples/*.py`, `sdks/js/core/examples/*.ts` (type-checked by the docs build), `sdks/js/web/examples/*.html`, `examples/demo-robot/seydd.toml` | MDX imports the file with `?raw` and renders it | The example is the file; the check that compiles it is the check that the doc is right |
+| The integration skill (decided 2026-10-06) | `skills/seyd/`: `SKILL.md` (the procedure: read the user's code, interview for the rest, choose the form factor, write the plan, implement, verify) and `references/` (one file per part; `seydd-config.md` and `qos-profiles.md` rendered by the generators above) | `gen-skill.py` regenerates the two references; `--check` fails the build if a C function or callback, Python method or handler, `<seyd-video>` attribute, `SeydSession` event or failure reason, `AgentEvent` variant, publisher-control message or failure class exists in the code and is not mentioned, if a named path or `/docs/` route is dead, or if a generated file is stale. `generate.mjs` publishes the folder verbatim at `/docs/skill/` with a `files.txt` manifest | Agent Skills format (`SKILL.md` + references), so Claude Code and other agents load it unchanged; the developer's agent interviews for what the plan needs instead of guessing. The page is *Integrate with a coding agent* under *Start here* |
 
 **Hand-written pages (prose only, examples imported):**
 
@@ -263,8 +264,9 @@ publisher-control loop.
 **Keeping it current (CLAUDE.md carries the rule):** a change to the C header,
 the Python package, the `@seyd/core`/`@seyd/web` exports, `seydd`'s config
 struct, the QoS constants or the failure classes is not done until
-`pnpm --filter docs build` passes and the guide that explains the changed
-surface says the new thing. A new example is a file under an SDK's
+`pnpm --filter docs build` passes, the guide that explains the changed
+surface says the new thing, and `skills/seyd/` says what an integrator does
+with it (the build's `gen-skill.py --check` catches the mechanical part). A new example is a file under an SDK's
 `examples/`, never a code block in a page.
 
 ---

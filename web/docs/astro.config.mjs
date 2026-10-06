@@ -71,6 +71,7 @@ export default defineConfig({
             { label: 'Concepts', slug: 'start/concepts' },
             { label: 'Choose a form factor', slug: 'start/form-factor' },
             { label: 'Quickstart: drive the demo', slug: 'start/quickstart' },
+            { label: 'Integrate with a coding agent', slug: 'start/agent-skill' },
           ],
         },
         {
