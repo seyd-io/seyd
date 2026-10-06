@@ -9,7 +9,7 @@
     "directory": "web/docs"
   },
   "type": "module",
-  "description": "Seyd developer documentation (PLAN.md \u00a72.8): Starlight site; API references generated from the code by tools/docs.",
+  "description": "Seyd developer documentation (PLAN.md §2.8): Starlight site; API references generated from the code by tools/docs.",
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "dev": "node scripts/generate.mjs && astro dev",
@@ -18,11 +18,11 @@
     "test": "echo 'the build is the test'"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.2",
+    "@astrojs/starlight": "^0.42.5",
     "@seyd/core": "workspace:*",
     "@seyd/theme": "workspace:*",
     "@seyd/web": "workspace:*",
-    "astro": "^7.3.3",
+    "astro": "^7.3.5",
     "starlight-typedoc": "^0.23.1",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.13.1"
