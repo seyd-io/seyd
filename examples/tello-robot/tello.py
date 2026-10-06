@@ -355,6 +355,12 @@ class FrameAssembler:
         self.lost_frames = 0
         self.packets = 0
         self.uses_end_flag = False
+        # Timing of the picture most recently delivered: first and last
+        # datagram arrival (monotonic). The bridge reads them to measure the
+        # assembly span and its own hop to the daemon.
+        self.first_at = 0.0
+        self.last_first_at = 0.0
+        self.last_close_at = 0.0
 
     def push(self, dgram: bytes) -> None:
         if len(dgram) < 3:
@@ -369,6 +375,7 @@ class FrameAssembler:
             self.expect_idx = 0
             self.torn = idx != 0
             self.parts = []
+            self.first_at = time.monotonic()
         elif idx != self.expect_idx:
             self.torn = True
         self.expect_idx = idx + 1
@@ -389,6 +396,7 @@ class FrameAssembler:
         if missing_flag:
             log.debug('frame %d closed by frame change (no end flag)', self.frame_no)
         self.frames += 1
+        self.last_first_at, self.last_close_at = self.first_at, time.monotonic()
         self.on_frame(b''.join(parts))
 
 

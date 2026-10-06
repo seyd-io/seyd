@@ -45,6 +45,7 @@ Nothing here is Seyd; it is what a customer writes for their own vehicle.
 """
 import argparse
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -154,9 +155,23 @@ async def main():
                   resume_after_s=args.resume_after_loss_s, after_loss=args.after_loss)
 
     fps_window = {'frames': 0, 'bytes': 0, 'at': time.monotonic(), 'fps': 0.0, 'kbps': 0}
+    # Per picture: first→last datagram (the drone's and Wi-Fi's share) and
+    # last datagram→RTP handed to the daemon (this bridge's share). Rolling,
+    # for the comparison with the native Rust host (host/).
+    timing = {'assembly_ms': collections.deque(maxlen=300), 'push_ms': collections.deque(maxlen=300)}
+
+    def pct(v, p):
+        if not v:
+            return 0.0
+        s = sorted(v)
+        return round(s[round((len(s) - 1) * p)], 2)
 
     def on_video(picture: bytes) -> None:
-        relay.push_picture(picture)
+        sent, _ = relay.push_picture(picture)
+        if sent:
+            a = drone.assembler
+            timing['assembly_ms'].append((a.last_close_at - a.last_first_at) * 1000.0)
+            timing['push_ms'].append((time.monotonic() - a.last_close_at) * 1000.0)
         fps_window['frames'] += 1
         fps_window['bytes'] += len(picture)
 
@@ -293,7 +308,9 @@ async def main():
                 'wifi_disturb': drone.wifi_disturb,
                 'video': {'fps': fps_window['fps'], 'kbps': fps_window['kbps'], 'level': drone.encoder_rate,
                           'lost_frames': drone.assembler.lost_frames, 'idr': relay.stats['idr'],
-                          'codec': relay.codec},
+                          'codec': relay.codec,
+                          'assembly_ms_p50': pct(timing['assembly_ms'], 0.5), 'assembly_ms_p95': pct(timing['assembly_ms'], 0.95),
+                          'push_ms_p95': pct(timing['push_ms'], 0.95)},
             }
             try:
                 tel_sock.send(json.dumps(msg, separators=(',', ':')).encode())
@@ -302,9 +319,9 @@ async def main():
             if now - last_log >= 30:
                 last_log = now
                 idr_iv = relay.idr_intervals[-10:]
-                log.info('stats %s relay=%s drone=%s frames=%d lost=%d idr_interval=%s',
+                log.info('stats %s relay=%s drone=%s frames=%d lost=%d idr_interval=%s assembly_ms p50=%.1f p95=%.1f push_ms p95=%.2f',
                          stats, relay.stats, drone.stats, drone.assembler.frames, drone.assembler.lost_frames,
-                         [round(x, 1) for x in idr_iv])
+                         [round(x, 1) for x in idr_iv], pct(timing['assembly_ms'], 0.5), pct(timing['assembly_ms'], 0.95), pct(timing['push_ms'], 0.95))
 
     try:
         await telemetry_loop()

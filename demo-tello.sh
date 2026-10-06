@@ -4,6 +4,7 @@
 #
 #   ./demo-tello.sh                                    # drone on Wi-Fi, deployed cloud
 #   ./demo-tello.sh --fake                             # no drone: fake_tello.py on localhost
+#   ./demo-tello.sh --rust                             # the native Rust host instead of bridge.py + seydd
 #   SIGNAL_URL=ws://localhost:8080/ws ./demo-tello.sh  # against a local cloud/api
 #   BRIDGE_ARGS=--no-takeoff ./demo-tello.sh           # bench: props off, take-off refused
 #   ENROL_TOKEN=seyd_enr_… ./demo-tello.sh             # first start on a new key
@@ -21,6 +22,7 @@ FAKE=0
 for arg in "$@"; do
   case "$arg" in
     --fake) FAKE=1 ;;
+    --rust) export HOST=rust ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac

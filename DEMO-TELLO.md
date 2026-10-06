@@ -107,6 +107,58 @@ controller no longer steers a range the encoder cannot follow.
 
 ---
 
+### Native host versus daemon (host/)
+
+`examples/tello-robot/host` is the same robot a second way: a Rust program
+that hosts `seyd_core::Agent` directly, the way `seydd` does, and hands it
+each picture as an access unit. The drone protocol, the channels, the safety
+rules and the loss handling are ports of the Python; what disappears is the
+RTP re-framing, the loopback hop and the daemon's depacketizer. It exists to
+measure what that is worth, and it is also the first customer-shaped native
+host of the agent (ADR 0004's "every other form factor is a thin wrapper").
+
+    ./demo-tello.sh --rust         # instead of bridge.py + seydd
+    cargo test -p tello-host       # the protocol vectors and the relay rules
+
+Both hosts report the same two timings per picture, rolling p50/p95, in the
+telemetry (`video.assembly_ms_*`, `video.push_ms_p95`) and in the 30 s stats
+line: **assembly** (first to last datagram of the picture — the drone's and
+its Wi-Fi's share, identical on both paths by construction) and **push**
+(last datagram to the picture handed on: to the RTP socket in Python, to
+`Agent::push_video` in Rust). The daemon path then adds its depacketizer
+and loopback, which the pilot's agent-to-display figure includes.
+
+**Measured on the real drone (2026-10-06)**, each host run alternately
+against the same drone on the desk, `latency` profile, 1.5 Mbps; the pilot
+side is headless Chrome through the cloud relay (the only path it can take
+from this laptop), 20 s recordings, medians of the per-second p50/p95:
+
+| | Python bridge + seydd | Rust host |
+|---|---|---|
+| Hand-off, last datagram → picture handed on, p95 | 0.13–0.23 ms | 0.02–0.03 ms |
+| Assembly, first → last datagram (the drone's), p50 / p95 | 1.9–2.5 / 5.7–9.0 ms | 2.0 / 4.8–6.0 ms |
+| Pilot agent-to-display, p50 (two / three runs) | 33.7, 29.5 ms | 33.7, 30.0, 30.8 ms |
+| Pilot agent-to-display, p95 | 47.0, 34.0 ms | (136.8), 33.5, 37.0 ms |
+
+The bracketed Rust p95 is a run that caught a relay stall (two incomplete
+frames, 120 ms of render jitter) that then sat in the 95th-percentile window
+for ten seconds; the first Python run's 47 ms is the same kind of thing in
+milder form. Between clean runs the two hosts are indistinguishable at the
+pilot: about 30 ms median, 34–37 ms at the 95th percentile, with run-to-run
+variation on the relay path larger than any difference between them. What
+the daemon path adds — RTP framing, a loopback hop, the depacketizer — is
+measurable on the robot (a tenth of a millisecond) and invisible on the
+pilot. The flights' impression that the Rust host felt "a little better" is
+not supported by the numbers; what differs flight to flight is the drone
+link and the pilot's own network, not the host.
+
+So the native host is not a latency feature. It is the proof that a
+customer can embed the agent without the daemon, and the smaller process
+(one binary, no Python, no FFmpeg) is the operational argument for it.
+
+They run alternately, never together: one drone, one controller, the same
+local ports, the same robot id and key.
+
 ## The Tello protocol, as used
 
 Learned from TelloPy (https://github.com/hanyazou/TelloPy) and the

@@ -169,7 +169,7 @@ seyd/
 ├── deploy/                    # Terraform (GCP isolated to one module), Dockerfiles, compose
 │   └── firebase-redirect/     # seydio.web.app: a redirect-only Firebase Hosting site pointing at the Cloud Run URL
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program
-├── examples/tello-robot/      # the Tello drone demo: tello.py (protocol), h264rtp.py (Annex B → RTP), bridge.py, fake_tello.py
+├── examples/tello-robot/      # the Tello drone demo: tello.py (protocol), h264rtp.py (Annex B → RTP), bridge.py, fake_tello.py; host/ = the same robot as a native Rust host of seyd-core (workspace member)
 ├── sim/                       # robot simulation — NOT part of Seyd
 │   ├── video-source.sh        # FFmpeg webcam → RTP/H.264 UDP :5000 (owns encoder settings; intra refresh by default)
 │   └── sensor-source.py       # counter → UDP :5002 at 10 Hz
@@ -309,7 +309,7 @@ directory.
 |---|---|
 | `./demo-start.sh` | "Find a camera and start the demo" in one go: probes `CAMERA_IP`, falls back to `tools/find-camera.py` discovery, starts `./demo-seyd.sh` with the address that answered, waits until the cloud lists the robot online and prints the pilot URL. `--detach` leaves it running; otherwise Ctrl-C stops it. Log in `$DEMO_LOG` (default `$TMPDIR/seyd-demo.log`). |
 | `./demo-seyd.sh` | The camera demo robot: preflights the Hikvision over ISAPI, starts `seydd` + `examples/demo-robot/bridge.py` against the deployed cloud. Overrides: `CAMERA_IP` (CLI beats `.env.local`), `SIGNAL_URL`, `DARC_QOS_PROFILE`, `ROBOT_ID`. Needs `.env.local` (`CAMERA_USER`/`CAMERA_PASSWORD`). |
-| `./demo-tello.sh` | The Tello drone robot (DEMO-TELLO.md): checks the laptop is on the drone's Wi-Fi with the default route elsewhere, then `seydd` + `examples/tello-robot/bridge.py`. `--fake` runs `fake_tello.py` instead of a drone. `BRIDGE_ARGS=--no-takeoff` for bench work. |
+| `./demo-tello.sh` | The Tello drone robot (DEMO-TELLO.md): checks the laptop is on the drone's Wi-Fi with the default route elsewhere, then `seydd` + `examples/tello-robot/bridge.py`. `--fake` runs `fake_tello.py` instead of a drone; `--rust` runs the native host (`examples/tello-robot/host`) instead of `seydd` + the bridge. `BRIDGE_ARGS=--no-takeoff` for bench work. |
 | `./sim-robot.sh` | Webcam robot (no camera needed): FFmpeg webcam + counter sensor + `seydd` as robot `seyd-sim` on the deployed cloud. `VIDEO_DEVICE=lavfi` for a synthetic source; same overrides as above. |
 | `tools/seyd-smoke.py` | End-to-end assertion in headless Chrome (venv: `tools/.venv`, created by `tools/setup-machine.sh`). `--robot`, `--page`, `--signal`, `--no-sensor`, `--camera-ip <ip>` (verifies PTZ moved the real camera), `--query loss=0.05`, `--record N` (per-second stats to jsonl for field runs), `--command flight` for a robot with a `flight` channel instead of `ptz`. |
 | `tools/setup-machine.sh` | Bootstrap a fresh Mac (brew, node, pnpm, rustup, Colima + Docker CLI, tools/.venv, first build). |
