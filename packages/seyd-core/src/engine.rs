@@ -287,7 +287,12 @@ const BACKLOG_SUSTAIN: Duration = Duration::from_millis(300);
 /// Whether a backlog reading should drop the frame: `over` must have held
 /// continuously for `sustain`. `since` is the session's record of when the
 /// backlog was first seen over the threshold, cleared whenever it is under.
-fn backlog_sustained(over: bool, since: &mut Option<Instant>, now: Instant, sustain: Duration) -> bool {
+fn backlog_sustained(
+    over: bool,
+    since: &mut Option<Instant>,
+    now: Instant,
+    sustain: Duration,
+) -> bool {
     if !over {
         *since = None;
         return false;
@@ -778,7 +783,8 @@ impl Engine {
             &frame.data,
         );
         let wire_bytes: usize = pack.chunks.iter().map(|c| c.len()).sum();
-        let threshold = profile.drop_threshold_bytes_at(self.inner.ceiling_kbps(profile, channel), fps);
+        let threshold =
+            profile.drop_threshold_bytes_at(self.inner.ceiling_kbps(profile, channel), fps);
         let mut sent_any = false;
         tracing::trace!(
             frame_id,
@@ -1259,21 +1265,20 @@ impl Engine {
                 .map(|c| c.id)
                 .collect();
             for ch in video_channels.iter().copied() {
-                let ctl = abr
-                    .controllers
-                    .entry(ch)
-                    .or_insert_with(|| {
-                        AbrController::with_ceiling(profile, self.inner.publisher_max_kbps(ch))
-                    });
+                let ctl = abr.controllers.entry(ch).or_insert_with(|| {
+                    AbrController::with_ceiling(profile, self.inner.publisher_max_kbps(ch))
+                });
                 let Some(d) = ctl.step(&sample) else { continue };
                 abr.fec = (d.fec_delta_pct, d.fec_key_pct);
                 abr.reason = d.reason;
                 if d.bitrate_changed {
                     let up = d.max_bitrate_kbps > abr.bitrate_kbps;
                     abr.bitrate_kbps = d.max_bitrate_kbps;
-                    let mut cfg = self
-                        .inner
-                        .publisher_config(profile, ch, if up { "abr-up" } else { "abr-down" });
+                    let mut cfg = self.inner.publisher_config(
+                        profile,
+                        ch,
+                        if up { "abr-up" } else { "abr-down" },
+                    );
                     cfg["maxBitrateKbps"] = serde_json::json!(d.max_bitrate_kbps);
                     cfg["suggestedFps"] = serde_json::json!(d.suggested_fps);
                     let _ = self.inner.events.try_send(Event::RequestedConfig(cfg));
@@ -1301,7 +1306,9 @@ impl Engine {
             let mut sim = self.inner.simulcast.lock().unwrap();
             for ch in video_channels {
                 let Some(st) = sim.get_mut(&ch) else { continue };
-                let Some(sel) = st.selector.step(target) else { continue };
+                let Some(sel) = st.selector.step(target) else {
+                    continue;
+                };
                 // Armed, not applied: `push_video_layer` completes the switch on
                 // the target layer's next keyframe.
                 st.pending = Some(sel.layer);
@@ -1480,7 +1487,10 @@ mod tests {
         // balanced at 30 fps: 2 frames = 25 000 B. Nothing queued → admit.
         let threshold = BALANCED.drop_threshold_bytes(30);
         assert!(!backlog_exceeds(0, threshold, 0));
-        assert!(!backlog_exceeds(threshold, threshold, 0), "at the budget still admits");
+        assert!(
+            !backlog_exceeds(threshold, threshold, 0),
+            "at the budget still admits"
+        );
         // One byte over the budget drops, whatever the buffer's total size —
         // the old free-space check needed ~725 KB queued to reach this point.
         assert!(backlog_exceeds(threshold + 1, threshold, 0));
@@ -1494,23 +1504,43 @@ mod tests {
         let t0 = Instant::now();
         let mut since = None;
         assert!(!backlog_sustained(true, &mut since, t0, BACKLOG_SUSTAIN));
-        assert!(!backlog_sustained(true, &mut since, t0 + Duration::from_millis(200), BACKLOG_SUSTAIN));
+        assert!(!backlog_sustained(
+            true,
+            &mut since,
+            t0 + Duration::from_millis(200),
+            BACKLOG_SUSTAIN
+        ));
         // Back under: the clock resets.
-        assert!(!backlog_sustained(false, &mut since, t0 + Duration::from_millis(250), BACKLOG_SUSTAIN));
+        assert!(!backlog_sustained(
+            false,
+            &mut since,
+            t0 + Duration::from_millis(250),
+            BACKLOG_SUSTAIN
+        ));
         assert!(since.is_none());
         // Over again and staying over: drops once the sustain has elapsed.
         let t1 = t0 + Duration::from_secs(1);
         assert!(!backlog_sustained(true, &mut since, t1, BACKLOG_SUSTAIN));
-        assert!(backlog_sustained(true, &mut since, t1 + BACKLOG_SUSTAIN, BACKLOG_SUSTAIN));
-        assert!(backlog_sustained(true, &mut since, t1 + Duration::from_secs(2), BACKLOG_SUSTAIN));
+        assert!(backlog_sustained(
+            true,
+            &mut since,
+            t1 + BACKLOG_SUSTAIN,
+            BACKLOG_SUSTAIN
+        ));
+        assert!(backlog_sustained(
+            true,
+            &mut since,
+            t1 + Duration::from_secs(2),
+            BACKLOG_SUSTAIN
+        ));
     }
 
     #[test]
     fn a_draining_keyframe_is_not_backlog() {
         let threshold = BALANCED.drop_threshold_bytes(30);
         let kf = 30_000; // wire bytes of a keyframe, ~80 ms at 3 Mbps
-        // Just after the keyframe the queue is keyframe + a delta: legitimately
-        // deep, and the allowance discounts the keyframe.
+                         // Just after the keyframe the queue is keyframe + a delta: legitimately
+                         // deep, and the allowance discounts the keyframe.
         let a = keyframe_allowance(Some((Duration::from_millis(30), kf)), 3000);
         assert_eq!(a, kf);
         assert!(!backlog_exceeds(kf + 12_500, threshold, a));
@@ -1527,8 +1557,14 @@ mod tests {
     #[test]
     fn a_slower_bitrate_request_gives_the_keyframe_longer_to_drain() {
         let kf = 60_000; // 320 ms at 1500 kbps, so the window is 640 ms
-        assert_eq!(keyframe_allowance(Some((Duration::from_millis(600), kf)), 1500), kf);
-        assert_eq!(keyframe_allowance(Some((Duration::from_millis(700), kf)), 1500), 0);
+        assert_eq!(
+            keyframe_allowance(Some((Duration::from_millis(600), kf)), 1500),
+            kf
+        );
+        assert_eq!(
+            keyframe_allowance(Some((Duration::from_millis(700), kf)), 1500),
+            0
+        );
     }
 
     #[test]

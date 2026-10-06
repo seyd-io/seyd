@@ -41,7 +41,11 @@ const LINK_UP_HOLD_MAX: Duration = Duration::from_secs(120);
 struct Args {
     #[arg(long, default_value = "192.168.10.1", env = "TELLO_IP")]
     drone_ip: String,
-    #[arg(long, default_value = "wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws", env = "SIGNAL_URL")]
+    #[arg(
+        long,
+        default_value = "wss://seyd-signal-flj7s44j4a-ew.a.run.app/ws",
+        env = "SIGNAL_URL"
+    )]
     signal_url: String,
     #[arg(long, default_value = "seyd-tello", env = "ROBOT_ID")]
     robot_id: String,
@@ -162,7 +166,11 @@ impl Drone {
     fn video_setup(&self, encoder_rate: u8) {
         self.send(tello::VIDEO_MODE_CMD, tello::PT_SET, &[0]);
         self.send(tello::EXPOSURE_CMD, tello::PT_GET, &[0]);
-        self.send(tello::VIDEO_ENCODER_RATE_CMD, tello::PT_SET, &[encoder_rate]);
+        self.send(
+            tello::VIDEO_ENCODER_RATE_CMD,
+            tello::PT_SET,
+            &[encoder_rate],
+        );
         self.start_video();
     }
     fn send_time(&self) {
@@ -171,7 +179,11 @@ impl Drone {
         self.send(tello::TIME_CMD, tello::PT_DATA1, &p);
     }
     fn takeoff(&self, alt_limit_m: u8) {
-        self.send(tello::SET_ALT_LIMIT_CMD, tello::PT_SET, &[alt_limit_m.clamp(1, 30), 0]);
+        self.send(
+            tello::SET_ALT_LIMIT_CMD,
+            tello::PT_SET,
+            &[alt_limit_m.clamp(1, 30), 0],
+        );
         self.send(tello::TAKEOFF_CMD, tello::PT_SET, &[]);
         tracing::info!(alt_limit_m, "takeoff");
     }
@@ -205,7 +217,12 @@ impl Drone {
 }
 
 fn level_for_kbps(kbps: f64) -> u8 {
-    ENCODER_LEVELS_KBPS.iter().filter(|(_, r)| (*r as f64) <= kbps).map(|(l, _)| *l).max().unwrap_or(1)
+    ENCODER_LEVELS_KBPS
+        .iter()
+        .filter(|(_, r)| (*r as f64) <= kbps)
+        .map(|(l, _)| *l)
+        .max()
+        .unwrap_or(1)
 }
 
 fn percentile(v: &VecDeque<f64>, p: f64) -> f64 {
@@ -227,7 +244,9 @@ fn push_sample(v: &mut VecDeque<f64>, x: f64) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("info".parse()?))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive("info".parse()?),
+        )
         .init();
     let args = Args::parse();
 
@@ -241,8 +260,24 @@ async fn main() -> anyhow::Result<()> {
             layers: Vec::new(),
             max_bitrate_kbps: 4000, // the drone's level 5 (ADR 0011)
         },
-        ChannelSpec { id: 2, kind: ChannelKind::Sensor, name: "telemetry".into(), codec: "json".into(), fps: 0, layers: Vec::new(), max_bitrate_kbps: 0 },
-        ChannelSpec { id: 3, kind: ChannelKind::Command, name: "flight".into(), codec: "json".into(), fps: 0, layers: Vec::new(), max_bitrate_kbps: 0 },
+        ChannelSpec {
+            id: 2,
+            kind: ChannelKind::Sensor,
+            name: "telemetry".into(),
+            codec: "json".into(),
+            fps: 0,
+            layers: Vec::new(),
+            max_bitrate_kbps: 0,
+        },
+        ChannelSpec {
+            id: 3,
+            kind: ChannelKind::Command,
+            name: "flight".into(),
+            codec: "json".into(),
+            fps: 0,
+            layers: Vec::new(),
+            max_bitrate_kbps: 0,
+        },
     ];
     let (agent, mut events) = Agent::start(AgentConfig {
         robot_id: args.robot_id.clone(),
@@ -292,7 +327,11 @@ async fn main() -> anyhow::Result<()> {
         fps: 0.0,
         kbps: 0,
     }));
-    let drone = Arc::new(Drone { ctl: ctl.clone(), addr, st: st.clone() });
+    let drone = Arc::new(Drone {
+        ctl: ctl.clone(),
+        addr,
+        st: st.clone(),
+    });
     let relay = Arc::new(Mutex::new(video::Relay::new()));
     let assembler = Arc::new(Mutex::new(video::FrameAssembler::new()));
 
@@ -315,7 +354,9 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];
             loop {
-                let Ok((n, from)) = ctl.recv_from(&mut buf).await else { continue };
+                let Ok((n, from)) = ctl.recv_from(&mut buf).await else {
+                    continue;
+                };
                 let data = &buf[..n];
                 let now = Instant::now();
                 let mut s = st.lock().unwrap();
@@ -372,12 +413,21 @@ async fn main() -> anyhow::Result<()> {
 
     // ── video receive → agent ────────────────────────────────────────────
     {
-        let (vid, drone, st, agent, relay, assembler) = (vid.clone(), drone.clone(), st.clone(), agent.clone(), relay.clone(), assembler.clone());
+        let (vid, drone, st, agent, relay, assembler) = (
+            vid.clone(),
+            drone.clone(),
+            st.clone(),
+            agent.clone(),
+            relay.clone(),
+            assembler.clone(),
+        );
         let t0 = Instant::now();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 4096];
             loop {
-                let Ok(n) = vid.recv(&mut buf).await else { continue };
+                let Ok(n) = vid.recv(&mut buf).await else {
+                    continue;
+                };
                 let now = Instant::now();
                 let outcome = {
                     let mut s = st.lock().unwrap();
@@ -405,11 +455,24 @@ async fn main() -> anyhow::Result<()> {
                             let capture_ts_us = (pic.first_at - t0).as_micros() as u64;
                             let keyframe = out.keyframe;
                             let bytes = out.data.len() as u64;
-                            agent.push_video(1, VideoFrame { data: Bytes::from(out.data), keyframe, capture_ts_us });
+                            agent.push_video(
+                                1,
+                                VideoFrame {
+                                    data: Bytes::from(out.data),
+                                    keyframe,
+                                    capture_ts_us,
+                                },
+                            );
                             let pushed = Instant::now();
                             let mut s = st.lock().unwrap();
-                            push_sample(&mut s.assembly_ms, (pic.last_at - pic.first_at).as_secs_f64() * 1000.0);
-                            push_sample(&mut s.push_ms, (pushed - pic.last_at).as_secs_f64() * 1000.0);
+                            push_sample(
+                                &mut s.assembly_ms,
+                                (pic.last_at - pic.first_at).as_secs_f64() * 1000.0,
+                            );
+                            push_sample(
+                                &mut s.push_ms,
+                                (pushed - pic.last_at).as_secs_f64() * 1000.0,
+                            );
                             s.fps_window.0 += 1;
                             s.fps_window.1 += bytes;
                         }
@@ -440,7 +503,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                     s.sticks
                 };
-                let mut p = tello::stick_payload(sticks[0], sticks[1], sticks[2], sticks[3], false).to_vec();
+                let mut p = tello::stick_payload(sticks[0], sticks[1], sticks[2], sticks[3], false)
+                    .to_vec();
                 p.extend_from_slice(&tello::time_payload_now());
                 drone.send(tello::STICK_CMD, tello::PT_DATA2, &p);
             }
@@ -457,13 +521,16 @@ async fn main() -> anyhow::Result<()> {
                 let now = Instant::now();
                 let (connected, video_enabled, lost, video_stale) = {
                     let mut s = st.lock().unwrap();
-                    let lost = s.connected && s.last_control_rx.map_or(true, |t| now - t > CONTROL_TIMEOUT);
+                    let lost = s.connected
+                        && s.last_control_rx
+                            .map_or(true, |t| now - t > CONTROL_TIMEOUT);
                     if lost {
                         s.connected = false;
                         s.sticks = [0.0; 4];
                         s.sticks_until = None;
                     }
-                    let stale = s.video_enabled && s.last_video_rx.map_or(true, |t| now - t > VIDEO_TIMEOUT);
+                    let stale = s.video_enabled
+                        && s.last_video_rx.map_or(true, |t| now - t > VIDEO_TIMEOUT);
                     (s.connected, s.video_enabled, lost, stale)
                 };
                 if lost {
@@ -480,7 +547,14 @@ async fn main() -> anyhow::Result<()> {
 
     // ── telemetry at 10 Hz, orphan landing, keyframe safety net, stats ──
     {
-        let (drone, st, agent, relay, assembler, args) = (drone.clone(), st.clone(), agent.clone(), relay.clone(), assembler.clone(), args.clone());
+        let (drone, st, agent, relay, assembler, args) = (
+            drone.clone(),
+            st.clone(),
+            agent.clone(),
+            relay.clone(),
+            assembler.clone(),
+            args.clone(),
+        );
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
             let mut last_log = Instant::now();
@@ -492,47 +566,76 @@ async fn main() -> anyhow::Result<()> {
                     let f = s.flight;
                     let orphan = f.flying()
                         && s.sessions > 0
-                        && s.last_command_at.is_some_and(|t| (now - t).as_secs_f64() > args.orphan_land_s);
+                        && s.last_command_at
+                            .is_some_and(|t| (now - t).as_secs_f64() > args.orphan_land_s);
                     if orphan {
                         s.last_command_at = None;
                         s.stats.orphan_landings += 1;
                     }
                     let r = relay.lock().unwrap();
                     let safety = s.connected
-                        && r.last_idr_at.is_some_and(|t| (now - t).as_millis() as u64 > s.max_gop_ms)
-                        && s.last_video_rx.is_some_and(|t| now - t < Duration::from_secs(1));
+                        && r.last_idr_at
+                            .is_some_and(|t| (now - t).as_millis() as u64 > s.max_gop_ms)
+                        && s.last_video_rx
+                            .is_some_and(|t| now - t < Duration::from_secs(1));
                     if safety {
                         s.stats.safety_net_keyframes += 1;
                     }
                     // the drone's own link: step the encoder level with the tear rate
-                    while s.tears.front().is_some_and(|t| now - *t > Duration::from_secs(15)) {
+                    while s
+                        .tears
+                        .front()
+                        .is_some_and(|t| now - *t > Duration::from_secs(15))
+                    {
                         s.tears.pop_front();
                     }
-                    if args.link_down_tears > 0 && now - s.link_changed_at >= Duration::from_secs(5) {
-                        let recent5 = s.tears.iter().filter(|t| now - **t <= Duration::from_secs(5)).count();
+                    if args.link_down_tears > 0 && now - s.link_changed_at >= Duration::from_secs(5)
+                    {
+                        let recent5 = s
+                            .tears
+                            .iter()
+                            .filter(|t| now - **t <= Duration::from_secs(5))
+                            .count();
                         let want = s.requested_level.min(s.link_level).max(1);
                         if recent5 >= args.link_down_tears && want > 1 {
                             // A step up reversed quickly means the link was only quiet
                             // because the level was low: probe less often next time.
-                            if s.last_step_up_at.is_some_and(|t| now - t < Duration::from_secs(20)) {
+                            if s.last_step_up_at
+                                .is_some_and(|t| now - t < Duration::from_secs(20))
+                            {
                                 s.link_up_hold = (s.link_up_hold * 2).min(LINK_UP_HOLD_MAX);
                             }
-                            s.last_step_up_at = None;   // that step up did not survive; only a surviving one resets the hold
+                            s.last_step_up_at = None; // that step up did not survive; only a surviving one resets the hold
                             s.link_level = want - 1;
                             s.link_changed_at = now;
                             s.stats.link_steps_down += 1;
                             s.pending_rate = Some(s.requested_level.min(s.link_level));
-                            tracing::warn!(torn_in_5s = recent5, cap = s.link_level, next_up_hold_s = s.link_up_hold.as_secs(), "drone link: encoder level cap stepped down");
-                        } else if s.tears.len() <= args.link_up_tears && s.link_level < s.requested_level && now - s.link_changed_at >= s.link_up_hold {
+                            tracing::warn!(
+                                torn_in_5s = recent5,
+                                cap = s.link_level,
+                                next_up_hold_s = s.link_up_hold.as_secs(),
+                                "drone link: encoder level cap stepped down"
+                            );
+                        } else if s.tears.len() <= args.link_up_tears
+                            && s.link_level < s.requested_level
+                            && now - s.link_changed_at >= s.link_up_hold
+                        {
                             s.link_level += 1;
                             s.link_changed_at = now;
                             s.last_step_up_at = Some(now);
                             s.stats.link_steps_up += 1;
                             s.pending_rate = Some(s.requested_level.min(s.link_level));
-                            tracing::info!(torn_in_15s = s.tears.len(), cap = s.link_level, "drone link quiet: encoder level cap stepped up");
-                        } else if s.last_step_up_at.is_some_and(|t| now - t >= Duration::from_secs(60)) {
+                            tracing::info!(
+                                torn_in_15s = s.tears.len(),
+                                cap = s.link_level,
+                                "drone link quiet: encoder level cap stepped up"
+                            );
+                        } else if s
+                            .last_step_up_at
+                            .is_some_and(|t| now - t >= Duration::from_secs(60))
+                        {
                             s.last_step_up_at = None;
-                            s.link_up_hold = LINK_UP_HOLD_MIN;   // the step up held: back to normal probing
+                            s.link_up_hold = LINK_UP_HOLD_MIN; // the step up held: back to normal probing
                         }
                     }
                     if now - s.fps_window.2 >= Duration::from_secs(1) {
@@ -575,7 +678,10 @@ async fn main() -> anyhow::Result<()> {
                     (orphan, safety, msg)
                 };
                 if orphan {
-                    drone.notice(format!("no pilot presence for {:.0}s while airborne — landing", args.orphan_land_s));
+                    drone.notice(format!(
+                        "no pilot presence for {:.0}s while airborne — landing",
+                        args.orphan_land_s
+                    ));
                     drone.land();
                 }
                 if safety {
@@ -609,7 +715,10 @@ async fn main() -> anyhow::Result<()> {
                 let apply = {
                     let mut s = st.lock().unwrap();
                     match s.pending_rate {
-                        Some(level) if s.last_rate_at.map_or(true, |t| t.elapsed() >= Duration::from_secs(2)) => {
+                        Some(level)
+                            if s.last_rate_at
+                                .map_or(true, |t| t.elapsed() >= Duration::from_secs(2)) =>
+                        {
                             s.pending_rate = None;
                             s.last_rate_at = Some(Instant::now());
                             if level != s.encoder_rate {

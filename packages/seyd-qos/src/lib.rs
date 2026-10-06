@@ -230,7 +230,12 @@ mod tests {
         }
         // The profile that freezes on loss until an IDR keeps its net closer.
         let (q, b) = (get("quality").unwrap(), get("balanced").unwrap());
-        assert!(q.max_gop_ms < b.max_gop_ms, "{} vs {}", q.max_gop_ms, b.max_gop_ms);
+        assert!(
+            q.max_gop_ms < b.max_gop_ms,
+            "{} vs {}",
+            q.max_gop_ms,
+            b.max_gop_ms
+        );
         let v = BALANCED.publisher_config(1, "profile");
         assert_eq!(v["maxGopMs"], 10_000);
         assert_eq!(v["preferIntraRefresh"], true);

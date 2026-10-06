@@ -394,8 +394,18 @@ mod tests {
         assert_eq!(c.current().max_bitrate_kbps, 4000);
         assert_eq!(c.floor_kbps(), 1000.0);
         // A limit above the profile changes nothing, and 0 means none.
-        assert_eq!(AbrController::with_ceiling(&crate::LATENCY, 4000).current().max_bitrate_kbps, 1500);
-        assert_eq!(AbrController::with_ceiling(&crate::QUALITY, 0).current().max_bitrate_kbps, 6000);
+        assert_eq!(
+            AbrController::with_ceiling(&crate::LATENCY, 4000)
+                .current()
+                .max_bitrate_kbps,
+            1500
+        );
+        assert_eq!(
+            AbrController::with_ceiling(&crate::QUALITY, 0)
+                .current()
+                .max_bitrate_kbps,
+            6000
+        );
     }
 
     #[test]

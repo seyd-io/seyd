@@ -76,7 +76,14 @@ pub(crate) async fn serve(
 
         let (dg_tx, dg_rx) = mpsc::channel::<Bytes>(1024);
         let (ctl_tx, ctl_rx) = oneshot::channel::<(ControlReader, ControlWriter)>();
-        let session = Session::new(id, conn.clone(), prefix, dg_rx, ctl_rx, send_buffer_capacity);
+        let session = Session::new(
+            id,
+            conn.clone(),
+            prefix,
+            dg_rx,
+            ctl_rx,
+            send_buffer_capacity,
+        );
 
         // Inbound datagrams: strip the prefix, drop anything not ours.
         let dg_conn = conn.clone();

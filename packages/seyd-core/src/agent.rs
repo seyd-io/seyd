@@ -370,7 +370,10 @@ async fn maintain(
     let mut pending_regather: Option<(String, Instant)> = None;
 
     loop {
-        let due = pending_regather.as_ref().map(|(_, at)| *at).unwrap_or_else(|| Instant::now() + Duration::from_secs(3600));
+        let due = pending_regather
+            .as_ref()
+            .map(|(_, at)| *at)
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(3600));
         tokio::select! {
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due)), if pending_regather.is_some() => {
                 let (reason, _) = pending_regather.take().unwrap();
@@ -467,15 +470,26 @@ async fn regather(
         tracing::info!(label = %c.label, priority = c.priority, url = %c.url, "candidate");
     }
     if new_g.candidates.is_empty() {
-        tracing::warn!(retry_s = EMPTY_REGATHER_RETRY.as_secs(), "re-gather found no candidates — the interface is probably between addresses; retrying");
-        *pending_regather = Some(("empty re-gather".into(), Instant::now() + EMPTY_REGATHER_RETRY));
+        tracing::warn!(
+            retry_s = EMPTY_REGATHER_RETRY.as_secs(),
+            "re-gather found no candidates — the interface is probably between addresses; retrying"
+        );
+        *pending_regather = Some((
+            "empty re-gather".into(),
+            Instant::now() + EMPTY_REGATHER_RETRY,
+        ));
     }
     lc.gathered = new_g;
     let _ = mapping_tx.send(lc.gathered.mapping.clone());
     if san_changed {
         // New addresses must be in the certificate's SAN or Chrome
         // rejects the handshake.
-        if let Err(e) = do_rotate(&mut lc.cert, &mut lc.fps, &lc.endpoint, &lc.gathered.san_ips) {
+        if let Err(e) = do_rotate(
+            &mut lc.cert,
+            &mut lc.fps,
+            &lc.endpoint,
+            &lc.gathered.san_ips,
+        ) {
             tracing::error!(error = %e, "certificate rotation after network change failed");
         }
     }
@@ -502,10 +516,22 @@ async fn handle_maint(
             // Not dropped: run it when the rate limit expires. The latest
             // reason wins the label; the earliest due time stays.
             let at = *last_regather + REGATHER_MIN_INTERVAL;
-            let at = pending_regather.as_ref().map(|(_, t)| (*t).min(at)).unwrap_or(at);
+            let at = pending_regather
+                .as_ref()
+                .map(|(_, t)| (*t).min(at))
+                .unwrap_or(at);
             tracing::info!(%reason, in_s = (at - Instant::now()).as_secs(), "network change deferred (rate-limited)");
             *pending_regather = Some((reason.clone(), at));
-        } else if !regather(lc, reason, last_regather, pending_regather, mapping_tx, host).await {
+        } else if !regather(
+            lc,
+            reason,
+            last_regather,
+            pending_regather,
+            mapping_tx,
+            host,
+        )
+        .await
+        {
             return false;
         }
     }

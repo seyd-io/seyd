@@ -153,11 +153,7 @@ impl Channel {
     /// special case.
     pub fn inputs(&self) -> Vec<(u8, String)> {
         if self.layers.is_empty() {
-            return self
-                .input
-                .iter()
-                .map(|u| (0u8, u.clone()))
-                .collect();
+            return self.input.iter().map(|u| (0u8, u.clone())).collect();
         }
         let mut ls: Vec<&Layer> = self.layers.iter().collect();
         ls.sort_by_key(|l| l.activate_above_kbps);
@@ -256,8 +252,7 @@ impl Config {
                 // Two layers that activate at the same target can never both be
                 // chosen, which is a config bug that would otherwise present as
                 // a rung that is silently never used.
-                let mut points: Vec<u32> =
-                    c.layers.iter().map(|l| l.activate_above_kbps).collect();
+                let mut points: Vec<u32> = c.layers.iter().map(|l| l.activate_above_kbps).collect();
                 points.sort_unstable();
                 if points.windows(2).any(|w| w[0] == w[1]) {
                     anyhow::bail!(
@@ -330,7 +325,10 @@ udp = "127.0.0.1:5003"
         assert_eq!(cfg.channels[0].kind, ChannelKind::Video);
         assert_eq!(cfg.channels[1].codec, "json");
         // A single-input channel is layer 0 and nothing else.
-        assert_eq!(cfg.channels[0].inputs(), vec![(0, "rtsp://cam/x".to_string())]);
+        assert_eq!(
+            cfg.channels[0].inputs(),
+            vec![(0, "rtsp://cam/x".to_string())]
+        );
         assert!(cfg.channels[0].layer_specs().is_empty());
     }
 

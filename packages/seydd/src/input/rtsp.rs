@@ -89,7 +89,9 @@ async fn session(url: &str, codec: Codec, tx: &mpsc::Sender<VideoAu>) -> anyhow:
         .streams()
         .iter()
         .position(|s| {
-            s.media() == "video" && s.encoding_name().eq_ignore_ascii_case(codec.rtp_encoding_name())
+            s.media() == "video"
+                && s.encoding_name()
+                    .eq_ignore_ascii_case(codec.rtp_encoding_name())
         })
         .ok_or_else(|| anyhow::anyhow!("no H.264 video stream in RTSP DESCRIBE"))?;
     sess.setup(

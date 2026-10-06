@@ -142,9 +142,7 @@ impl LayerSelector {
             .activate_above_kbps
             .saturating_mul(100 + UP_MARGIN_PCT)
             / 100;
-        let learned = self.insufficient[rung]
-            .saturating_mul(100 + RETRY_MARGIN_PCT)
-            / 100;
+        let learned = self.insufficient[rung].saturating_mul(100 + RETRY_MARGIN_PCT) / 100;
         declared.max(learned)
     }
 
@@ -199,8 +197,7 @@ impl LayerSelector {
             // insufficient" would bar that rung for good.
             let failed_at = self.climbed_at[self.current];
             if failed_at > 0 {
-                self.insufficient[self.current] =
-                    self.insufficient[self.current].max(failed_at);
+                self.insufficient[self.current] = self.insufficient[self.current].max(failed_at);
             }
             self.settled_s = 0;
         }
@@ -219,15 +216,27 @@ mod tests {
 
     fn ladder() -> Vec<VideoLayer> {
         vec![
-            VideoLayer { id: 0, name: "low".into(), activate_above_kbps: 0 },
-            VideoLayer { id: 1, name: "high".into(), activate_above_kbps: 1800 },
+            VideoLayer {
+                id: 0,
+                name: "low".into(),
+                activate_above_kbps: 0,
+            },
+            VideoLayer {
+                id: 1,
+                name: "high".into(),
+                activate_above_kbps: 1800,
+            },
         ]
     }
 
     #[test]
     fn a_single_layer_never_switches() {
         let mut s = LayerSelector::new(
-            vec![VideoLayer { id: 0, name: "only".into(), activate_above_kbps: 0 }],
+            vec![VideoLayer {
+                id: 0,
+                name: "only".into(),
+                activate_above_kbps: 0,
+            }],
             3000,
         )
         .unwrap();
@@ -266,7 +275,9 @@ mod tests {
         for _ in 0..UP_HOLD_S - 1 {
             assert_eq!(s.step(2250), None, "must hold the whole window first");
         }
-        let u = s.step(2250).expect("clears the margin for the whole window");
+        let u = s
+            .step(2250)
+            .expect("clears the margin for the whole window");
         assert_eq!((u.layer, u.reason), (1, "up"));
     }
 
@@ -329,7 +340,10 @@ mod tests {
                 switches += 1;
             }
         }
-        assert!(switches <= 1, "{switches} switches while hovering at the rung edge");
+        assert!(
+            switches <= 1,
+            "{switches} switches while hovering at the rung edge"
+        );
     }
 
     #[test]
@@ -346,7 +360,11 @@ mod tests {
             // Target recovers while low, collapses a few seconds after climbing.
             let target = if s.current() == 1 {
                 on_high_s += 1;
-                if on_high_s > 4 { 1725 } else { 2300 }
+                if on_high_s > 4 {
+                    1725
+                } else {
+                    2300
+                }
             } else {
                 on_high_s = 0;
                 2300
@@ -358,8 +376,15 @@ mod tests {
         }
         // Without backoff this cycled forever, roughly once every 15 s — about
         // 130 switches over this run.
-        assert!(switches <= 10, "{switches} switches in {t}s: still flapping");
-        assert_eq!(s.current(), 0, "should settle on the rung the link sustains");
+        assert!(
+            switches <= 10,
+            "{switches} switches in {t}s: still flapping"
+        );
+        assert_eq!(
+            s.current(),
+            0,
+            "should settle on the rung the link sustains"
+        );
     }
 
     #[test]
@@ -422,9 +447,21 @@ mod tests {
     #[test]
     fn three_rungs_step_down_to_what_the_target_affords() {
         let layers = vec![
-            VideoLayer { id: 0, name: "low".into(), activate_above_kbps: 0 },
-            VideoLayer { id: 1, name: "mid".into(), activate_above_kbps: 1200 },
-            VideoLayer { id: 2, name: "high".into(), activate_above_kbps: 3000 },
+            VideoLayer {
+                id: 0,
+                name: "low".into(),
+                activate_above_kbps: 0,
+            },
+            VideoLayer {
+                id: 1,
+                name: "mid".into(),
+                activate_above_kbps: 1200,
+            },
+            VideoLayer {
+                id: 2,
+                name: "high".into(),
+                activate_above_kbps: 3000,
+            },
         ];
         let mut s = LayerSelector::new(layers, 4000).unwrap();
         assert_eq!(s.current(), 2);

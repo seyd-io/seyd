@@ -25,7 +25,8 @@ pub const NAL_PPS: u8 = 8;
 pub fn split_annexb(buf: &[u8]) -> Vec<&[u8]> {
     let mut out = Vec::new();
     let find = |from: usize| -> Option<usize> {
-        (from..buf.len().saturating_sub(2)).find(|&i| buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1)
+        (from..buf.len().saturating_sub(2))
+            .find(|&i| buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1)
     };
     let Some(first) = find(0) else {
         if !buf.is_empty() {
@@ -96,7 +97,15 @@ pub enum Assembled {
 
 impl FrameAssembler {
     pub fn new() -> Self {
-        Self { frame_no: None, expect_idx: 0, parts: Vec::with_capacity(32 * 1024), first_at: None, torn: false, uses_end_flag: false, stats: AssemblerStats::default() }
+        Self {
+            frame_no: None,
+            expect_idx: 0,
+            parts: Vec::with_capacity(32 * 1024),
+            first_at: None,
+            torn: false,
+            uses_end_flag: false,
+            stats: AssemblerStats::default(),
+        }
     }
 
     /// Feed one datagram. At most one picture (or one loss) results per call
@@ -145,7 +154,11 @@ impl FrameAssembler {
             return Assembled::Lost;
         }
         self.stats.frames += 1;
-        Assembled::Picture(Picture { data, first_at, last_at: now })
+        Assembled::Picture(Picture {
+            data,
+            first_at,
+            last_at: now,
+        })
     }
 }
 
@@ -186,7 +199,16 @@ const REREQUEST: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Relay {
     pub fn new() -> Self {
-        Self { sps: None, pps: None, awaiting_first_idr: true, want_idr: false, kf_requested_at: None, codec: None, last_idr_at: None, stats: RelayStats::default() }
+        Self {
+            sps: None,
+            pps: None,
+            awaiting_first_idr: true,
+            want_idr: false,
+            kf_requested_at: None,
+            codec: None,
+            last_idr_at: None,
+            stats: RelayStats::default(),
+        }
     }
 
     /// A picture was lost on the drone link. Returns true when a keyframe
@@ -213,7 +235,12 @@ impl Relay {
                         self.sps = Some(nal.to_vec());
                         let codec = sps_codec_string(nal);
                         if self.codec.as_deref() != Some(&codec) {
-                            tracing::info!(codec, profile_idc = nal[1], level_idc = nal[3], "stream profile from SPS");
+                            tracing::info!(
+                                codec,
+                                profile_idc = nal[1],
+                                level_idc = nal[3],
+                                "stream profile from SPS"
+                            );
                             self.codec = Some(codec);
                         }
                     }
@@ -264,7 +291,13 @@ impl Relay {
             out.extend_from_slice(n);
         }
         self.stats.frames += 1;
-        (Verdict::Send(Outgoing { data: out, keyframe: idr }), request)
+        (
+            Verdict::Send(Outgoing {
+                data: out,
+                keyframe: idr,
+            }),
+            request,
+        )
     }
 }
 
@@ -282,7 +315,10 @@ mod tests {
     fn assembler_end_flag_gap_and_lost_tail() {
         let t = Instant::now();
         let mut a = FrameAssembler::new();
-        assert!(matches!(a.push(&dg(1, 0, false, b"ab"), t), Assembled::Nothing));
+        assert!(matches!(
+            a.push(&dg(1, 0, false, b"ab"), t),
+            Assembled::Nothing
+        ));
         match a.push(&dg(1, 1, true, b"cd"), t) {
             Assembled::Picture(p) => assert_eq!(p.data, b"abcd"),
             _ => panic!("expected a picture"),
@@ -330,7 +366,11 @@ mod tests {
         let (v, req) = r.push_picture(P, t0 + std::time::Duration::from_millis(600));
         assert!(matches!(v, Verdict::Send(_)) && req);
         assert_eq!(r.stats.forwarded_unrepaired, 2);
-        assert!(matches!(r.push_picture(IDR, t0 + std::time::Duration::from_secs(1)).0, Verdict::Send(_)));
+        assert!(matches!(
+            r.push_picture(IDR, t0 + std::time::Duration::from_secs(1))
+                .0,
+            Verdict::Send(_)
+        ));
         let (_, req) = r.push_picture(P, t0 + std::time::Duration::from_secs(2));
         assert!(!req);
     }

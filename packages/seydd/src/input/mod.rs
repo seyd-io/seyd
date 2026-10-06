@@ -134,7 +134,6 @@ pub fn spawn_video(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,9 +142,18 @@ mod tests {
     fn codec_strings_map_to_the_right_framing() {
         // WebCodecs identifiers, because the same string travels to the
         // browser's decoder untouched.
-        assert_eq!(Codec::from_codec_string("avc1.42001f").unwrap(), Codec::H264);
-        assert_eq!(Codec::from_codec_string("hev1.1.6.L93.B0").unwrap(), Codec::H265);
-        assert_eq!(Codec::from_codec_string("hvc1.1.6.L93.B0").unwrap(), Codec::H265);
+        assert_eq!(
+            Codec::from_codec_string("avc1.42001f").unwrap(),
+            Codec::H264
+        );
+        assert_eq!(
+            Codec::from_codec_string("hev1.1.6.L93.B0").unwrap(),
+            Codec::H265
+        );
+        assert_eq!(
+            Codec::from_codec_string("hvc1.1.6.L93.B0").unwrap(),
+            Codec::H265
+        );
         assert_eq!(Codec::from_codec_string("mjpeg").unwrap(), Codec::Mjpeg);
         assert_eq!(Codec::from_codec_string("JPEG").unwrap(), Codec::Mjpeg);
         assert!(Codec::from_codec_string("vp09.00.10.08").is_err());
@@ -168,7 +176,10 @@ mod tests {
         let err = spawn_video("rtp://127.0.0.1:5000".into(), Codec::Mjpeg, tx)
             .expect_err("bare rtp:// MJPEG must be refused");
         let msg = err.to_string();
-        assert!(msg.contains("rtsp://"), "the error should say what to do instead: {msg}");
+        assert!(
+            msg.contains("rtsp://"),
+            "the error should say what to do instead: {msg}"
+        );
     }
 
     // Needs a runtime: unlike the MJPEG case this reaches `tokio::spawn`.

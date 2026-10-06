@@ -14,13 +14,16 @@ use url::Url;
 /// Turns the signal WebSocket URL into the API's origin:
 /// `wss://signal.seyd.io/ws` → `https://signal.seyd.io`.
 pub fn api_base(signal_url: &str) -> anyhow::Result<Url> {
-    let mut url = Url::parse(signal_url).with_context(|| format!("bad signal_url: {signal_url}"))?;
+    let mut url =
+        Url::parse(signal_url).with_context(|| format!("bad signal_url: {signal_url}"))?;
     let scheme = match url.scheme() {
         "wss" | "https" => "https",
         "ws" | "http" => "http",
         other => bail!("signal_url has scheme {other:?}; expected ws, wss, http or https"),
     };
-    url.set_scheme(scheme).ok().context("could not rewrite the URL scheme")?;
+    url.set_scheme(scheme)
+        .ok()
+        .context("could not rewrite the URL scheme")?;
     url.set_path("");
     url.set_query(None);
     url.set_fragment(None);
@@ -74,7 +77,10 @@ pub async fn run(
         ),
         (400, _) => bail!(
             "the server rejected the request: {}",
-            detail.get("message").and_then(|v| v.as_str()).unwrap_or(&body)
+            detail
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&body)
         ),
         (404, _) => bail!(
             "{url} returned 404 — is signal_url pointing at a Seyd signal server \
@@ -90,16 +96,28 @@ mod tests {
 
     #[test]
     fn derives_the_api_origin_from_the_signal_url() {
-        assert_eq!(api_base("wss://signal.seyd.io/ws").unwrap().as_str(), "https://signal.seyd.io/");
-        assert_eq!(api_base("ws://localhost:8080/ws").unwrap().as_str(), "http://localhost:8080/");
+        assert_eq!(
+            api_base("wss://signal.seyd.io/ws").unwrap().as_str(),
+            "https://signal.seyd.io/"
+        );
+        assert_eq!(
+            api_base("ws://localhost:8080/ws").unwrap().as_str(),
+            "http://localhost:8080/"
+        );
         // Query strings and paths on the signal URL must not leak into the API call.
-        assert_eq!(api_base("ws://host:1/ws?x=1#f").unwrap().as_str(), "http://host:1/");
+        assert_eq!(
+            api_base("ws://host:1/ws?x=1#f").unwrap().as_str(),
+            "http://host:1/"
+        );
         assert!(api_base("ftp://nope/ws").is_err());
     }
 
     #[test]
     fn joins_the_enrol_path_onto_the_origin() {
-        let url = api_base("wss://signal.seyd.io/ws").unwrap().join("api/v1/enrol").unwrap();
+        let url = api_base("wss://signal.seyd.io/ws")
+            .unwrap()
+            .join("api/v1/enrol")
+            .unwrap();
         assert_eq!(url.as_str(), "https://signal.seyd.io/api/v1/enrol");
     }
 }

@@ -345,7 +345,10 @@ mod h265_tests {
         let mut idr = hdr(19).to_vec();
         idr.extend_from_slice(&[1, 2, 3]);
         let au = d.push(&rtp(2, 1000, true, &idr)).unwrap();
-        assert!(au.keyframe, "IDR_W_RADL must mark the access unit as a keyframe");
+        assert!(
+            au.keyframe,
+            "IDR_W_RADL must mark the access unit as a keyframe"
+        );
         assert_eq!(
             &au.data[..],
             &[
@@ -381,8 +384,12 @@ mod h265_tests {
             p.extend_from_slice(data);
             p
         };
-        assert!(d.push(&rtp(10, 500, false, &fu(true, false, &[7, 7]))).is_none());
-        assert!(d.push(&rtp(11, 500, false, &fu(false, false, &[8]))).is_none());
+        assert!(d
+            .push(&rtp(10, 500, false, &fu(true, false, &[7, 7])))
+            .is_none());
+        assert!(d
+            .push(&rtp(11, 500, false, &fu(false, false, &[8])))
+            .is_none());
         let au = d.push(&rtp(12, 500, true, &fu(false, true, &[9]))).unwrap();
         assert!(au.keyframe);
         // Reassembled as one NAL with the original IDR header restored.
@@ -403,9 +410,18 @@ mod h265_tests {
 
     #[test]
     fn codec_strings_map_to_the_right_framing() {
-        assert_eq!(Codec::from_codec_string("avc1.42001f").unwrap(), Codec::H264);
-        assert_eq!(Codec::from_codec_string("hev1.1.6.L93.B0").unwrap(), Codec::H265);
-        assert_eq!(Codec::from_codec_string("hvc1.1.6.L93.B0").unwrap(), Codec::H265);
+        assert_eq!(
+            Codec::from_codec_string("avc1.42001f").unwrap(),
+            Codec::H264
+        );
+        assert_eq!(
+            Codec::from_codec_string("hev1.1.6.L93.B0").unwrap(),
+            Codec::H265
+        );
+        assert_eq!(
+            Codec::from_codec_string("hvc1.1.6.L93.B0").unwrap(),
+            Codec::H265
+        );
         assert_eq!(Codec::from_codec_string("H265").unwrap(), Codec::H265);
         assert!(Codec::from_codec_string("vp09.00.10.08").is_err());
     }
