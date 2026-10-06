@@ -359,9 +359,23 @@ async fn maintain(
         });
     }
     let mut last_regather = Instant::now();
+    // A network change inside the rate limit, or a re-gather that found
+    // nothing, is not dropped: it is held here and run when due. Found on
+    // the Tello demo (2026-10-06): the Wi-Fi switched networks, the re-gather
+    // ran in the instant both old addresses were gone and the new one not yet
+    // up — no route, STUN failed, zero candidates — and the address that
+    // arrived a second later was "ignored (rate-limited)". The agent then
+    // announced an empty candidate list until restarted, and every pilot,
+    // including one on the same machine, went straight to the relay.
+    let mut pending_regather: Option<(String, Instant)> = None;
 
     loop {
+        let due = pending_regather.as_ref().map(|(_, at)| *at).unwrap_or_else(|| Instant::now() + Duration::from_secs(3600));
         tokio::select! {
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due)), if pending_regather.is_some() => {
+                let (reason, _) = pending_regather.take().unwrap();
+                if !regather(&mut lc, &format!("{reason} (deferred)"), &mut last_regather, &mut pending_regather, &mapping_tx, &host).await { break }
+            }
             ev = signal_events.recv() => {
                 let Some(ev) = ev else { break };
                 match ev {
@@ -416,7 +430,7 @@ async fn maintain(
             }
             ev = maint_rx.recv() => {
                 let Some(ev) = ev else { break };
-                if !handle_maint(&mut lc, ev, &mut last_regather, &mapping_tx, &host).await { break }
+                if !handle_maint(&mut lc, ev, &mut last_regather, &mut pending_regather, &mapping_tx, &host).await { break }
             }
             _ = lc.shutdown.notified() => { tracing::info!("agent stopping"); break; }
         }
@@ -424,11 +438,56 @@ async fn maintain(
     lc.endpoint.close();
 }
 
+/// Re-gathers are rate-limited to one per this interval; a change inside it
+/// is deferred to the end of it, never dropped.
+const REGATHER_MIN_INTERVAL: Duration = Duration::from_secs(30);
+/// A re-gather that found no candidate at all is retried after this long:
+/// it almost certainly ran while an interface was between addresses.
+const EMPTY_REGATHER_RETRY: Duration = Duration::from_secs(5);
+
+/// Re-gather candidates after a network change, rotate the certificate if
+/// the addresses changed, announce. Returns `false` when the host is gone.
+async fn regather(
+    lc: &mut Lifecycle,
+    reason: &str,
+    last_regather: &mut Instant,
+    pending_regather: &mut Option<(String, Instant)>,
+    mapping_tx: &tokio::sync::watch::Sender<Option<seyd_nat::PortMapping>>,
+    host: &mpsc::Sender<AgentEvent>,
+) -> bool {
+    *last_regather = Instant::now();
+    tracing::info!(%reason, "network change — re-gathering candidates");
+    let new_g = seyd_nat::gather(&lc.gather_socks, &gather_opts(&lc.cfg)).await;
+    let san_changed = {
+        let a: std::collections::BTreeSet<&IpAddr> = lc.gathered.san_ips.iter().collect();
+        let b: std::collections::BTreeSet<&IpAddr> = new_g.san_ips.iter().collect();
+        a != b
+    };
+    for c in &new_g.candidates {
+        tracing::info!(label = %c.label, priority = c.priority, url = %c.url, "candidate");
+    }
+    if new_g.candidates.is_empty() {
+        tracing::warn!(retry_s = EMPTY_REGATHER_RETRY.as_secs(), "re-gather found no candidates — the interface is probably between addresses; retrying");
+        *pending_regather = Some(("empty re-gather".into(), Instant::now() + EMPTY_REGATHER_RETRY));
+    }
+    lc.gathered = new_g;
+    let _ = mapping_tx.send(lc.gathered.mapping.clone());
+    if san_changed {
+        // New addresses must be in the certificate's SAN or Chrome
+        // rejects the handshake.
+        if let Err(e) = do_rotate(&mut lc.cert, &mut lc.fps, &lc.endpoint, &lc.gathered.san_ips) {
+            tracing::error!(error = %e, "certificate rotation after network change failed");
+        }
+    }
+    announce(lc, host).await
+}
+
 /// One maintenance event. Returns `false` when the host is gone.
 async fn handle_maint(
     lc: &mut Lifecycle,
     ev: Maint,
     last_regather: &mut Instant,
+    pending_regather: &mut Option<(String, Instant)>,
     mapping_tx: &tokio::sync::watch::Sender<Option<seyd_nat::PortMapping>>,
     host: &mpsc::Sender<AgentEvent>,
 ) -> bool {
@@ -438,37 +497,16 @@ async fn handle_maint(
         Maint::NetworkChanged(_) => false,
     };
     if let Maint::NetworkChanged(reason) = &ev {
-        if last_regather.elapsed() < Duration::from_secs(30) {
-            tracing::debug!(%reason, "network change ignored (rate-limited)");
-        } else {
-            *last_regather = Instant::now();
-            tracing::info!(%reason, "network change — re-gathering candidates");
-            let new_g = seyd_nat::gather(&lc.gather_socks, &gather_opts(&lc.cfg)).await;
-            let san_changed = {
-                let a: std::collections::BTreeSet<&IpAddr> = lc.gathered.san_ips.iter().collect();
-                let b: std::collections::BTreeSet<&IpAddr> = new_g.san_ips.iter().collect();
-                a != b
-            };
-            for c in &new_g.candidates {
-                tracing::info!(label = %c.label, priority = c.priority, url = %c.url, "candidate");
-            }
-            lc.gathered = new_g;
-            let _ = mapping_tx.send(lc.gathered.mapping.clone());
-            if san_changed {
-                // New addresses must be in the certificate's SAN or Chrome
-                // rejects the handshake.
-                if let Err(e) = do_rotate(
-                    &mut lc.cert,
-                    &mut lc.fps,
-                    &lc.endpoint,
-                    &lc.gathered.san_ips,
-                ) {
-                    tracing::error!(error = %e, "certificate rotation after network change failed");
-                }
-            }
-            if !announce(lc, host).await {
-                return false;
-            }
+        let elapsed = last_regather.elapsed();
+        if elapsed < REGATHER_MIN_INTERVAL {
+            // Not dropped: run it when the rate limit expires. The latest
+            // reason wins the label; the earliest due time stays.
+            let at = *last_regather + REGATHER_MIN_INTERVAL;
+            let at = pending_regather.as_ref().map(|(_, t)| (*t).min(at)).unwrap_or(at);
+            tracing::info!(%reason, in_s = (at - Instant::now()).as_secs(), "network change deferred (rate-limited)");
+            *pending_regather = Some((reason.clone(), at));
+        } else if !regather(lc, reason, last_regather, pending_regather, mapping_tx, host).await {
+            return false;
         }
     }
     if rotate_due {
