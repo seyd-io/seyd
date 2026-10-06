@@ -10,15 +10,15 @@ license.workspace = true
 
 [dependencies]
 tokio = { workspace = true }
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
-base64 = "0.22"
+ed25519-dalek = { version = "3", features = ["rand_core"] }
+rand = "0.10"
+base64 = "0.23"
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
