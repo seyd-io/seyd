@@ -116,10 +116,18 @@ steps the encoder level down one (`--link-down-tears`), three or fewer in
 what Seyd asked for (effective level = min(requested, link cap)). The
 telemetry shows `level`, `level_requested`, `level_link_cap` and
 `tears_5s`. On the simulator at 3 % datagram loss both hosts reached
-1 Mbps within ten seconds of video starting. Near the antenna the drone
-tears about one picture a second, below the threshold, so nothing changes
-there; the range flight's 1 keyframe in 80 is what it is for, and that
-flight has not been repeated with it yet.
+1 Mbps within ten seconds of video starting.
+
+Flown in the room (2026-10-06, two flights): the level stepped down within
+seconds whenever the drone sat at 1.5 Mbps — 10–20 torn pictures in 5 s —
+and at 1 Mbps the same link tore 2–3 pictures in 15 s, a fifteen-fold
+difference, far more than the six-against-nine datagram count predicts;
+the drone's radio copes with 1 Mbps here and not with 1.5. The first flight
+also showed the policy oscillating, up after 15 quiet seconds and down again
+within 5, six times in two minutes. So a step up reversed within 20 s now
+doubles the quiet time required before the next attempt (15, 30, 60,
+120 s), and only a step up that survives a minute resets it. The range
+flight's 1 keyframe in 80 has not been repeated with this yet.
 
 ---
 

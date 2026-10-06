@@ -33,6 +33,8 @@ const STICK_HZ: u64 = 50;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
 const VIDEO_TIMEOUT: Duration = Duration::from_secs(1);
 const KF_MIN_INTERVAL: Duration = Duration::from_millis(250);
+const LINK_UP_HOLD_MIN: Duration = Duration::from_secs(15);
+const LINK_UP_HOLD_MAX: Duration = Duration::from_secs(120);
 
 #[derive(Parser, Debug, Clone)]
 #[command(about = "Tello drone as a Seyd robot, hosting seyd-core directly")]
@@ -112,6 +114,12 @@ struct State {
     requested_level: u8,
     link_level: u8,
     link_changed_at: Instant,
+    /// Quiet time required before the next step up. Doubles each time a
+    /// step up is reversed within 20 s (the link only *looked* quiet at the
+    /// lower level), up to 2 min; resets once a step up survives a minute.
+    /// Without this the first range flight stepped up and down every 20 s.
+    link_up_hold: Duration,
+    last_step_up_at: Option<Instant>,
     tears: VecDeque<Instant>,
     max_gop_ms: u64,
     last_kf_req: Option<Instant>,
@@ -267,6 +275,8 @@ async fn main() -> anyhow::Result<()> {
         requested_level: args.encoder_rate.max(1),
         link_level: 5,
         link_changed_at: Instant::now(),
+        link_up_hold: LINK_UP_HOLD_MIN,
+        last_step_up_at: None,
         tears: VecDeque::new(),
         max_gop_ms: 10_000,
         last_kf_req: None,
@@ -502,17 +512,27 @@ async fn main() -> anyhow::Result<()> {
                         let recent5 = s.tears.iter().filter(|t| now - **t <= Duration::from_secs(5)).count();
                         let want = s.requested_level.min(s.link_level).max(1);
                         if recent5 >= args.link_down_tears && want > 1 {
+                            // A step up reversed quickly means the link was only quiet
+                            // because the level was low: probe less often next time.
+                            if s.last_step_up_at.is_some_and(|t| now - t < Duration::from_secs(20)) {
+                                s.link_up_hold = (s.link_up_hold * 2).min(LINK_UP_HOLD_MAX);
+                            }
+                            s.last_step_up_at = None;   // that step up did not survive; only a surviving one resets the hold
                             s.link_level = want - 1;
                             s.link_changed_at = now;
                             s.stats.link_steps_down += 1;
                             s.pending_rate = Some(s.requested_level.min(s.link_level));
-                            tracing::warn!(torn_in_5s = recent5, cap = s.link_level, "drone link: encoder level cap stepped down");
-                        } else if s.tears.len() <= args.link_up_tears && s.link_level < s.requested_level && now - s.link_changed_at >= Duration::from_secs(15) {
+                            tracing::warn!(torn_in_5s = recent5, cap = s.link_level, next_up_hold_s = s.link_up_hold.as_secs(), "drone link: encoder level cap stepped down");
+                        } else if s.tears.len() <= args.link_up_tears && s.link_level < s.requested_level && now - s.link_changed_at >= s.link_up_hold {
                             s.link_level += 1;
                             s.link_changed_at = now;
+                            s.last_step_up_at = Some(now);
                             s.stats.link_steps_up += 1;
                             s.pending_rate = Some(s.requested_level.min(s.link_level));
                             tracing::info!(torn_in_15s = s.tears.len(), cap = s.link_level, "drone link quiet: encoder level cap stepped up");
+                        } else if s.last_step_up_at.is_some_and(|t| now - t >= Duration::from_secs(60)) {
+                            s.last_step_up_at = None;
+                            s.link_up_hold = LINK_UP_HOLD_MIN;   // the step up held: back to normal probing
                         }
                     }
                     if now - s.fps_window.2 >= Duration::from_secs(1) {

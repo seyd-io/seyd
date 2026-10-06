@@ -139,7 +139,12 @@ async def main():
     state = {'last_command_at': 0.0, 'sessions': 0, 'max_gop_ms': 10000, 'last_rate_at': 0.0,
              'pending_rate': None, 'last_kf_req': 0.0, 'no_video_since': None,
              'notice': None, 'notice_until': 0.0,
-             'requested_level': args.encoder_rate or 5, 'link_level': 5, 'link_changed_at': 0.0}
+             'requested_level': args.encoder_rate or 5, 'link_level': 5, 'link_changed_at': 0.0,
+             # Quiet time required before the next step up. Doubles each time a
+             # step up is reversed within 20 s (the link only looked quiet at the
+             # lower level), up to 2 min; resets once a step up survives a minute.
+             # Without this the first range flight stepped up and down every 20 s.
+             'link_up_hold': 15.0, 'last_step_up_at': None}
     tears = collections.deque()   # monotonic times of torn pictures, last 15 s
 
     def want_level() -> int:
@@ -311,18 +316,26 @@ async def main():
             if args.link_down_tears > 0 and now - state['link_changed_at'] >= 5.0:
                 recent5 = sum(1 for t in tears if now - t <= 5.0)
                 if recent5 >= args.link_down_tears and want_level() > 1:
+                    if state['last_step_up_at'] is not None and now - state['last_step_up_at'] < 20.0:
+                        state['link_up_hold'] = min(120.0, state['link_up_hold'] * 2)
+                    state['last_step_up_at'] = None   # that step up did not survive; only a surviving one resets the hold
                     state['link_level'] = want_level() - 1
                     state['link_changed_at'] = now
                     stats['link_steps_down'] += 1
-                    log.warning('drone link: %d torn pictures in 5 s — encoder level cap -> %d', recent5, state['link_level'])
+                    log.warning('drone link: %d torn pictures in 5 s — encoder level cap -> %d (next step up after %.0f s quiet)',
+                                recent5, state['link_level'], state['link_up_hold'])
                     submit_level()
                 elif (len(tears) <= args.link_up_tears and state['link_level'] < state['requested_level']
-                      and now - state['link_changed_at'] >= 15.0):
+                      and now - state['link_changed_at'] >= state['link_up_hold']):
                     state['link_level'] += 1
                     state['link_changed_at'] = now
+                    state['last_step_up_at'] = now
                     stats['link_steps_up'] += 1
                     log.info('drone link quiet (%d torn in 15 s) — encoder level cap -> %d', len(tears), state['link_level'])
                     submit_level()
+                elif state['last_step_up_at'] is not None and now - state['last_step_up_at'] >= 60.0:
+                    state['last_step_up_at'] = None
+                    state['link_up_hold'] = 15.0   # the step up held: back to normal probing
             # keyframe safety net (ADR 0009): the profile's maxGopMs, not a timer of our own
             if (drone.connected and relay.last_idr_at is not None and now - relay.last_idr_at > state['max_gop_ms'] / 1000.0
                     and now - drone.last_video_rx < 1.0):
