@@ -105,6 +105,22 @@ The channel declares `max_bitrate_kbps = 4000`, the drone's top encoder
 level, so the `quality` profile's 6 Mbps ceiling becomes 4 and the rate
 controller no longer steers a range the encoder cannot follow.
 
+**The drone's own link is adapted by the host** (both of them, 2026-10-06),
+because Seyd cannot see it: loss is measured on the pilot leg (ADR 0006),
+and PLAN.md item 24 is the proper fix. A picture is as many datagrams as
+its size — 9 at 1.5 Mbps, 6 at 1 Mbps, a keyframe 14 against 9 — and every
+tear is one dropped datagram, so fewer datagrams means fewer tears and
+keyframes that survive. The host counts torn pictures: ten or more in 5 s
+steps the encoder level down one (`--link-down-tears`), three or fewer in
+15 s steps it back up (`--link-up-tears`), one step then hold, never above
+what Seyd asked for (effective level = min(requested, link cap)). The
+telemetry shows `level`, `level_requested`, `level_link_cap` and
+`tears_5s`. On the simulator at 3 % datagram loss both hosts reached
+1 Mbps within ten seconds of video starting. Near the antenna the drone
+tears about one picture a second, below the threshold, so nothing changes
+there; the range flight's 1 keyframe in 80 is what it is for, and that
+flight has not been repeated with it yet.
+
 ---
 
 ### Native host versus daemon (host/)

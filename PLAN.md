@@ -399,9 +399,11 @@ flights:
     controller lowers its request when the source is the bottleneck, and the
     HUD shows "source link" and "Seyd link" as two things, because a pilot
     reacts differently to each. Applies to every camera behind its own
-    wireless hop, which is most field robots. The bridge-local version
-    (lower the drone's encoder level when tears climb, so keyframes shrink
-    and survive) is the stopgap in `examples/tello-robot`.
+    wireless hop, which is most field robots. The bridge-local version —
+    lower the drone's encoder level when torn pictures climb, so keyframes
+    shrink and survive — exists in both Tello hosts since 2026-10-06 and is
+    the stopgap; this item moves that judgment into the agent, fed by a
+    signal every publisher can send.
 25. **Driver presence in the protocol, not in every demo page.** A
     hands-off hover landed after 5 s, a reconnect raised a false "pilot
     gone" from a stale timestamp, and a 5 s 5G stall at 100 m landed the

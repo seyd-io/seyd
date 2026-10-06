@@ -62,6 +62,12 @@ struct Args {
     /// Refuse take-off (bench work with the propellers off).
     #[arg(long)]
     no_takeoff: bool,
+    /// Torn pictures in 5 s that step the encoder level down (0 disables link adaptation).
+    #[arg(long, default_value_t = 10)]
+    link_down_tears: usize,
+    /// Torn pictures in 15 s at or below which the level steps back up.
+    #[arg(long, default_value_t = 3)]
+    link_up_tears: usize,
 }
 
 #[derive(Default)]
@@ -74,6 +80,8 @@ struct Stats {
     rate_changes: u64,
     orphan_landings: u64,
     safety_net_keyframes: u64,
+    link_steps_down: u64,
+    link_steps_up: u64,
     tx: u64,
     rx: u64,
     bad_crc: u64,
@@ -95,6 +103,16 @@ struct State {
     wifi_strength: u8,
     wifi_disturb: u8,
     encoder_rate: u8,
+    /// What Seyd asked for (video-config) and what the drone's own link
+    /// allows; the drone gets min(requested, link). Seyd cannot see the
+    /// drone's 2.4 GHz link (loss is measured on the pilot leg, ADR 0006;
+    /// PLAN.md item 24 is the proper fix), so the host steps the level down
+    /// when pictures tear often — fewer datagrams per picture, keyframes
+    /// that survive — and back up when the link is quiet.
+    requested_level: u8,
+    link_level: u8,
+    link_changed_at: Instant,
+    tears: VecDeque<Instant>,
     max_gop_ms: u64,
     last_kf_req: Option<Instant>,
     last_command_at: Option<Instant>,
@@ -246,6 +264,10 @@ async fn main() -> anyhow::Result<()> {
         wifi_strength: 0,
         wifi_disturb: 0,
         encoder_rate: args.encoder_rate,
+        requested_level: args.encoder_rate.max(1),
+        link_level: 5,
+        link_changed_at: Instant::now(),
+        tears: VecDeque::new(),
         max_gop_ms: 10_000,
         last_kf_req: None,
         last_command_at: None,
@@ -267,11 +289,13 @@ async fn main() -> anyhow::Result<()> {
     // The initial video-config the daemon would have sent: level from the profile's ceiling.
     {
         let cfg = agent.publisher_config(1, "profile");
+        let mut s = st.lock().unwrap();
         if let Some(k) = cfg["maxBitrateKbps"].as_f64() {
-            st.lock().unwrap().encoder_rate = level_for_kbps(k);
+            s.requested_level = level_for_kbps(k);
+            s.encoder_rate = s.requested_level.min(s.link_level);
         }
         if let Some(g) = cfg["maxGopMs"].as_u64() {
-            st.lock().unwrap().max_gop_ms = g;
+            s.max_gop_ms = g;
         }
     }
 
@@ -354,6 +378,7 @@ async fn main() -> anyhow::Result<()> {
                 match outcome {
                     video::Assembled::Nothing => {}
                     video::Assembled::Lost => {
+                        st.lock().unwrap().tears.push_back(now);
                         if relay.lock().unwrap().mark_loss(now) {
                             drone.request_keyframe("torn picture");
                         }
@@ -469,6 +494,27 @@ async fn main() -> anyhow::Result<()> {
                     if safety {
                         s.stats.safety_net_keyframes += 1;
                     }
+                    // the drone's own link: step the encoder level with the tear rate
+                    while s.tears.front().is_some_and(|t| now - *t > Duration::from_secs(15)) {
+                        s.tears.pop_front();
+                    }
+                    if args.link_down_tears > 0 && now - s.link_changed_at >= Duration::from_secs(5) {
+                        let recent5 = s.tears.iter().filter(|t| now - **t <= Duration::from_secs(5)).count();
+                        let want = s.requested_level.min(s.link_level).max(1);
+                        if recent5 >= args.link_down_tears && want > 1 {
+                            s.link_level = want - 1;
+                            s.link_changed_at = now;
+                            s.stats.link_steps_down += 1;
+                            s.pending_rate = Some(s.requested_level.min(s.link_level));
+                            tracing::warn!(torn_in_5s = recent5, cap = s.link_level, "drone link: encoder level cap stepped down");
+                        } else if s.tears.len() <= args.link_up_tears && s.link_level < s.requested_level && now - s.link_changed_at >= Duration::from_secs(15) {
+                            s.link_level += 1;
+                            s.link_changed_at = now;
+                            s.stats.link_steps_up += 1;
+                            s.pending_rate = Some(s.requested_level.min(s.link_level));
+                            tracing::info!(torn_in_15s = s.tears.len(), cap = s.link_level, "drone link quiet: encoder level cap stepped up");
+                        }
+                    }
                     if now - s.fps_window.2 >= Duration::from_secs(1) {
                         let dt = (now - s.fps_window.2).as_secs_f64();
                         s.fps = (s.fps_window.0 as f64 / dt * 10.0).round() / 10.0;
@@ -494,6 +540,8 @@ async fn main() -> anyhow::Result<()> {
                         "wind": f.wind_state, "imu_ok": f.imu_state, "hot": f.temperature_height,
                         "wifi": s.wifi_strength, "wifi_disturb": s.wifi_disturb,
                         "video": {"fps": s.fps, "kbps": s.kbps, "level": s.encoder_rate,
+                                  "level_requested": s.requested_level, "level_link_cap": s.link_level,
+                                  "tears_5s": s.tears.iter().filter(|t| now - **t <= Duration::from_secs(5)).count(),
                                   "lost_frames": a.stats.lost_frames, "idr": r.stats.idr, "codec": r.codec,
                                   "assembly_ms_p50": percentile(&s.assembly_ms, 0.5),
                                   "assembly_ms_p95": percentile(&s.assembly_ms, 0.95),
@@ -520,9 +568,9 @@ async fn main() -> anyhow::Result<()> {
                     let r = relay.lock().unwrap();
                     let a = assembler.lock().unwrap();
                     tracing::info!(
-                        "stats commands={} stale={} takeoffs={} landings={} keyframe_requests={} rate_changes={} orphan_landings={} safety_net_keyframes={} relay={:?} tx={} rx={} bad_crc={} video_bytes={} reconnects={} frames={} lost={} assembly_ms p50={:.1} p95={:.1} push_ms p95={:.2}",
+                        "stats commands={} stale={} takeoffs={} landings={} keyframe_requests={} rate_changes={} orphan_landings={} safety_net_keyframes={} link_steps_down={} link_steps_up={} relay={:?} tx={} rx={} bad_crc={} video_bytes={} reconnects={} frames={} lost={} assembly_ms p50={:.1} p95={:.1} push_ms p95={:.2}",
                         s.stats.commands, s.stats.stale, s.stats.takeoffs, s.stats.landings, s.stats.keyframe_requests, s.stats.rate_changes,
-                        s.stats.orphan_landings, s.stats.safety_net_keyframes, r.stats, s.stats.tx, s.stats.rx, s.stats.bad_crc, s.stats.video_bytes,
+                        s.stats.orphan_landings, s.stats.safety_net_keyframes, s.stats.link_steps_down, s.stats.link_steps_up, r.stats, s.stats.tx, s.stats.rx, s.stats.bad_crc, s.stats.video_bytes,
                         s.stats.reconnects, a.stats.frames, a.stats.lost_frames,
                         percentile(&s.assembly_ms, 0.5), percentile(&s.assembly_ms, 0.95), percentile(&s.push_ms, 0.95)
                     );
@@ -612,7 +660,10 @@ async fn main() -> anyhow::Result<()> {
                         tracing::info!(kbps = cfg["maxBitrateKbps"].as_f64(), gop_ms = cfg["maxGopMs"].as_u64(), reason = cfg["reason"].as_str(), "video-config");
                         let mut s = st.lock().unwrap();
                         if let Some(k) = cfg["maxBitrateKbps"].as_f64() {
-                            if k > 0.0 { s.pending_rate = Some(level_for_kbps(k)); }
+                            if k > 0.0 {
+                                s.requested_level = level_for_kbps(k);
+                                s.pending_rate = Some(s.requested_level.min(s.link_level));
+                            }
                         }
                         if let Some(g) = cfg["maxGopMs"].as_u64() {
                             if g > 0 { s.max_gop_ms = g; }

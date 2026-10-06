@@ -26,7 +26,18 @@ the vendor protocol (tello.py) on the other side:
     drone's encoder level (1–5 = 1–4 Mbps) is set to the highest at or below
     N, at most once per 2 s, and G becomes the keyframe safety net: if no IDR
     has been seen for G ms one is requested (ADR 0009 — on demand, never on
-    a one-second timer);
+    a one-second timer).
+
+  The drone's own link is adapted here, because Seyd cannot see it (loss is
+  measured on the pilot leg, ADR 0006; PLAN.md item 24 is the proper fix).
+  Every torn picture is a datagram the 2.4 GHz link dropped, and a picture
+  is as many datagrams as its size: 9 at 1.5 Mbps, 6 at 1 Mbps, a keyframe
+  14 against 9. So when tears climb the level steps down (fewer datagrams,
+  fewer tears, keyframes that survive) and when the link is quiet it steps
+  back up, never above what Seyd asked for: effective = min(requested,
+  link). Thresholds: ≥ --link-down-tears torn pictures in 5 s steps down,
+  ≤ --link-up-tears in 15 s steps up; one step, then hold. The range flight
+  (DEMO-TELLO.md) is what this is for: 1 keyframe in 80 arrived at 1.5 Mbps.
     {"type": "session", "state": "ended", "sessions": 0} → land if airborne.
 
 Safety, in order of what fails first:
@@ -105,6 +116,8 @@ async def main():
     ap.add_argument('--after-loss', choices=['forward', 'wait'], default='forward',
                     help='after a torn picture: keep forwarding delta frames while the keyframe is on its way '
                          '(smear, like the vendor app), or hold them back until it arrives (freeze)')
+    ap.add_argument('--link-down-tears', type=int, default=10, help='torn pictures in 5 s that step the encoder level down (0 disables link adaptation)')
+    ap.add_argument('--link-up-tears', type=int, default=3, help='torn pictures in 15 s at or below which the level steps back up')
     ap.add_argument('--resume-after-loss-s', type=float, default=1.5,
                     help='with --after-loss wait: forward delta frames again if no keyframe came within this long')
     args = ap.parse_args()
@@ -122,10 +135,24 @@ async def main():
                   video_port=args.video_local_port, alt_limit_m=args.alt_limit_m,
                   encoder_rate=args.encoder_rate, zoom=args.zoom)
     stats = {'commands': 0, 'stale': 0, 'takeoffs': 0, 'landings': 0, 'keyframe_requests': 0,
-             'rate_changes': 0, 'orphan_landings': 0, 'safety_net_keyframes': 0}
+             'rate_changes': 0, 'orphan_landings': 0, 'safety_net_keyframes': 0, 'link_steps_down': 0, 'link_steps_up': 0}
     state = {'last_command_at': 0.0, 'sessions': 0, 'max_gop_ms': 10000, 'last_rate_at': 0.0,
              'pending_rate': None, 'last_kf_req': 0.0, 'no_video_since': None,
-             'notice': None, 'notice_until': 0.0}
+             'notice': None, 'notice_until': 0.0,
+             'requested_level': args.encoder_rate or 5, 'link_level': 5, 'link_changed_at': 0.0}
+    tears = collections.deque()   # monotonic times of torn pictures, last 15 s
+
+    def want_level() -> int:
+        return max(1, min(state['requested_level'], state['link_level']))
+
+    def submit_level() -> None:
+        level = want_level()
+        if level == drone.encoder_rate and state['pending_rate'] is None:
+            return
+        idle = state['pending_rate'] is None
+        state['pending_rate'] = level
+        if idle:
+            asyncio.ensure_future(drain_rate())
 
     def notice(text: str, seconds: float = 8.0) -> None:
         # What the pilot must be told: a refusal or an automatic landing is
@@ -154,6 +181,10 @@ async def main():
     relay = Relay(send=send_rtp, now=time.monotonic, on_need_keyframe=lambda: request_keyframe('torn frame'),
                   resume_after_s=args.resume_after_loss_s, after_loss=args.after_loss)
 
+    def on_video_loss(n: int) -> None:
+        tears.append(time.monotonic())
+        relay.mark_loss(n)
+
     fps_window = {'frames': 0, 'bytes': 0, 'at': time.monotonic(), 'fps': 0.0, 'kbps': 0}
     # Per picture: first→last datagram (the drone's and Wi-Fi's share) and
     # last datagram→RTP handed to the daemon (this bridge's share). Rolling,
@@ -176,7 +207,7 @@ async def main():
         fps_window['bytes'] += len(picture)
 
     drone.on_video = on_video
-    drone.on_video_loss = relay.mark_loss
+    drone.on_video_loss = on_video_loss
     drone.on_state = lambda s: log.info('drone %s', s)
     await drone.start()
 
@@ -237,10 +268,8 @@ async def main():
             gop = m.get('maxGopMs')
             log.info('video-config: %s kbps, gop %s ms (%s)', kbps, gop, m.get('reason'))
             if isinstance(kbps, (int, float)) and kbps > 0:
-                idle = state['pending_rate'] is None
-                state['pending_rate'] = level_for_kbps(kbps)
-                if idle:
-                    asyncio.ensure_future(drain_rate())
+                state['requested_level'] = level_for_kbps(kbps)
+                submit_level()
             if isinstance(gop, (int, float)) and gop > 0:
                 state['max_gop_ms'] = int(gop)
         elif t == 'session':
@@ -276,6 +305,24 @@ async def main():
                 stats['orphan_landings'] += 1
                 state['last_command_at'] = 0.0
                 drone.land()
+            # the drone's own link: step the encoder level with the tear rate
+            while tears and now - tears[0] > 15.0:
+                tears.popleft()
+            if args.link_down_tears > 0 and now - state['link_changed_at'] >= 5.0:
+                recent5 = sum(1 for t in tears if now - t <= 5.0)
+                if recent5 >= args.link_down_tears and want_level() > 1:
+                    state['link_level'] = want_level() - 1
+                    state['link_changed_at'] = now
+                    stats['link_steps_down'] += 1
+                    log.warning('drone link: %d torn pictures in 5 s — encoder level cap -> %d', recent5, state['link_level'])
+                    submit_level()
+                elif (len(tears) <= args.link_up_tears and state['link_level'] < state['requested_level']
+                      and now - state['link_changed_at'] >= 15.0):
+                    state['link_level'] += 1
+                    state['link_changed_at'] = now
+                    stats['link_steps_up'] += 1
+                    log.info('drone link quiet (%d torn in 15 s) — encoder level cap -> %d', len(tears), state['link_level'])
+                    submit_level()
             # keyframe safety net (ADR 0009): the profile's maxGopMs, not a timer of our own
             if (drone.connected and relay.last_idr_at is not None and now - relay.last_idr_at > state['max_gop_ms'] / 1000.0
                     and now - drone.last_video_rx < 1.0):
@@ -307,6 +354,8 @@ async def main():
                 'wifi': drone.wifi_strength,
                 'wifi_disturb': drone.wifi_disturb,
                 'video': {'fps': fps_window['fps'], 'kbps': fps_window['kbps'], 'level': drone.encoder_rate,
+                          'level_requested': state['requested_level'], 'level_link_cap': state['link_level'],
+                          'tears_5s': sum(1 for t in tears if now - t <= 5.0),
                           'lost_frames': drone.assembler.lost_frames, 'idr': relay.stats['idr'],
                           'codec': relay.codec,
                           'assembly_ms_p50': pct(timing['assembly_ms'], 0.5), 'assembly_ms_p95': pct(timing['assembly_ms'], 0.95),
