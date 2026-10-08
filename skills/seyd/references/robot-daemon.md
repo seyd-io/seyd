@@ -239,6 +239,17 @@ aarch64-unknown-linux-gnu` with a linker for that target installed (the
 `cross` tool wraps that in a container). One static-ish binary and the TOML
 file are the whole install.
 
+On Windows the same `cargo build -p seydd --release` with the msvc toolchain
+gives `seydd.exe`; nothing in the core is Unix-only (the gateway for
+PCP/NAT-PMP comes from the IP helper API, the QUIC port is bound
+`SO_EXCLUSIVEADDRUSE` so no other process can take it). Two things differ:
+the defaults `--config /etc/seyd/seydd.toml` and `credential_path =
+/var/lib/seyd/robot.key` are Unix paths, so pass `--config` and set
+`credential_path` to a directory only the service account can read — the
+key file is created with the directory's ACL, not `0600` as on Unix. Run it
+as a Windows service with the tooling the integrator already uses (`sc
+create`, NSSM, Task Scheduler); the repository ships no service wrapper.
+
 ## Codecs
 
 | Codec | `codec` | Ingest | Browser |

@@ -7,14 +7,15 @@ checked in, so a C or Python consumer needs no Rust toolchain.
 ## Build
 
 ```bash
-cargo build -p seyd-ffi --release   # produces target/release/libseyd.{dylib,so,a}
+cargo build -p seyd-ffi --release   # produces target/release/libseyd.{dylib,so,a}; on Windows seyd.dll
 make check                          # builds and runs the ABI conformance test
 make                                # builds every example into build/
 ```
 
 Link against `libseyd` (cdylib) or `libseyd.a` (staticlib). The static library
 pulls in the platform's TLS and networking libraries; see the `LDFLAGS` in the
-`Makefile` for the per-platform list.
+`Makefile` for the per-platform list. The Makefile also works on Windows under
+GNU make with MinGW gcc (an MSYS2 shell), linking `seyd.dll` by name.
 
 ## The shape of an integration
 

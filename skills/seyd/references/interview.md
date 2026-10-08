@@ -42,8 +42,10 @@ whose answer you already have and explain the ones the user finds odd.
 ## B. The robot program and platform
 
 7. **Operating system, architecture and board.** Linux x86-64, ARM64 (Jetson,
-   Raspberry Pi 5, an industrial PC), macOS for development.
-   *Decides the build* (every Seyd crate is pure Rust; cross-builds are plain).
+   Raspberry Pi 5, an industrial PC), Windows x86-64 (an industrial PC, a
+   vehicle computer), macOS for development.
+   *Decides the build* (every Seyd crate is pure Rust; cross-builds are plain;
+   Windows builds with the msvc toolchain and is covered by CI).
 8. **Language of the software that will hold the Seyd agent**, if an SDK is
    needed: Python, C, C++, Go, Rust, ROS 2 (C++ or Python node).
    *Decides the SDK.* C++ and Go go through `seyd.h`; ROS 2 nodes wrap the C

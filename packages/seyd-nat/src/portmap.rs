@@ -78,7 +78,44 @@ impl PortMapping {
 // ── gateway discovery ──────────────────────────────────────────────────────
 
 /// Best-effort IPv4 default gateway, for the UDP-to-gateway protocols.
+/// `None` means PCP and NAT-PMP are skipped; UPnP still runs (SSDP finds the
+/// router by multicast, not by address).
 pub fn default_gateway() -> Option<Ipv4Addr> {
+    #[cfg(windows)]
+    {
+        windows_default_gateway()
+    }
+    #[cfg(not(windows))]
+    {
+        unix_default_gateway()
+    }
+}
+
+/// Windows: ask the IP helper API for the route it would take to a public
+/// address. The next hop of that route is the gateway. No `route print`
+/// parsing — its table headers are localised, its columns are not stable.
+#[cfg(windows)]
+fn windows_default_gateway() -> Option<Ipv4Addr> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestRoute, MIB_IPFORWARDROW};
+    // Any globally routed address resolves to the default route; this one is
+    // never contacted, only looked up.
+    let probe = u32::from_ne_bytes(Ipv4Addr::new(1, 1, 1, 1).octets());
+    // SAFETY: `row` is a plain-data struct the call fills in; zeroed is a
+    // valid initial state and the pointer outlives the call.
+    let row = unsafe {
+        let mut row: MIB_IPFORWARDROW = std::mem::zeroed();
+        if GetBestRoute(probe, 0, &mut row) != 0 {
+            return None;
+        }
+        row
+    };
+    let next_hop = Ipv4Addr::from(row.dwForwardNextHop.to_ne_bytes());
+    // An on-link "route" to the probe itself means there is no gateway.
+    (!next_hop.is_unspecified() && next_hop != Ipv4Addr::new(1, 1, 1, 1)).then_some(next_hop)
+}
+
+#[cfg(not(windows))]
+fn unix_default_gateway() -> Option<Ipv4Addr> {
     // Linux: the kernel routing table.
     if let Ok(table) = std::fs::read_to_string("/proc/net/route") {
         for line in table.lines().skip(1) {

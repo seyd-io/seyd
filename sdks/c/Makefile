@@ -7,6 +7,8 @@
 #   make PROFILE=release
 #
 # libseyd comes from `cargo build -p seyd-ffi`; this Makefile builds it for you.
+# Linux, macOS and Windows (GNU make + MinGW gcc, e.g. an MSYS2 shell; the
+# library itself may come from either the msvc or the gnu Rust toolchain).
 
 PROFILE ?= debug
 ROOT    := $(abspath $(CURDIR)/../..)
@@ -18,7 +20,12 @@ LDFLAGS += -L $(TARGET) -lseyd
 
 # The Rust cdylib pulls in the platform's TLS, threading and network libraries.
 UNAME := $(shell uname -s)
-ifeq ($(UNAME),Darwin)
+EXE   :=
+ifeq ($(OS),Windows_NT)
+    # seyd.dll is found by name; ld resolves -lseyd to it without an import lib.
+    EXE     := .exe
+    RUNPATH := PATH="$(TARGET):$$PATH"
+else ifeq ($(UNAME),Darwin)
     LDFLAGS += -framework CoreFoundation -framework Security -framework SystemConfiguration
     RUNPATH := DYLD_LIBRARY_PATH=$(TARGET)
 else
@@ -27,7 +34,7 @@ else
 endif
 
 EXAMPLES := abi-smoke sensor-robot
-BINS     := $(addprefix build/,$(EXAMPLES))
+BINS     := $(addsuffix $(EXE),$(addprefix build/,$(EXAMPLES)))
 
 all: $(BINS)
 
@@ -36,12 +43,12 @@ all: $(BINS)
 lib:
 	cd $(ROOT) && $(CARGO) -p seyd-ffi
 
-build/%: examples/%.c include/seyd.h | lib
+build/%$(EXE): examples/%.c include/seyd.h | lib
 	@mkdir -p build
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-check: build/abi-smoke
-	$(RUNPATH) ./build/abi-smoke
+check: build/abi-smoke$(EXE)
+	$(RUNPATH) ./build/abi-smoke$(EXE)
 
 clean:
 	rm -rf build

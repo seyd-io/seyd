@@ -35,7 +35,7 @@ cargo build -p seydd --release
 ./target/release/seydd --help
 ```
 
-The binary is `target/release/seydd`. Every crate is pure Rust, which is what keeps cross-builds for ARM boards simple.
+The binary is `target/release/seydd`. Every crate is pure Rust, which is what keeps cross-builds for ARM boards simple, and what makes Windows a plain `cargo build` too (`seydd.exe`, msvc toolchain; CI builds and tests it).
 
 ```
 seydd [--config /etc/seyd/seydd.toml] [--probe-input SECONDS] [enrol --token TOKEN [--signal-url URL]]
@@ -110,6 +110,8 @@ WantedBy=multi-user.target
 ```
 
 The credential at `/var/lib/seyd/robot.key` is what stays enrolled. Back it up with the machine; lose it and you need a new token. `RUST_LOG` is the log filter (`info`, or `seyd_core=debug`).
+
+On Windows, pass `--config` (the default is a Unix path) and set `credential_path` to a directory only the service account can read: the key file takes that directory's ACL, where Unix sets it `0600`. The daemon binds its QUIC port `SO_EXCLUSIVEADDRUSE`, so no other process can bind the same port while it runs, and finds the router for PCP/NAT-PMP through the IP helper API. Run it as a service with whatever the machine already uses (`sc create`, NSSM, Task Scheduler); the repository ships no wrapper for that either.
 
 ## The robot-side interfaces
 

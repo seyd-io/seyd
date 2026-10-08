@@ -21,12 +21,16 @@ Link against `libseyd` (cdylib) or `libseyd.a` (staticlib). The library pulls in
 ```makefile
 CFLAGS  += -std=c11 -Wall -Wextra -O2 -I include
 LDFLAGS += -L $(TARGET) -lseyd
-ifeq ($(UNAME),Darwin)
+ifeq ($(OS),Windows_NT)
+    # seyd.dll is found by name; ld resolves -lseyd to it without an import lib.
+else ifeq ($(UNAME),Darwin)
     LDFLAGS += -framework CoreFoundation -framework Security -framework SystemConfiguration
 else
     LDFLAGS += -lpthread -ldl -lm
 endif
 ```
+
+On Windows the library is `target/release/seyd.dll` (plus `seyd.dll.lib` for MSVC); the Makefile runs under GNU make with MinGW gcc, which is what CI does in an MSYS2 shell, and the two examples build there unchanged. Put the directory holding `seyd.dll` on `PATH` to run them.
 
 At run time the dynamic library must be findable: the Makefile sets `DYLD_LIBRARY_PATH` or `LD_LIBRARY_PATH` to the target directory when it runs the check.
 

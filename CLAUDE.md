@@ -333,6 +333,11 @@ pnpm -r build && pnpm -r test                                           # @seyd/
 python3 tools/check-headers.py                                          # every source file carries the license header
 cargo deny check licenses                                               # dependency licenses stay within deny.toml
 
+# Windows is a supported robot host: CI runs clippy, the tests and both SDK checks on windows-latest.
+# From a Mac, the type-check (ring has C sources, so it needs a Windows-targeting C compiler):
+brew install mingw-w64 && rustup target add x86_64-pc-windows-gnu
+CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+
 # End to end on this machine (sim source, no camera), against the hosted cloud:
 VIDEO_DEVICE=lavfi ./sim-robot.sh                                       # robot seyd-sim; first run needs ENROL_TOKEN=…
 tools/.venv/bin/python3 tools/seyd-smoke.py --robot seyd-sim [--query loss=0.05]   # venv: tools/setup-machine.sh
