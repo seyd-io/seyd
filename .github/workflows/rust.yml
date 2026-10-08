@@ -73,7 +73,11 @@ jobs:
           path-type: inherit
           install: make mingw-w64-ucrt-x86_64-gcc
       - name: C ABI conformance
-        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
+        if: runner.os != 'Windows'
+        run: make -C sdks/c check
+      - name: C ABI conformance (MSYS2)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
         run: make -C sdks/c check
       - name: Python SDK
         run: |
