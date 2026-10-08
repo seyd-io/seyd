@@ -49,14 +49,14 @@ importers:
         specifier: ^0.1.13
         version: 0.1.19
       '@types/node':
-        specifier: ^22.20.1
-        version: 22.20.1
+        specifier: ^22.20.5
+        version: 22.20.5
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
       vite:
         specifier: ^6.0.0
-        version: 6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1)
+        version: 6.4.3(@types/node@22.20.5)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1)
 
   web/docs:
     dependencies:
@@ -109,7 +109,7 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^6.0.0
-        version: 6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1)
+        version: 6.4.3(@types/node@24.13.6)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1)
 
 packages:
 
@@ -1202,8 +1202,8 @@ packages:
   '@types/nlcst@2.0.3':
     resolution: {integrity: sha512-vSYNSDe6Ix3q+6Z7ri9lyWqgGhJTmzRjZRqyq15N0Z/1/UnVsno9G/N40NBijoYx2seFDIl0+B2mgAb9mezUCA==}
 
-  '@types/node@22.20.1':
-    resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
+  '@types/node@22.20.5':
+    resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
 
   '@types/node@24.13.6':
     resolution: {integrity: sha512-SGrw/h3KPFshy3OE6ZL53LMBG5vGQQ8/gIpiqz/kRZhPJ7HgwCEs8LBuNtWLa8dvGZVpSF7+Bf+c11HUrCb/yg==}
@@ -3194,7 +3194,7 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
 
-  '@types/node@22.20.1':
+  '@types/node@22.20.5':
     dependencies:
       undici-types: 6.21.0
 
@@ -3204,7 +3204,7 @@ snapshots:
 
   '@types/sax@1.2.7':
     dependencies:
-      '@types/node': 22.20.1
+      '@types/node': 22.20.5
 
   '@types/unist@2.0.11': {}
 
@@ -4502,7 +4502,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@6.4.3(@types/node@22.20.1)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1):
+  vite@6.4.3(@types/node@22.20.5)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.7)
@@ -4511,7 +4511,22 @@ snapshots:
       rollup: 4.63.0
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 22.20.1
+      '@types/node': 22.20.5
+      fsevents: 2.3.3
+      lightningcss: 1.33.0
+      tsx: 4.23.12
+      yaml: 2.9.1
+
+  vite@6.4.3(@types/node@24.13.6)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.1):
+    dependencies:
+      esbuild: 0.25.12
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
+      postcss: 8.5.26
+      rollup: 4.63.0
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 24.13.6
       fsevents: 2.3.3
       lightningcss: 1.33.0
       tsx: 4.23.12
