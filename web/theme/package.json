@@ -16,7 +16,9 @@
     ".": "./src/index.ts",
     "./tokens.css": "./src/tokens.css",
     "./ui.css": "./src/ui.css",
-    "./fonts.css": "./src/fonts.css"
+    "./fonts.css": "./src/fonts.css",
+    "./prompt-deck": "./src/prompt-deck.ts",
+    "./prompt-deck.css": "./src/prompt-deck.css"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",

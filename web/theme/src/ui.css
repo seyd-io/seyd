@@ -180,3 +180,4 @@ dl.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 }
 .theme-switch button:hover:not(:disabled) { color: var(--seyd-ink); }
 .theme-switch button[aria-pressed="true"] { background: var(--seyd-surface-2); color: var(--seyd-ink); }
+

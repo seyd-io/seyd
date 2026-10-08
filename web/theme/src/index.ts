@@ -9,6 +9,7 @@
 // visitor's address to a third party.
 import './fonts.css';
 import './ui.css';
+import './prompt-deck.css';
 
 export type Theme = 'system' | 'light' | 'dark';
 const THEMES: Theme[] = ['system', 'light', 'dark'];
@@ -59,6 +60,8 @@ function paint(host: HTMLElement): void {
   const cur = currentTheme();
   host.querySelectorAll<HTMLElement>('[data-theme-choice]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === cur)));
 }
+
+export { mountPromptDeck, type Prompt } from './prompt-deck';
 
 // Apply the saved choice as early as the module runs. A `?theme=` query
 // parameter overrides it for one load, so a screenshot or a test can pin a

@@ -1,0 +1,35 @@
+/*
+ * Copyright 2026 Anton Gravestam
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ * Prompt deck (docs/design.md §5): example prompts for a coding agent, typed
+ * out one after another. Self-contained, so a page that must not take ui.css
+ * (the docs site, under Starlight's own base styles) can import this file and
+ * `@seyd/theme/prompt-deck` alone; the theme's index imports it for the other
+ * surfaces.
+ * The typing is decorative, so reduced motion shows each prompt whole with a
+ * still caret.
+ */
+.prompt-deck { display: grid; gap: 10px; }
+.prompt-deck .prompt-line {
+  display: flex; align-items: flex-start; gap: 10px; min-height: 3.2em;
+  background: var(--seyd-surface-2); border-radius: var(--seyd-radius); padding: 12px 14px;
+  font-family: var(--seyd-font-mono); font-size: 13.5px; line-height: 1.55; color: var(--seyd-ink);
+}
+.prompt-deck .prompt-line .prefix { color: var(--seyd-accent); flex: none; user-select: none; }
+.prompt-deck .prompt-line .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.prompt-deck .prompt-line .caret { display: inline-block; width: 0.55em; height: 1.1em; vertical-align: text-bottom; margin-left: 1px; background: var(--seyd-ink); animation: seyd-caret 1s steps(2, start) infinite; }
+.prompt-deck .prompt-line .copy { flex: none; align-self: center; visibility: hidden; }
+.prompt-deck .prompt-line.done .copy { visibility: visible; }
+.prompt-deck .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The chips and the copy button are the design system's small button, written out so the deck needs no ui.css. */
+.prompt-deck button {
+  font-family: var(--seyd-font-mono); font-size: 12.5px; letter-spacing: 0.02em; line-height: 1.2;
+  padding: 3px 9px; border: 1px solid var(--seyd-line); border-radius: var(--seyd-radius-sm);
+  background: var(--seyd-surface); color: var(--seyd-ink); cursor: pointer; margin: 0;
+}
+.prompt-deck button:hover { border-color: var(--seyd-muted); }
+.prompt-deck button[aria-pressed="true"] { background: var(--seyd-accent-bg); border-color: var(--seyd-accent); color: var(--seyd-accent); }
+@keyframes seyd-caret { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .prompt-deck .prompt-line .caret { animation: none; } }

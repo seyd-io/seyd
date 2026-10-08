@@ -1,0 +1,33 @@
+{
+  "_comment": "Example prompts for a coding agent with the Seyd skill installed. Rendered by the landing page and the docs (mountPromptDeck in @seyd/theme). Keep each one a single sentence or two a person would actually type.",
+  "prompts": [
+    {
+      "label": "Get to know Seyd",
+      "text": "I've never used Seyd. Explain what it does and what it refuses to do, then put the public demo robot in a page of my own so I can drive it."
+    },
+    {
+      "label": "I have a robot",
+      "text": "I have a warehouse rover on a Jetson with a camera that publishes RTSP. We drive it over Wi-Fi today; I want to drive it from the office across town. Integrate it with Seyd."
+    },
+    {
+      "label": "A drone",
+      "text": "My drone's video leaves a Python process as H.264 access units. Which form factor fits, and what exactly do I have to implement?"
+    },
+    {
+      "label": "My web app",
+      "text": "Add a drivable video feed for robot acme-rover-1 to our React ops console, with controls that stop the rover when the operator's tab goes away."
+    },
+    {
+      "label": "Won't connect",
+      "text": "The pilot shows robot-cgnat from the office. The rover is behind a 4G router. What do I change, and what will the relay cost me meanwhile?"
+    },
+    {
+      "label": "Review my setup",
+      "text": "Review my seydd.toml and my GStreamer pipeline against the publisher contract and tell me what breaks under packet loss."
+    },
+    {
+      "label": "Prove it works",
+      "text": "Walk me through verifying the integration end to end, including loss injection and a pilot on another network, and write up the numbers."
+    }
+  ]
+}

@@ -3,7 +3,8 @@
 // Landing page (marketing sections are static HTML): live list of robots from the signal server's console presence
 // feed (docs/protocol/signal-v2.md), with a REST fallback. Old links of the
 // form /?robot=<id> are forwarded to the pilot page.
-import { mountThemeSwitch } from '@seyd/theme';
+import { mountPromptDeck, mountThemeSwitch } from '@seyd/theme';
+import promptsFile from '../../../skills/seyd/prompts.json';
 
 const params = new URLSearchParams(location.search);
 if (params.get('robot')) {
@@ -18,6 +19,8 @@ const listEl = document.getElementById('robot-list')!;
 const signalText = document.getElementById('signal-text')!;
 const signalDot = document.getElementById('signal-dot')!;
 mountThemeSwitch(document.getElementById('theme-switch')!);
+// The integration section's prompt deck: the same prompts the docs show, from the skill folder.
+mountPromptDeck(document.getElementById('prompt-deck')!, promptsFile.prompts);
 
 function signal(text: string, state: 'on' | 'warn' | 'stop' | ''): void {
   signalText.textContent = text;

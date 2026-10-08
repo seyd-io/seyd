@@ -1,0 +1,25 @@
+---
+// Copyright 2026 Anton Gravestam
+// SPDX-License-Identifier: Apache-2.0
+// The prompt deck (docs/design.md §5) on the docs site: the same example
+// prompts as the landing page, from skills/seyd/prompts.json, typed out in
+// the deck and listed in full below it so they read and search as text.
+import '@seyd/theme/prompt-deck.css';
+import promptsFile from '@repo/skills/seyd/prompts.json';
+const prompts = promptsFile.prompts as { label: string; text: string }[];
+---
+<div data-prompt-deck class="not-content"></div>
+<ul class="prompt-list">
+  {prompts.map((p) => <li><strong>{p.label}.</strong> {p.text}</li>)}
+</ul>
+<style>
+  [data-prompt-deck] { margin: 1.25rem 0; }
+  .prompt-list { margin-top: 1rem; }
+  .prompt-list li { margin: 0.4rem 0; }
+  .prompt-list strong { font-family: var(--seyd-font-mono); font-weight: 500; font-size: 0.85em; letter-spacing: 0.04em; text-transform: uppercase; color: var(--seyd-ink-2); margin-right: 0.25rem; }
+</style>
+<script>
+  import { mountPromptDeck } from '@seyd/theme/prompt-deck';
+  import promptsFile from '@repo/skills/seyd/prompts.json';
+  document.querySelectorAll<HTMLElement>('[data-prompt-deck]').forEach((el) => mountPromptDeck(el, promptsFile.prompts));
+</script>

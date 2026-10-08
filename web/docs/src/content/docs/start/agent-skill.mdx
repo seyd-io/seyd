@@ -4,6 +4,7 @@ description: A skill file for Claude Code and other coding agents that holds eve
 ---
 
 import { Code } from '@astrojs/starlight/components';
+import PromptDeck from '@components/PromptDeck.astro';
 import skill from '@repo/skills/seyd/SKILL.md?raw';
 
 Most integrations are built with a coding agent in the loop today. The Seyd
@@ -27,6 +28,26 @@ internet), chooses the form factor, writes an integration plan with every
 part filled in, and only then builds and verifies it against the ladder in
 the skill. The questions it asks are the ones a Seyd engineer would ask; the
 rules it enforces are the ones on these pages.
+
+## What to say to it
+
+Anything you would say to a colleague who knows Seyd. These are the shapes
+that work well, from "I have never seen this" to "prove it works":
+
+<PromptDeck />
+
+The first is for getting to know Seyd: the agent explains the product in its
+own words, then puts the public demo robot in a page and drives it, which is
+the five-minute quickstart done for you. The second is the real thing: the
+agent reads the rover's repository, finds the RTSP pipeline and the UDP
+command path, proposes the daemon, asks the questions it cannot answer from
+the code (what the encoder can change at run time, what "safe" means when
+the driver vanishes, who the pilots are, what the 4G router allows), and
+writes the plan before it writes code. The rest are what the same agent does
+on day two: a second robot with a different form factor, the pilot page in
+your own web app, a connection that fails from one network, a review of an
+existing setup against the publisher contract, and the verification ladder
+with numbers.
 
 ## Install it
 

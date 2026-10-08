@@ -167,6 +167,16 @@ do not restyle these.
 - **Facts** `dl.facts` — a two-column key/value list with eyebrow keys.
 - **Theme switch** `.theme-switch` — the segmented system / light / dark
   control from `mountThemeSwitch()`.
+- **Prompt deck** `.prompt-deck` — from `mountPromptDeck(host, prompts)`: a
+  sunken mono line where example prompts for a coding agent are typed out
+  one after another behind a `›`, with a blinking caret, a copy button once
+  a prompt is complete, and a row of small chip buttons (one per prompt,
+  `aria-pressed` on the current one) to jump to one. The typing is the only
+  animation in the system and it is decorative, so `prefers-reduced-motion`
+  removes it: the prompt appears whole and the caret does not blink. Used on
+  the landing page's integration section and the docs' *Integrate with a
+  coding agent* page; the prompts are `skills/seyd/prompts.json`, one file
+  for both.
 
 ## 6. Surfaces
 
