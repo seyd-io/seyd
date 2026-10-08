@@ -81,8 +81,9 @@ so no callback runs after it returns. Compare `seyd_abi_version()` with
 `SEYD_ERR_BACKPRESSURE` is reserved and never returned (drops are by design
 and show in the counters). Link flags per platform are in `sdks/c/Makefile`
 (macOS: CoreFoundation, Security, SystemConfiguration frameworks; Linux:
-`-lpthread -ldl -lm`; Windows: `seyd.dll` and nothing else — MinGW `ld`
-resolves `-lseyd` to the DLL, MSVC links `seyd.dll.lib`). `make -C sdks/c
+`-lpthread -ldl -lm`; Windows: the DLL by path, `target/release/seyd.dll`, not `-lseyd` —
+MinGW `ld` would find the static `seyd.lib` first and fail on its MSVC
+objects; MSVC links `seyd.dll.lib`). `make -C sdks/c
 check` runs the ABI conformance test on all three (Windows: GNU make and
 MinGW gcc, an MSYS2 shell).
 Simulcast: `seyd_channel_add_layer` per layer before start, then

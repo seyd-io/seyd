@@ -16,20 +16,22 @@ TARGET  := $(ROOT)/target/$(PROFILE)
 CARGO   := cargo $(if $(filter release,$(PROFILE)),build --release,build)
 
 CFLAGS  += -std=c11 -Wall -Wextra -O2 -I include
-LDFLAGS += -L $(TARGET) -lseyd
 
 # The Rust cdylib pulls in the platform's TLS, threading and network libraries.
 UNAME := $(shell uname -s)
 EXE   :=
 ifeq ($(OS),Windows_NT)
-    # seyd.dll is found by name; ld resolves -lseyd to it without an import lib.
+    # The DLL by path, not -lseyd: cargo also emits the static seyd.lib (MSVC
+    # objects), and MinGW ld would pick that up first and fail on its /GS
+    # cookie symbols. ld links a DLL given as an input file directly.
     EXE     := .exe
+    LDFLAGS += $(TARGET)/seyd.dll
     RUNPATH := PATH="$(TARGET):$$PATH"
 else ifeq ($(UNAME),Darwin)
-    LDFLAGS += -framework CoreFoundation -framework Security -framework SystemConfiguration
+    LDFLAGS += -L $(TARGET) -lseyd -framework CoreFoundation -framework Security -framework SystemConfiguration
     RUNPATH := DYLD_LIBRARY_PATH=$(TARGET)
 else
-    LDFLAGS += -lpthread -ldl -lm
+    LDFLAGS += -L $(TARGET) -lseyd -lpthread -ldl -lm
     RUNPATH := LD_LIBRARY_PATH=$(TARGET)
 endif
 
