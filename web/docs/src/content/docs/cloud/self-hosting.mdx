@@ -35,6 +35,10 @@ looks inside them.
 
 ## Bring it up
 
+Paths on this page are inside the cloud repository that comes with a
+self-hosting license (`seyd-io/seyd-cloud`), which pins this public
+repository as its `seyd/` submodule for the pilot pages and these docs.
+
 ```bash
 cd cloud && docker compose up -d
 open http://localhost:3002        # Logto admin — first run asks you to create an account
@@ -66,9 +70,9 @@ pnpm --filter @seyd/console dev     # http://localhost:5173
 management API instead, idempotently, which is how a scripted deployment
 avoids the admin console altogether.
 
-The pilot pages come from `web/demo/dist`, mounted into the container; build
-them first with `pnpm --filter demo build`, or the console's "Open pilot"
-button has nothing to open.
+The pilot pages come from `seyd/web/demo/dist`, mounted into the container;
+build them first with `pnpm --filter demo build` at the cloud repository's
+root, or the console's "Open pilot" button has nothing to open.
 
 :::note
 Without Docker, `cloud/api` also runs standalone with no database at all:

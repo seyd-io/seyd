@@ -15,8 +15,8 @@ while it is down. Who may drive which robot lives in Seyd's own database.
 
 1. An admin creates a one-time enrolment token: console → Fleet → *Create
    enrolment token*, or `node dist/bootstrap.js enrolment-token <org-id>
-   "<label>"` on a machine with database access (self-hosted, or the
-   operator of the hosted cloud).
+   "<label>"` in the cloud's API directory on a machine with database access
+   (a self-hosted cloud, or the operator of the hosted one).
 2. The robot redeems it (`robot-daemon.md`, "Enrolment"): the daemon on
    first start with `SEYD_ENROLMENT_TOKEN`, or `seydd enrol --token …`.
    SDK robots enrol their key file through `seydd enrol` too

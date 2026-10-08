@@ -54,7 +54,7 @@ roll-your-own libraries. Findings that decided it:
 **Authentication is a pluggable edge. Authorization is the product and stays in
 Seyd's Postgres.**
 
-1. `cloud/api` verifies OIDC tokens against the issuer's JWKS. Issuer and
+1. `cloud/api` (the private `seyd-cloud` repository) verifies OIDC tokens against the issuer's JWKS. Issuer and
    audience are configuration; nothing else about the provider is load-bearing.
    Users are keyed on `(oidc_issuer, oidc_subject)`, so changing provider is an
    `UPDATE` of two columns matched on verified email, not a migration.

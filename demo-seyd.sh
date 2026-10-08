@@ -6,7 +6,7 @@
 # camera-specific part). The successor of demo.sh.
 #
 #   ./demo-seyd.sh                                   # against the deployed cloud
-#   SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local cloud/api
+#   SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local signal server (seyd-cloud)
 #   CAMERA_IP=192.168.86.237 ./demo-seyd.sh
 #   DARC_QOS_PROFILE=latency ./demo-seyd.sh          # QoS ceiling (latency|balanced|quality)
 #   RUST_LOG=debug ./demo-seyd.sh

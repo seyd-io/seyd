@@ -98,7 +98,7 @@ Two constraints shape the design:
 * **Sessions cap at Cloud Run's request timeout.** Deploys now set
   `--timeout 3600`, the platform maximum; a relayed session older than an hour
   drops and reconnects (the pilot re-races and re-relays). A self-hosted cloud
-  (`cloud/docker-compose.yml`) has no such limit.
+  (`cloud/docker-compose.yml` in `seyd-cloud`) has no such limit.
 * **No live upgrade to direct.** The prototype retried P2P every 30 s while
   relaying and switched over live. The new engine does not yet: a relayed
   session stays relayed until it ends. Reload to retry. Adding it needs the

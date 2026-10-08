@@ -276,8 +276,8 @@ Verification without hardware, all on one machine (what was run on 2026-09-22):
 
 ```
 python3 -m unittest discover -s examples/tello-robot -p 'test_*.py'   # 21 tests
-(cd cloud/api && PORT=8080 SEYD_DEV_OPEN_ENROLMENT=1 SEYD_DEV_ALLOW_ANONYMOUS=1 \
-   SEYD_STATIC_DIR=$PWD/../../web/demo/dist node dist/index.js &)
+# a local signal server with no accounts: seyd-cloud's "Running the cloud locally" (its CLAUDE.md);
+# or point seydd and the smoke test at the hosted cloud with an enrolled seyd-tello
 python3 examples/tello-robot/fake_tello.py [--loss 0.03 --gop 30] &
 python3 examples/tello-robot/bridge.py --drone-ip 127.0.0.1 &
 ./target/release/seydd --config <seydd.toml with ws://localhost:8080/ws and the flight output on :5024> &

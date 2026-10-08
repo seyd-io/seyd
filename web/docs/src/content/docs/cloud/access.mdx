@@ -16,8 +16,9 @@ database, never at the provider.
 ## Enrolling a robot
 
 A robot joins a fleet by redeeming a one-time enrolment token. Create one in
-the console, on the Fleet page ("Create enrolment token"), or from a machine
-that can reach the database:
+the console, on the Fleet page ("Create enrolment token"), or, on a
+self-hosted cloud, from a machine that can reach the database with the
+cloud's `cloud/api` built:
 
 ```bash
 node dist/bootstrap.js enrolment-token <org-id> "Hikvision demo"
@@ -186,7 +187,7 @@ invitation hands the printed link over. The link is the onboarding.
 
 ## The endpoints
 
-The cloud's HTTP API, as registered in `cloud/api/src`. A REST reference
+The cloud's HTTP API, as its source registers it. A REST reference
 generated from the route table is planned; until then this is the list.
 
 | Method and path | Purpose |

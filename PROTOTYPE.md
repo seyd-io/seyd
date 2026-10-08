@@ -7,7 +7,10 @@
 > `examples/demo-robot/hikvision.py`; `pilot-smoke.py`'s DevTools helper became
 > `tools/cdp.py` (used by `tools/seyd-smoke.py`); `robot.sh`/`demo.sh`/`dev.sh`
 > were replaced by `sim-robot.sh`, `demo-seyd.sh` and CLAUDE.md's "Verifying
-> work"; the signal server was rewritten as `cloud/api`, and the relay path was
+> work"; the signal server was rewritten as `cloud/api` (now in the private
+> `seyd-cloud` repository, whose history also holds the prototype's
+> `packages/signal`; the public history holds the prototype's agent and
+> pilot), and the relay path was
 > dropped entirely (P2P only — relays are a future tier). The product is
 > described by SPEC.md, PLAN.md, docs/protocol/ and the ADRs; field results
 > since the freeze live in docs/field-test.md and docs/starlink.md.

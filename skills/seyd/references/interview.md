@@ -144,7 +144,7 @@ whose answer you already have and explain the ones the user finds odd.
     *Decides `signal_url`* and who creates the organisation and tokens.
 28. **Does the user have an organisation and can they mint enrolment
     tokens?** From the console's Fleet page, or `node dist/bootstrap.js`
-    with database access on a self-hosted cloud.
+    in the cloud's API directory with database access, on a self-hosted cloud.
     *Decides the first step of enrolment.*
 29. **Data residency or audit requirements?** Every access change and every
     session token is in the organisation's audit log.

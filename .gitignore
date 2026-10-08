@@ -12,10 +12,6 @@ venv/
 node_modules/
 npm-debug.log*
 
-# Build artifact: deploy.sh copies packages/pilot/ here so the image can serve
-# it, and removes it on exit. Ignored in case that trap doesn't fire.
-packages/signal/pilot/
-
 # TLS certs generated at runtime (packages/agent/cert.py)
 *.pem
 *.key
@@ -25,8 +21,6 @@ packages/signal/pilot/
 # See DEMO.md: the camera password must not appear in agent CLI args.
 .env.local
 .env.development.local
-# Compose reads cloud/.env: session signing key and Logto client id.
-cloud/.env
 
 # Editor
 .vscode/

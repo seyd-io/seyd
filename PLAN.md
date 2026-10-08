@@ -70,7 +70,11 @@ Ordered by expected latency/reliability payoff. Each names the current code it r
 
 ## Part 2 — Architecture
 
-### 2.1 Monorepo layout
+### 2.1 Repository layout
+
+Two repositories since 2026-10-06 (`docs/open-source.md`): this public one,
+and the private `seyd-io/seyd-cloud`, which holds everything marked *cloud*
+below and pins this repository as its `seyd/` submodule.
 
 ```
 seyd/
@@ -89,12 +93,12 @@ seyd/
 ├── sdks/                      # thin wrappers — NO protocol logic here
 │   ├── c/  cpp/  python/  ros2/
 │   └── js/core  js/web  js/react      # @seyd/core, <seyd-video>, <SeydVideo/>
-├── cloud/api                  # TS Fastify+ws: /ws signal v2 + /api/v1; OIDC token verification (provider-agnostic); Postgres + Redis
-├── cloud/prober               # cloud-side QUIC reachability probe of robot candidates
-├── cloud/monitor              # synthetic pilot against the public demo robot
+├── cloud/api                  # [cloud] TS Fastify+ws: /ws signal v2 + /api/v1; OIDC token verification (provider-agnostic); Postgres + Redis
+├── cloud/prober               # [cloud] cloud-side QUIC reachability probe of robot candidates
+├── cloud/monitor              # [cloud] synthetic pilot against the public demo robot
 ├── web/theme                  # @seyd/theme: the design system as code — tokens, base styles, fonts, light/dark switch (docs/design.md)
-├── web/site (Astro landing, seyd.io)   web/console (React: login, fleet, robots, tokens; console.seyd.io)   web/demo (demo.seyd.io on @seyd/web)
-├── docs/  (Starlight, docs.seyd.io + docs/adr/)   deploy/ (Terraform GCP, Dockerfiles)
+├── web/site (Astro landing, seyd.io)   web/console [cloud] (React: login, fleet, robots, tokens; console.seyd.io)   web/demo (demo.seyd.io on @seyd/web)
+├── docs/  (Starlight, docs.seyd.io + docs/adr/)   deploy/ [cloud] (Terraform GCP, Dockerfiles)
 ├── examples/demo-robot/       # the Hikvision PTZ demo as a customer program on sdks/python (camera.py lands here)
 ├── tools/  sim/               # harnesses and robot stand-ins stay
 └── legacy/agent-py/           # frozen Python agent until parity; then deleted

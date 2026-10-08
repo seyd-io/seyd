@@ -72,9 +72,9 @@ provider, or anyone can still create an account there and sit on the "no
 organisation yet" page. Seyd then has to open the door for invitees itself: an
 invitation asks the provider for a one-time sign-in token and hands out one
 link that both registers the account and joins the org. For Logto this is
-`SEYD_LOGTO_M2M_CLIENT_ID/SECRET` (`cloud/README.md`, "Invitations under a
+`SEYD_LOGTO_M2M_CLIENT_ID/SECRET` (the cloud repository's `cloud/README.md`, "Invitations under a
 closed door"); for another provider it is an implementation of `UserInviter`
-in `cloud/api/src/authn/inviter.ts`, the only place that speaks a provider's
+in the cloud's `authn/inviter.ts`, the only place that speaks a provider's
 management API. Leave registration open and configure nothing, and invitations
 work the older way: the invitee signs up first, then the link accepts.
 

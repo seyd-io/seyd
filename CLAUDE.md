@@ -18,7 +18,8 @@ guide is that repository's `CLAUDE.md`. Business planning lives in the
 private `seyd-io/seyd-business`. One question routes a document: who needs
 to read it (`docs/open-source.md`). The Python/JS proof of concept that
 preceded the new stack has been deleted (git history before 2026-08-28 has
-it; PROTOTYPE.md describes it); its measurements remain valid. `PLAN.md` is
+its agent and pilot; its signal server is in `seyd-cloud`'s history;
+PROTOTYPE.md describes it); its measurements remain valid. `PLAN.md` is
 the plan; follow it.
 
 ## Key documents — read these first

@@ -275,7 +275,7 @@ inputs are Annex B with parameter sets inline on every keyframe.
 
 ```bash
 ./demo-seyd.sh                                   # against the deployed cloud (default URL in the script)
-SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local cloud/api
+SIGNAL_URL=ws://localhost:8080/ws ./demo-seyd.sh # against a local signal server (seyd-cloud)
 CAMERA_IP=192.168.86.237 DARC_QOS_PROFILE=latency ./demo-seyd.sh
 ```
 

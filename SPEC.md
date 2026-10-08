@@ -638,7 +638,7 @@ records it and its still-valid measurements.
   per-block FEC recovery, adaptive close-out, clock-synced glass-to-glass,
   duplicate-session guards), `@seyd/web` custom elements with role badge and
   per-class connect-error guidance, `web/demo` pilot page with PTZ controls.
-- Cloud (`cloud/api`, signal v2) on Cloud Run `europe-west1`, project
+- Cloud (`cloud/api` in the private `seyd-cloud` repository, signal v2) on Cloud Run `europe-west1`, project
   `seydio`: `https://seyd-signal-flj7s44j4a-ew.a.run.app` — landing page with
   the live robot list at `/`, pilot at `/pilot/`, dev-mode auth (TOFU robot
   enrolment, anonymous pilots), in-memory presence. Deploy:

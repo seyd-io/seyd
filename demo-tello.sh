@@ -7,7 +7,7 @@
 #   ./demo-tello.sh                                    # drone on Wi-Fi, deployed cloud
 #   ./demo-tello.sh --fake                             # no drone: fake_tello.py on localhost
 #   ./demo-tello.sh --rust                             # the native Rust host instead of bridge.py + seydd
-#   SIGNAL_URL=ws://localhost:8080/ws ./demo-tello.sh  # against a local cloud/api
+#   SIGNAL_URL=ws://localhost:8080/ws ./demo-tello.sh  # against a local signal server (seyd-cloud)
 #   BRIDGE_ARGS=--no-takeoff ./demo-tello.sh           # bench: props off, take-off refused
 #   ENROL_TOKEN=seyd_enr_… ./demo-tello.sh             # first start on a new key
 #
