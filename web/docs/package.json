@@ -22,7 +22,7 @@
     "@seyd/core": "workspace:*",
     "@seyd/theme": "workspace:*",
     "@seyd/web": "workspace:*",
-    "astro": "^7.3.5",
+    "astro": "^7.4.7",
     "starlight-typedoc": "^0.23.1",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.13.1"
